@@ -326,7 +326,7 @@ fn send_mouse_input(flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
             }
         }
     } ];
-    unsafe { SendInput(&inputs, size_of::<INPUT>() as c_int) };
+    unsafe { SendInput(&mut inputs, size_of::<INPUT>() as c_int) };
 }
 
 /// send simulated keyboard events to system for injection into events-stream
@@ -346,5 +346,5 @@ fn send_keybd_input(key_code: u16, up_not_down:bool, sc_not_vk:bool) {
             }
         }
     } ];
-    unsafe { SendInput(&inputs, size_of::<INPUT>() as c_int) };
+    unsafe { SendInput(&mut inputs, size_of::<INPUT>() as c_int) };
 }

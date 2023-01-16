@@ -21,8 +21,8 @@ pub mod brightness_ps_wmi {
 
 
 pub mod brightness_utils {
-    use brightness::{Brightness, BrightnessDevice};
-    use futures::{executor::block_on, StreamExt, TryFutureExt, TryStreamExt};
+    use brightness::{Brightness};
+    use futures::{executor::block_on, TryStreamExt};
 
     fn incr_b_limited (v:u32, incr:i32) -> u32 {
         let res = v as i64 + incr as i64;
@@ -33,7 +33,7 @@ pub mod brightness_utils {
         brightness::brightness_devices().try_for_each(|mut dvc| async move {
             let v = dvc.get().await?;
             let v_new = incr_b_limited(v, incr);
-            if (v != v_new) {
+            if v != v_new {
                 dvc.set(v_new).await
             } else { Ok(()) }
         }).await
@@ -92,7 +92,6 @@ pub mod process_utils {
 
 
 pub mod window_utils {
-    use std::mem::uninitialized;
 
     use windows::{
         Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM},
@@ -101,7 +100,6 @@ pub mod window_utils {
             PostMessageW, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK
         },
     };
-    use windows::core::PSTR;
     use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_RESTORE, WM_NCLBUTTONUP, WM_SYSCOMMAND};
 
     pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
