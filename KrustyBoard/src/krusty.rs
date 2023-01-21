@@ -1,9 +1,6 @@
-use std::cell::RefCell;
+use std::{thread, time, time::Instant, cell::RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time;
-use std::time::Instant;
 
 use derivative::Derivative;
 
@@ -19,24 +16,36 @@ type L2S = Arc <Layer2State> ;
 type Key = KbdKey ;
 
 
+#[derive(Default, Debug)]
+pub struct Flag (RwLock<bool>);
+// ^^ simple sugar that helps reduce a lot of clutter in code
+
+impl Flag {
+    pub fn check (&self) -> bool { *self.0.read().unwrap() }
+    pub fn set   (&self) { *self.0.write().unwrap() = true }
+    pub fn clear (&self) { *self.0.write().unwrap() = false }
+
+    pub fn set_if_clear (&self) { if !self.check() { self.set() } }
+    pub fn clear_if_set (&self) { if self.check() { self.clear() } }
+}
 
 #[derive(Derivative)]
 #[derivative(Default, Debug)]
 pub struct Layer2State {
     // used for toggling key processing .. should only listen to turn-back-on combo
-    in_disabled_state: RwLock<bool>,
+    in_disabled_state: Flag,
 
     // note that this is specifically only for use for our caps-combos .. so dont have to worry too much about whether
     // >  it'll always be in sync .. just that its in sync for our caps combo periods! (which is a LOT easier)
-    is_caps_down:   RwLock<bool>,
-    is_lalt_down:   RwLock<bool>,
-    is_ralt_down:   RwLock<bool>,
-    is_lwin_down:   RwLock<bool>,
-    is_lshift_down: RwLock<bool>,
+    is_caps_down:   Flag,
+    is_lalt_down:   Flag,
+    is_ralt_down:   Flag,
+    is_lwin_down:   Flag,
+    is_lshift_down: Flag,
 
     // for alt, gotta separately track outside logical state, as sometimes we wanna suppress its down going out (instead it'll go out of sync)
     // this will explicitly track whether the outside seen last alt-key-event was down or not
-    is_alt_active : RwLock<bool>,
+    is_alt_active : Flag,
 
     // further, when the common caps-alt combo is released, if caps is released just a tiny bit earlier, we dont want the alt to trigger ..
     // so we'll track the caps release to allow for some grace period of sorts before we start accepting alt as activated
@@ -45,31 +54,31 @@ pub struct Layer2State {
 
     // since win listeners often act on release (e.g. start menu), its annoying after we've done some win combo to have it pop up
     // so where possible, we'll try and suppress its up if we consumed it internally ourselves
-    is_down_lwin_consumed : RwLock<bool>,
+    is_down_lwin_consumed : Flag,
 
     // these three need indiv cloning into spawned threads, hence separate Arcs for them
-    in_caret_sel_mode:  Arc<RwLock<bool>>,
-    in_caret_del_mode:  Arc<RwLock<bool>>,
-    in_caret_fast_mode: Arc<RwLock<bool>>,
+    in_caret_sel_mode:  Arc<Flag>,
+    in_caret_del_mode:  Arc<Flag>,
+    in_caret_fast_mode: Arc<Flag>,
 
-    is_mouse_left_btn_down:  RwLock<bool>,
-    is_mouse_right_btn_down: RwLock<bool>,
+    is_mouse_left_btn_down:  Flag,
+    is_mouse_right_btn_down: Flag,
 
     // for caps-ctrl eqv for caps-tab or caps-wheel, we'll send ctrl press/release at the right times, and will need to track that
-    in_managed_ctrl_down_state: RwLock<bool>,
+    in_managed_ctrl_down_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
-    in_right_btn_scroll_state:  RwLock<bool>,
+    in_right_btn_scroll_state:  Flag,
 
     #[derivative(Default(value = "RwLock::new(Instant::now())"))]
     last_wheel_stamp: RwLock<Instant>,
-    is_wheel_spin_invalidated: RwLock<bool>, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
+    is_wheel_spin_invalidated: Flag, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
 }
 
 impl Layer2State {
     fn clear_caret_mode_flags (&self) {
-        *self.in_caret_sel_mode.write().unwrap() = false;
-        *self.in_caret_del_mode.write().unwrap() = false;
-        *self.in_caret_fast_mode.write().unwrap() = false;
+        self.in_caret_sel_mode.clear();
+        self.in_caret_del_mode.clear();
+        self.in_caret_fast_mode.clear();
     }
     fn caps_up_grace_active (&self) -> bool {
         const GRACE_DUR_MS: u128 = 200;
@@ -106,7 +115,7 @@ pub struct Krusty {
     pub l2s : Arc <Layer2State>,
     pub am  : RefCell <ActionMaps>,
     // we'll also keep a mapping of caret-mode keys and their associated flags for l2 impl
-    pub cmks: RefCell <HashMap <Key, Arc <RwLock <bool>>>>
+    pub cmks: RefCell <HashMap <Key, Arc<Flag>>>
 }
 
 
@@ -175,26 +184,24 @@ pub mod lalt_setups { // left-alt tracking business
             // so, if caps is down, suppress alt, capture state, let specific combos deal with the disparity
             // plus, even when caps isnt down, suppress the repeated events
             // plus, we allow a small grace period after caps is released during which we dont register prior pressed alt (allows sloppy combo release)
-            if *l2s.is_caps_down.read().unwrap() {
+            if l2s.is_caps_down.check() {
                 // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
-                if !*l2s.is_lalt_down.read().unwrap() {
-                    *l2s.is_lalt_down.write().unwrap() = true;
-                }
+                l2s.is_lalt_down.set_if_clear();
                 BlockInput::Block
             } else {
-                if *l2s.is_lalt_down.read().unwrap() {
+                if l2s.is_lalt_down.check() {
                     // caps isnt down, but alt was, so its repeat, so if in-post-caps-up-grace or not-out-of-sync then should still block it
-                    if *l2s.is_alt_active.read().unwrap() || l2s.caps_up_grace_active() {
+                    if l2s.is_alt_active.check() || l2s.caps_up_grace_active() {
                         BlockInput::Block
                     } else {
-                        *l2s.is_alt_active.write().unwrap() = true;
+                        l2s.is_alt_active.set();
                         BlockInput::DontBlock
                     }
                 } else {
                     // caps isnt down, and alt wasnt down, so record states and let it through
-                    *l2s.is_lalt_down.write().unwrap() = true;
-                    *l2s.is_alt_active.write().unwrap() = true;
-                    *l2s.is_wheel_spin_invalidated.write().unwrap() = true;
+                    l2s.is_lalt_down.set();
+                    l2s.is_alt_active.set_if_clear();
+                    l2s.is_wheel_spin_invalidated.set_if_clear();
                     BlockInput::DontBlock
                 }
             }
@@ -204,11 +211,9 @@ pub mod lalt_setups { // left-alt tracking business
             // here again, if caps is active, cant help but suppress it, esp as most menu trigger on alt key-up!!
             //   we'll just record state updates for others to deal with
             // unless if no caps, where we can update states as necessary and let it through
-            *l2s.is_lalt_down.write().unwrap() = false;
-            // ^^ assumes we get this ev only when we were tracking it (else either way couldnt do much else anyway)
-
-            if !*l2s.is_caps_down.read().unwrap() && *l2s.is_alt_active.read().unwrap() {
-                *l2s.is_alt_active.write().unwrap() = false;
+            l2s.is_lalt_down.clear_if_set();
+            if !l2s.is_caps_down.check() && l2s.is_alt_active.check() {
+                l2s.is_alt_active.clear();
                 BlockInput::DontBlock
             } else {
                 // either caps was down, or things were already in sync and can only be made worse!
@@ -220,40 +225,34 @@ pub mod lalt_setups { // left-alt tracking business
 
     pub fn ensure_held_lalt_active (l2s:&L2S) {
         // utility to set held l-alt active (sync it) while tracking state (useful for media shortcuts etc)
-        if *l2s.is_lalt_down.read().unwrap() && !*l2s.is_alt_active.read().unwrap() {
-            Key::LAlt.press();
-            *l2s.is_alt_active.write().unwrap() = true;
-        }
-    }
+        if l2s.is_lalt_down.check() && !l2s.is_alt_active.check() {
+            Key::LAlt.press(); l2s.is_alt_active.set();
+    } }
     pub fn ensure_alt_active (l2s:&L2S) {
         // utility to get alt out reliably whether its currently pressed or not, while keeping state tracking updated
-        if !*l2s.is_alt_active.read().unwrap() {
-            Key::LAlt.press();
-            *l2s.is_alt_active.write().unwrap() = true;
-        }
+        if !l2s.is_alt_active.check() {
+            Key::LAlt.press(); l2s.is_alt_active.set();
+    } }
+    pub fn release_alt_w_ctrl_masking () {
+        // masking w ctrl helps avoid/reduce focus loss to menu
+        Key::LControl.press(); Key::LAlt.release(); Key::LControl.release();
     }
     pub fn ensure_not_held_lalt_inactive (l2s:&L2S) {
         // utility to set not-held alt inactive (sync it) while tracking (useful for alt-combos that produce non-alt outputs)
-        if !*l2s.is_lalt_down.read().unwrap() && *l2s.is_alt_active.read().unwrap() {
-            Key::LAlt.release();
-            *l2s.is_alt_active.write().unwrap() = false;
-        }
-    }
+        if !l2s.is_lalt_down.check() && l2s.is_alt_active.check() {
+            release_alt_w_ctrl_masking(); l2s.is_alt_active.clear();
+    } }
     pub fn ensure_held_lalt_inactive (l2s:&L2S) {
         // utility to hard-clear alt state for alt-combos (e.g. for media shortcuts etc)
-        if *l2s.is_lalt_down.read().unwrap() && *l2s.is_alt_active.read().unwrap() {
-            Key::LAlt.release();
-            *l2s.is_alt_active.write().unwrap() = false;
-        }
-    }
+        if l2s.is_lalt_down.check() && l2s.is_alt_active.check() {
+            release_alt_w_ctrl_masking(); l2s.is_alt_active.clear();
+    } }
     pub fn ensure_alt_inactive (l2s:&L2S) {
         // utility to ensure lalt is inactive regardless if held down
         // (expectation is l-2 keys should ensure that, and l-alt handler should never activate it when l2/caps is active either)
-        if *l2s.is_alt_active.read().unwrap() {
-            *l2s.is_alt_active.write().unwrap() = false;
-            Key::LAlt.release();
-        }
-    }
+        if l2s.is_alt_active.check() {
+            release_alt_w_ctrl_masking(); l2s.is_alt_active.clear();
+    } }
 
     pub fn try_sync_lalt_if_no_caps (l2s:&L2S) {
         // well .. this fn .. either way, it can only fix when no-caps, so users will have to check first, and act differently ..
@@ -261,24 +260,22 @@ pub mod lalt_setups { // left-alt tracking business
         // >  plus, for them, they can selectively only send something IF the mismatch type was actually problematic for them
         // >  hence the various partial utility fns to cover those cases explicitly ONLY when absolutely necessary
         // so maybe we'll only use it upon capslock release, but its separately here in case it makes sense for others any other time
-        if *l2s.is_caps_down.read().unwrap() {
+        if l2s.is_caps_down.check() {
             // cant safely try to do blindly do anything while caps is down, as we dont wanna interfere w any active layer2 modes
         } else {
             try_sync_lalt(l2s);
         }
     }
     pub fn try_sync_lalt (l2s:&L2S) {
-        if *l2s.is_lalt_down.read().unwrap() {
-            if !*l2s.is_alt_active.read().unwrap() {
+        if l2s.is_lalt_down.check() {
+            if !l2s.is_alt_active.check() {
                 // alt key down, but not active .. so send a press
-                Key::LAlt.press();
-                *l2s.is_alt_active.write().unwrap() = true;
+                Key::LAlt.press(); l2s.is_alt_active.set();
             }
         } else {
-            if *l2s.is_alt_active.read().unwrap() {
+            if l2s.is_alt_active.check() {
                 // alt key up but still active .. so send a release
-                Key::LAlt.release();
-                *l2s.is_alt_active.write().unwrap() = false;
+                release_alt_w_ctrl_masking(); l2s.is_alt_active.clear();
             }
         }
     }
@@ -298,20 +295,20 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
         }
         let l2s = l2sr.clone();
         Key::CapsLock.block_bind(KeyDownCallback, move |_| {
-            if !*l2s.is_caps_down.read().unwrap() {
-                *l2s.is_caps_down.write().unwrap() = true;
-                *l2s.is_wheel_spin_invalidated.write().unwrap() = true;
+            if !l2s.is_caps_down.check() {
+                l2s.is_caps_down.set();
+                l2s.is_wheel_spin_invalidated.set_if_clear();
             }
-            if *l2s.is_mouse_left_btn_down.read().unwrap() && !*l2s.in_managed_ctrl_down_state.read().unwrap() {
-                *l2s.in_managed_ctrl_down_state.write().unwrap() = true;
+            if l2s.is_mouse_left_btn_down.check() && !l2s.in_managed_ctrl_down_state.check() {
+                l2s.in_managed_ctrl_down_state.set();
                 Key::LControl.press();
             }
         });
         let l2s = l2sr.clone();
         Key::CapsLock.block_bind(KeyUpCallback, move |_| {
-           *l2s.is_caps_down.write().unwrap() = false;
-            if *l2s.in_managed_ctrl_down_state.read().unwrap() {
-                *l2s.in_managed_ctrl_down_state.write().unwrap() = false;
+           l2s.is_caps_down.clear_if_set();
+            if l2s.in_managed_ctrl_down_state.check() {
+                l2s.in_managed_ctrl_down_state.clear();
                 Key::LControl.release();
             }
             // tracking caps release stamp allows for a grace between caps release and alt release from combos
@@ -332,13 +329,9 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
         // we'll completely disable its natural action other than tracking state so our own combos can use it as a separate key
         // usage goals: as shift for keys on board-left-half, as l2 fast mode, ralt-space as enter, and other combos for board-right
         let l2s = l2sr.clone();
-        Key::RAlt.block_bind(KeyDownCallback, move |_| {
-            *l2s.is_ralt_down.write().unwrap() = true;
-        });
+        Key::RAlt.block_bind (KeyDownCallback, move |_| { l2s.is_ralt_down.set() } );
         let l2s = l2sr.clone();
-        Key::RAlt.block_bind(KeyUpCallback, move |_| {
-            *l2s.is_ralt_down.write().unwrap() = false;
-        });
+        Key::RAlt.block_bind (KeyUpCallback, move |_| { l2s.is_ralt_down.clear() } );
     }
 
 
@@ -348,11 +341,9 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
         // however, ofc cant just block lwin-up, so instead will have to mask it w a ctrl down/up as ctrl-win doesnt trigger anything
         let l2s = l2sr.clone();
         Key::LWin.blockable_bind(KeyDownCallback, move |_| {
-            if !*l2s.is_lwin_down.read().unwrap() { // new physical press
-                *l2s.is_lwin_down.write().unwrap() = true;
-                if *l2s.is_down_lwin_consumed.read().unwrap() {
-                    *l2s.is_down_lwin_consumed.write().unwrap() = false;
-                }
+            if !l2s.is_lwin_down.check() { // new physical press
+                l2s.is_lwin_down.set();
+                if l2s.is_down_lwin_consumed.check() { l2s.is_down_lwin_consumed.clear() }
                 BlockInput::DontBlock
             } else { // its a key repeat
                 BlockInput::Block
@@ -360,8 +351,8 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
         });
         let l2s = l2sr.clone();
         Key::LWin.blockable_bind(KeyUpCallback, move |_| {
-            *l2s.is_lwin_down.write().unwrap() = false;
-            if *l2s.is_down_lwin_consumed.read().unwrap() {
+            l2s.is_lwin_down.clear_if_set();
+            if l2s.is_down_lwin_consumed.check() {
                 thread::spawn ( || {
                     Key::Ctrl.press(); Key::Ctrl.release();
                     Key::LWin.release(); // doesnt actually have to be interspersed between ctrl press/release
@@ -372,8 +363,8 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
     }
     pub fn consume_down_lwin (l2s:&L2S) {
         // utility for any key with lwin action to consume down state if they want to (to suppress its keyup later)
-        if *l2s.is_lwin_down.read().unwrap() && !*l2s.is_down_lwin_consumed.read().unwrap() {
-            *l2s.is_down_lwin_consumed.write().unwrap() = true;
+        if l2s.is_lwin_down.check() && !l2s.is_down_lwin_consumed.check() {
+            l2s.is_down_lwin_consumed.set();
         }
     }
 
@@ -382,11 +373,11 @@ pub mod mod_keys_setups { // tracking for other tracked modifier keys e.g. capsl
         // for left-shift, we really only care for a few combos with caps etc .. could query it as necessary too, but might as well
         let l2s = l2sr.clone();
         Key::LShift.non_blocking_bind(KeyDownCallback, move |_| {
-            if !*l2s.is_lshift_down.read().unwrap() { *l2s.is_lshift_down.write().unwrap() = true; }
+            if !l2s.is_lshift_down.check() { l2s.is_lshift_down.set(); }
         });
         let l2s = l2sr.clone();
         Key::LShift.non_blocking_bind(KeyUpCallback, move |_| {
-            *l2s.is_lshift_down.write().unwrap() = false;
+            l2s.is_lshift_down.clear();
         });
     }
 
@@ -401,16 +392,16 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
     pub fn setup_mouse_left_btn_handling (l2sr:&L2S) {
         let l2s = l2sr.clone();
         MouseButton::LeftButton.block_bind(true, move |_| {
-            *l2s.is_mouse_left_btn_down.write().unwrap() = true;
-            if *l2s.is_caps_down.read().unwrap() {
-                *l2s.in_managed_ctrl_down_state.write().unwrap() = true;
+            l2s.is_mouse_left_btn_down.set_if_clear();
+            if l2s.is_caps_down.check() {
+                l2s.in_managed_ctrl_down_state.set_if_clear();
                 Key::LControl.press(); // this allows caps-as-ctrl for drag drop etc
             }
             MouseButton::LeftButton.press()
         });
         let l2s = l2sr.clone();
         MouseButton::LeftButton.block_bind(false, move |_| {
-            *l2s.is_mouse_left_btn_down.write().unwrap() = false;
+            l2s.is_mouse_left_btn_down.clear_if_set();
             thread::sleep(time::Duration::from_millis(10));
             MouseButton::LeftButton.release();
         });
@@ -422,13 +413,13 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
         // tracking btn down is for ctrl-wheel (zoom) etc, and right-btn-down-state is for switche scroll (via F21/F22/F23)
         let l2s = l2sr.clone();
         MouseButton::RightButton.non_blocking_bind(true, move |_| {
-            *l2s.is_mouse_right_btn_down.write().unwrap() = true;
+            l2s.is_mouse_right_btn_down.set_if_clear();
         });
         let l2s = l2sr.clone();
         MouseButton::RightButton.non_blocking_bind(false, move |_| {
-            *l2s.is_mouse_right_btn_down.write().unwrap() = false;
-            if *l2s.in_right_btn_scroll_state.read().unwrap() {
-                *l2s.in_right_btn_scroll_state.write().unwrap() = false;
+            l2s.is_mouse_right_btn_down.clear_if_set();
+            if l2s.in_right_btn_scroll_state.check() {
+                l2s.in_right_btn_scroll_state.clear();
                 press_release(Key::F23);
             }
         });
@@ -436,17 +427,17 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
 
     pub fn setup_mouse_x_btn_1_handling () {
         // turns out just doing press/release on initial press works snappier/more-reliable than trying to be true to btn-holds
-        MouseButton::X1Button.block_bind(true, move |_| {
+        MouseButton::X1Button.block_bind(true, |_| {
             MouseButton::MiddleButton.press(); MouseButton::MiddleButton.release();
         });
-        MouseButton::X1Button.block_bind(false, move |_| { });
+        MouseButton::X1Button.block_bind(false, |_| { });
     }
 
     pub fn setup_mouse_x_btn_2_handling () {
-        MouseButton::X2Button.block_bind(true, move |_| {
+        MouseButton::X2Button.block_bind(true, |_| {
             MouseButton::MiddleButton.press(); MouseButton::MiddleButton.release();
         });
-        MouseButton::X2Button.block_bind(false, move |_| { });
+        MouseButton::X2Button.block_bind(false, |_| { });
     }
 
 }
@@ -467,10 +458,10 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
         //let gap = l2sr.last_wheel_stamp.read().unwrap().duration_since(last_stamp);
         //println!("{:#?}", dur.as_millis());
         const GUARD_DUR_MS: u128 = 120;  // from dur printouts above, looked like max inertial gap is 120 (min 7ms, usually <100)
-        if !*l2sr.is_wheel_spin_invalidated.read().unwrap() {
+        if !l2sr.is_wheel_spin_invalidated.check() {
             handle_wheel_action(delta, l2sr);
         } else if GUARD_DUR_MS < l2sr.last_wheel_stamp.read().unwrap().duration_since(last_stamp).as_millis() {
-            *l2sr.is_wheel_spin_invalidated.write().unwrap() = false;
+            l2sr.is_wheel_spin_invalidated.clear();
             handle_wheel_action(delta, l2sr);
         } else {
             // if its invalidated AND wheel-spin spacing is below guard-dur, we suppress the wheel event
@@ -479,27 +470,27 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
 
     pub fn handle_wheel_action (delta:i32, l2sr:&L2S) {
         let incr = delta / WHEEL_DELTA as i32;
-        if *l2sr.is_mouse_right_btn_down.read().unwrap() {
+        if l2sr.is_mouse_right_btn_down.check() {
             // right-mouse-btn-wheel support for switche task switching
-            if !*l2sr.in_right_btn_scroll_state.read().unwrap() { *l2sr.in_right_btn_scroll_state.write().unwrap() = true; }
+            l2sr.in_right_btn_scroll_state.set_if_clear();
             let key = if incr.is_positive() { Key::F22 } else { Key::F21 };
             press_release(key);
-        } else  if *l2sr.is_lalt_down.read().unwrap() {
+        } else  if l2sr.is_lalt_down.check() {
             // wheel support for scrolling in windows native alt-tab task-switching screen
-            if *l2sr.is_caps_down.read().unwrap() || get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
+            if l2sr.is_caps_down.check() || get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
                 ensure_alt_active(l2sr);
                 handle_alt_tab_wheel(incr)
             } else { // simple alt wheel for volume
                 handle_volume_wheel(incr);
             }
-        } else if *l2sr.is_lwin_down.read().unwrap() {
-            *l2sr.is_down_lwin_consumed.write().unwrap() = true;
+        } else if l2sr.is_lwin_down.check() {
+            l2sr.is_down_lwin_consumed.set();
             handle_brightness_wheel(incr); // win-wheel for brightness
-        } else if *l2sr.is_caps_down.read().unwrap() {
-            *l2sr.in_managed_ctrl_down_state.write().unwrap() = true;
+        } else if l2sr.is_caps_down.check() {
+            l2sr.in_managed_ctrl_down_state.set_if_clear();
             Key::LControl.press();
             MouseWheel::DefaultWheel.scroll(delta); // caps-wheel as ctrl-wheel (zoom etc)
-        } else if *l2sr.is_lshift_down.read().unwrap() {
+        } else if l2sr.is_lshift_down.check() {
             //handle_horiz_scroll_wheel(incr);
             // ^^ todo:: .. (and for now, just let default pass through)
             MouseWheel::DefaultWheel.scroll(delta);
@@ -546,9 +537,30 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
 
 pub mod special_keys_setups { // special keys handling e.g. Space, Tab
 
-    // used to be used for setting up things like space or tab, but after expanding action maps for ralt etc, even the more
-    // >  complex setups that were done individually can now be covered via action maps
-    // leaving this here just as reminder this option is always available in case we need it for anything in the future
+
+    // NOTE: so far we have decided not to hold mappings for ctrl or shift (and cascadingly for ctrl-alt, ctrl-win, shift-alt, shift-win etc)
+    // further, we make the action map composition default to pure ctrl/shift action when those natural combos are pressed
+    // >  which is better than not checking for those, as this will allow for natural ctrl-alt, shift-alt, ctrl-win etc to pass through
+    // however, that means if we need to setup combos that want to use shift or ctrl keys, we'll have to do it directly
+
+    use crate::krusty::{*, key_utils::*};
+
+    pub fn setup_direct_binding_keys (k:&Krusty) {
+
+        // currently, we dont need to do it for anything
+        // .. even for shift-tick, its handled by checking for shift in that base-action itself
+
+        // HOWEVER, for anything that needs ctrl/shift while alt/win/ralt is down, we have no easy way currently to do it via action maps
+        // .. and thats coz during am cb composition, shift/ctrl check defaulting to base needs to be before alt/ralt/win conditionals
+        // the messy alternative if we wanted to do it via action maps, we'd have base action check alt/ctrl/shift etc etc and set that for all actions
+
+        // ALSO, for things that require actual action in key-up callbacks, we'd do it direclty here because key-dn actions arent registered in maps
+        // >  and so action-maps composed callbacks can only either set key-up to do nothing, or at most clear caret flags
+
+        // IMPORTANT : note that whatever we put here, we will NOT want to include them in ANY action maps !!
+
+
+    }
 
 
 }
@@ -561,7 +573,7 @@ pub mod action_map_utils {
     use crate::krusty::{*, key_utils::*, lalt_setups::*, mod_keys_setups::*};
 
     /// note: registering a caret mode key auto sets their caps and caps-lalt/ralt actions to nothing, others combos can be set as usual
-    pub fn register_caret_mode_key (k: &Krusty, key:Key, mode_flag_r:&Arc<RwLock<bool>>) {
+    pub fn register_caret_mode_key (k: &Krusty, key:Key, mode_flag_r:&Arc<Flag>) {
         k.cmks.borrow_mut() .insert(key, mode_flag_r.clone());
         add_caps_mapping      (k, key, no_action());  // caret mode keys trigger w caps down, cant send anything during that
         add_caps_lalt_mapping (k, key, no_action());  // lalt is typically word-nav caret-mode, so this gotta be silent too
@@ -572,8 +584,8 @@ pub mod action_map_utils {
     fn gen_key_caret_mode_actions (k:&Krusty, key:Key) -> (AF,AF) {
         if let Some(cmfr) = k.cmks.borrow().get(&key) {
             let (cmf_c1, cmf_c2) = (cmfr.clone(), cmfr.clone()); // gotta clone to move into AF
-            return ( Arc::new ( move || { *cmf_c1.write().unwrap() = true } ),     // key-dn action, set mode-flag
-                     Arc::new ( move || { *cmf_c2.write().unwrap() = false } ) )   // key-up action, clear mode-flag
+            return ( Arc::new (move || cmf_c1.set_if_clear()), Arc::new (move || cmf_c2.clear_if_set()) )
+            // ^^ key-dn and key-up caret-mode-actions for a caret-mode-key is to set and clear its caret-mode-flag
         }
         (no_action(), no_action()) // empty (dn,up) caret-flag-actions for non-caret keys
     }
@@ -588,7 +600,7 @@ pub mod action_map_utils {
             af(&am.win_act_map), af(&am.caps_win_act_map), af(&am.caps_lalt_act_map), af(&am.caps_ralt_act_map)
         );
         // we cant move local options to closure, just the Arcs inside, so do that part of composition before making closure
-        let ba = mba.unwrap_or(base_action(key));
+        let (pba, ba) = (base_action(key), mba.unwrap_or(base_action(key))); // pure-base-action vs possibly mapped base-action
         // we'll derive actions for the rest of options, defaulting to base if unspecified
         // note that for lalt and win, initial presses go out, so picking base action will cover the alt or win action
         // .. however for ralt, caps, and caps-combos, this defaults to pure base action (for ralt as its up/down is always suppressed)
@@ -602,15 +614,15 @@ pub mod action_map_utils {
         let l2s = k.l2s.clone();
         let cb_dn = Box::new ( move |_| { // note that we're ignoring the KbdEvent passed in (it'd have KbdEventType and key vk/sc codes)
             cma_dn();
-            if *l2s.is_caps_down.read().unwrap() {
-                if *l2s.is_lwin_down.read().unwrap() { cwa() }
-                else if *l2s.is_lalt_down.read().unwrap() { claa() }
-                else if *l2s.is_ralt_down.read().unwrap() { craa() }
+            if l2s.is_caps_down.check() {
+                if l2s.is_lwin_down.check() { cwa() }
+                else if l2s.is_lalt_down.check() { claa() }
+                else if l2s.is_ralt_down.check() { craa() }
                 else { ca() }
             } // note: for the rest (lwin, lalt, ralt), we wont define multi-combos for now .. can add if need arises
-            else if *l2s.is_lwin_down.read().unwrap() { wa() }
-            else if *l2s.is_lalt_down.read().unwrap() { laa() }
-            else if *l2s.is_ralt_down.read().unwrap() { raa() }
+            else if l2s.is_lwin_down.check() { wa() }
+            else if l2s.is_lalt_down.check() { laa() }
+            else if l2s.is_ralt_down.check() { raa() }
             else { ba() }
         } );
         // and finally, the btn up action, which is really just caret mode flag action if any
@@ -630,7 +642,7 @@ pub mod action_map_utils {
         for key in keys.borrow().iter() {
             let (cb_dn, cb_up) = compose_action_maps_cb (k, *key);
             key.block_bind (KeyDownCallback, cb_dn);
-            key.block_bind (KeyUpCallback, cb_up);
+            key.block_bind (KeyUpCallback,   cb_up);
         }
     }
 
@@ -681,7 +693,7 @@ pub mod l2_utils {
      - in del mode, left/home/up/pgup get ExtBackspace, right/end/down/pgdn get ExtDelete
      - in del mode, left/right do direct bksp/del, but others get select then bksp/del
      */
-    use crate::krusty::{*, lalt_setups::*, key_utils::*, action_map_utils::*};
+    use crate::krusty::{*, lalt_setups::*, key_utils::*, action_map_utils::*, special_keys_setups::*};
 
     /// action-function generator type for l2 configuration
     pub type AFG = fn(Key) -> AF ;
@@ -691,8 +703,8 @@ pub mod l2_utils {
         // note: this ^^ cant take k:&Krusty because k.am would be not 'Send' while k.l2s is, and so only can be sent here from AFs
         let (base_af, alt_af, fast_af) = (base_action(l2k), aafg(l2k), fafg(l2k));
         Arc::new ( move || {
-            if *l2s.is_lalt_down.read().unwrap() { alt_af() }
-            else if *l2s.is_ralt_down.read().unwrap() || *l2s.in_caret_fast_mode.read().unwrap() { fast_af() }
+            if l2s.is_lalt_down.check() { alt_af() }
+            else if l2s.is_ralt_down.check() || l2s.in_caret_fast_mode.check() { fast_af() }
             else { base_af() }
     } ) }
 
@@ -720,8 +732,8 @@ pub mod l2_utils {
         Arc::new ( move || {
             ensure_alt_inactive(&l2s);
             // ^^ NOTE that for ALL l2, lAlt is suppressed other than for l2 behavior
-            if *l2s.in_caret_sel_mode.read().unwrap() { sel_af() }
-            else if *l2s.in_caret_del_mode.read().unwrap() { del_af() }
+            if l2s.in_caret_sel_mode.check() { sel_af() }
+            else if l2s.in_caret_del_mode.check() { del_af() }
             else { nav_af() }
     } ) }
 
@@ -803,11 +815,10 @@ pub fn setup_krusty_board () {
     // setup tab .. caps-as-ctrl for caps-tab switching, ralt-tab for shift-tab
     let l2s = k.l2s.clone();
     add_caps_mapping (&k, Key::Tab, Arc::new (move || {
-        if *l2s.is_caps_down.read().unwrap() {
+        if l2s.is_caps_down.check() {
+            if !l2s.in_managed_ctrl_down_state.check() { l2s.in_managed_ctrl_down_state.set() }
             Key::LControl.press();  // this enables caps-as-ctrl for caps-tab switching
-            if !*l2s.in_managed_ctrl_down_state.read().unwrap() {
-                *l2s.in_managed_ctrl_down_state.write().unwrap() = true;
-            } // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
+            // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
             press_release(Key::Tab)
         }
     } ) );
@@ -878,7 +889,7 @@ pub fn setup_krusty_board () {
     let l2s = k.l2s.clone();
     add_lalt_mapping (&k, Key::F2, Arc::new ( move || {
         ensure_held_lalt_inactive(&l2s);
-        if !*l2s.is_lshift_down.read().unwrap() { press_release(Key::MediaNextTrack) }
+        if !l2s.is_lshift_down.check() { press_release(Key::MediaNextTrack) }
         else { Key::LShift.release(); press_release(Key::MediaPrevTrack) } // note: its safer not to press it back again
         let l2s = l2s.clone(); // gotta clone again to allow moving into spawned thread closure!
         thread::spawn ( move || { thread::sleep(time::Duration::from_millis(2000));  do_media_skips(3,&l2s); } );
@@ -907,7 +918,7 @@ pub fn setup_krusty_board () {
     // also note that ralt-backquote to tilde is covered separately in the ralt-as-shift mappings below
     let l2s = k.l2s.clone();
     add_base_mapping (&k, Key::Backquote, Arc::new ( move || {
-        if *l2s.is_lshift_down.read().unwrap() { press_release(Key::Backquote) } // uses already down shift to give tilde
+        if l2s.is_lshift_down.check() { press_release(Key::Backquote) } // uses already down shift to give tilde
         else { press_release(Key::ExtDelete) }
     }));
     add_caps_mapping (&k, Key::Backquote, base_action(Key::Backquote));
