@@ -43,11 +43,6 @@ pub struct Layer2State {
     // caps will be tracked for internal reference, and we'll assume we'll ALWAYS operate with caps-lock off
     is_caps_down: Flag,
 
-    // further, when the common caps-alt combo is released, if caps is released just a tiny bit earlier, we dont want the alt to trigger ..
-    // so we'll track the caps release to allow for some grace period of sorts before we start accepting alt as activated
-    #[derivative(Default(value = "RwLock::new(Instant::now())"))]
-    last_caps_up_stamp: RwLock<Instant>,
-
     // for alt, gotta separately track outside logical state, as sometimes we wanna suppress its down going out (instead it'll go out of sync)
     // this will explicitly track whether the outside seen last alt-key-event was down or not, and whether its consumed so as to mask its release
     is_lalt_down:          Flag,
@@ -97,13 +92,6 @@ impl Layer2State {
     }
     fn some_shift_down (&self) -> bool { self.is_lshift_down.check() || self.is_rshift_down.check() }
     fn some_ctrl_down (&self)  -> bool { self.is_lctrl_down.check()  || self.is_rctrl_down.check() }
-
-    fn caps_up_grace_active (&self) -> bool {
-        const GRACE_DUR_MS: u128 = 200;
-        let t = Instant::now().duration_since(*self.last_caps_up_stamp.read().unwrap()).as_millis();
-        //std::thread::spawn(move || println!("{} {}", t<GRACE_DUR_MS, t));
-        t < GRACE_DUR_MS
-    }
 }
 
 
@@ -174,30 +162,8 @@ pub mod key_utils {
     pub fn shift_press_release      (key:Key) { wrapped_press_release (Key::Shift, press_release, key) }
     pub fn ctrl_shift_press_release (key:Key) { wrapped_press_release (Key::Ctrl,  shift_press_release, key) }
 
-    // the following can lead to tracked alt/win going out of sync .. so made these private .. use the 'smart' versions instead
-    fn blind_alt_press_release      (key:Key) { wrapped_press_release (Key::Alt, press_release, key) }
-    fn blind_win_press_release      (key:Key) { wrapped_press_release (Key::LWin, press_release, key) }
-    fn blind_ctrl_alt_press_release (key:Key) { wrapped_press_release (Key::Ctrl, blind_alt_press_release, key) }
-    fn blind_ctrl_win_press_release (key:Key) { wrapped_press_release (Key::Ctrl, blind_win_press_release, key) }
-
-    // the goal of the following is to ensure that tracked alt/win remain in-sync even after sending their press/releases
-    pub fn alt_press_release(key:Key, l2s:&L2S) {
-        l2s.is_down_lalt_consumed.set_if_clear();
-        if l2s.is_alt_active.check() { press_release(key) } else { blind_alt_press_release(key) }
-    }
-    pub fn ctrl_alt_press_release(key:Key, l2s:&L2S) {
-         l2s.is_down_lalt_consumed.set_if_clear();
-        if l2s.is_alt_active.check() { ctrl_press_release(key) } else { blind_ctrl_alt_press_release(key) }
-    }
-
-    pub fn win_press_release(key:Key, l2s:&L2S) {
-        l2s.is_down_lwin_consumed.set_if_clear();
-        if l2s.is_win_active.check() { press_release(key) } else { blind_win_press_release(key) }
-    }
-    pub fn ctrl_win_press_release(key:Key, l2s:&L2S) {
-        l2s.is_down_lwin_consumed.set_if_clear();
-        if l2s.is_win_active.check() { ctrl_press_release(key) } else { blind_ctrl_win_press_release(key) }
-    }
+    // note: ^^ we dont have these versions for alt/win and ctrl-alt/win, as we need to check state before blindly sending those
+    // .. instead, can use the smart state restoring action wrappers further below
 
     // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
     /// wraps a given unitary function with NO input args into an Arc Fn
@@ -214,18 +180,11 @@ pub mod key_utils {
     pub fn shift_action      (key:Key) -> AF { action_p1 (shift_press_release,      key) }
     pub fn ctrl_shift_action (key:Key) -> AF { action_p1 (ctrl_shift_press_release, key) }
 
-    // note: do NOT use the following as they can lead to alt/win going out of sync .. use the 'smart' versions below instead
-    fn _blind_alt_action        (key:Key) -> AF { action_p1 (blind_alt_press_release, key) }
-    fn _blind_win_action        (key:Key) -> AF { action_p1 (blind_win_press_release, key) }
-    fn _blind_ctrl_alt_action   (key:Key) -> AF { action_p1 (blind_ctrl_alt_press_release, key) }
-    fn _blind_ctrl_win_action   (key:Key) -> AF { action_p1 (blind_ctrl_win_press_release, key) }
 
-    // these ensure the tracked win/alt are still in sync after these are invoked
-    // note: even these are deprecated, as we'd rather wrap with smart guards that intelligently do masked releases if appropriate
-    pub fn _alt_action      (key:Key, l2s:L2S) -> AF { Arc::new (move || alt_press_release(key, &l2s)) }
-    pub fn _win_action      (key:Key, l2s:L2S) -> AF { Arc::new (move || win_press_release(key, &l2s)) }
-    pub fn _ctrl_alt_action (key:Key, l2s:L2S) -> AF { Arc::new (move || ctrl_alt_press_release(key, &l2s)) }
-    pub fn _ctrl_win_action (key:Key, l2s:L2S) -> AF { Arc::new (move || ctrl_win_press_release(key, &l2s)) }
+
+
+
+
 
 
 }
@@ -355,9 +314,7 @@ pub mod mod_keys_setups { // tracking for tracked modifier keys e.g. capslock, l
     }
     // note that we're making everything cnosume down lalt/lwin .. which makes sense, as really any key press action should do so
     pub fn consume_down_lalt (l2s:&L2S) {
-        // utility for any key with lwin action to consume down state if they want to (to suppress its keyup later)
-        //if l2s.is_lalt_down.check() { l2s.is_down_lalt_consumed.set_if_clear(); }
-        // ^^ not even worth checking, if anything at all happens, including us being called, we can set it consumed
+        // utility for any key with alt/win action to consume down state to mask its keyup later .. (which should be everyone always)
         l2s.is_down_lalt_consumed.set_if_clear();
     }
     pub fn release_alt_w_ctrl_masking (l2s:&L2S) {
@@ -365,12 +322,6 @@ pub mod mod_keys_setups { // tracking for tracked modifier keys e.g. capslock, l
         Key::LControl.press(); Key::LAlt.release(); Key::LControl.release();
         if l2s.some_ctrl_down() { Key::Ctrl.press() }
     }
-    pub fn ensure_not_held_lalt_inactive (l2s:&L2S) {
-        // utility to set not-held alt inactive (sync it) while tracking (useful for alt-combos that produce non-alt outputs)
-        l2s.is_down_lalt_consumed.set_if_clear();
-        if !l2s.is_lalt_down.check() && l2s.is_alt_active.check() {
-            l2s.is_alt_active.clear(); release_alt_w_ctrl_masking(l2s);
-    } }
     pub fn ensure_alt_inactive (l2s:&L2S) {
         // utility to ensure lalt is inactive regardless if held down
         // shouldnt really be necessary since there are action wrappers available to set/restore alt/win for any need at any alt/win state
@@ -434,9 +385,7 @@ pub mod mod_keys_setups { // tracking for tracked modifier keys e.g. capslock, l
     }
     // note that we're making everything cnosume down lalt/lwin .. which makes sense, as really any key press action should do so
     pub fn consume_down_lwin (l2s:&L2S) {
-        // utility for any key with lwin action to consume down state if they want to (to suppress its keyup later)
-        //if l2s.is_lwin_down.check() { l2s.is_down_lwin_consumed.set_if_clear(); }
-        // ^^ not even worth checking, if anything at all happens, including us being called, we can set it consumed
+        // utility for any key with alt/win action to consume down state to mask its keyup later .. (which should be everyone always)
         l2s.is_down_lwin_consumed.set_if_clear();
     }
     pub fn release_win_w_ctrl_masking (l2s:&L2S) {
@@ -445,12 +394,6 @@ pub mod mod_keys_setups { // tracking for tracked modifier keys e.g. capslock, l
         Key::LControl.press(); Key::LWin.release(); Key::LControl.release();
         if l2s.some_ctrl_down() { Key::Ctrl.press() }
     }
-    pub fn ensure_not_held_lwin_inactive (l2s:&L2S) {
-        // utility to set not-held win inactive (sync it) while tracking (useful to sync states upon caps release after caps-win etc)
-        l2s.is_down_lwin_consumed.set_if_clear();
-        if !l2s.is_lwin_down.check() && l2s.is_win_active.check() {
-            l2s.is_win_active.clear(); release_win_w_ctrl_masking(l2s);
-    } }
     pub fn ensure_win_inactive (l2s:&L2S) {
         // utility to ensure lwin is inactive regardless if held down
         // shouldnt really be necessary since there are action wrappers available to set/restore alt/win for any need at any alt/win state
@@ -502,7 +445,7 @@ pub mod mod_keys_setups { // tracking for tracked modifier keys e.g. capslock, l
 
 pub mod mouse_btn_setups { // setups for mouse btn handling
 
-    use crate::krusty::{*, key_utils::*};
+    use crate::krusty::{*, key_utils::*, action_map_utils::*};
 
     pub fn setup_mouse_left_btn_handling (l2sr:&L2S) {
         let l2s = l2sr.clone();
@@ -531,11 +474,12 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
             l2s.is_mouse_right_btn_down.set_if_clear();
         });
         let l2s = l2sr.clone();
+        let switche_action = alt_action (Key::F23, l2sr.clone());
         MouseButton::RightButton.non_blocking_bind(false, move |_| {
             l2s.is_mouse_right_btn_down.clear_if_set();
             if l2s.in_right_btn_scroll_state.check() {
                 l2s.in_right_btn_scroll_state.clear();
-                alt_press_release(Key::F23, &l2s);
+                switche_action();
             }
         });
     }
@@ -561,7 +505,7 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
 
 pub mod mouse_wheel_setups { // setups for mouse wheel handling
 
-    use crate::krusty::{*, key_utils::*, mod_keys_setups::*};
+    use crate::krusty::{*, key_utils::*, action_map_utils::*, mod_keys_setups::*};
     use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
     use crate::utils::window_utils::get_fgnd_win_class;
 
@@ -589,7 +533,8 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
             // right-mouse-btn-wheel support for switche task switching
             l2sr.in_right_btn_scroll_state.set_if_clear();
             let key = if incr.is_positive() { Key::F22 } else { Key::F21 };
-            alt_press_release(key, l2sr);
+            //alt_press_release(key, l2sr);
+            alt_press_release_guarded (key, l2sr);
         } else  if l2sr.is_lalt_down.check() {
             // wheel support for scrolling in windows native alt-tab task-switching screen
             // this requires a system call to check alt-tab window, so push it out to thread
@@ -786,28 +731,38 @@ pub mod action_map_utils {
     pub fn add_ralt_mapping (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .ralt_act_map .insert (key, action); }
 
 
-    // for lalt combos, since an alt-dn goes out on first alt press, we'll make util fns to map w that alt-dn either kept active or inactivated
-    // note that caps-(lalt/lwin) always already have their (alt/win)-dn inactivated/suppressed
-    //  .. hence this fancy mechanism only applies for non-caps lalt combo given extensive usage with it held down for l2
-    // as for lalt combos, we'll also mark the down lalt as consumed and mask its release with ctrl so it doesnt activate menus etc
+    // for the caps mapping, and all of its combos that we support (dont have to worry about state, as w/ caps alt/win are masked/suppressed)
+    // NOTE: we dont need one for caps-ctrl, as caps default is ctrl ... (though if we really ran out of combos, lol(!), we could add it)
+    pub fn add_caps_mapping       (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_act_map       .insert (key, action); }
+    pub fn add_caps_ralt_mapping  (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_ralt_act_map  .insert (key, action); }
+    pub fn add_caps_lalt_mapping  (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_lalt_act_map  .insert (key, action); }
+    pub fn add_caps_win_mapping   (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_win_act_map   .insert (key, action); }
+    pub fn add_caps_shift_mapping (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_shift_act_map .insert (key, action); }
 
 
-    fn _alt_active_action          (l2s:L2S, af:AF) -> AF { Arc::new ( move || { ensure_alt_active(&l2s); af(); } ) }
-    fn _alt_inactive_action        (l2s:L2S, af:AF) -> AF { Arc::new ( move || { ensure_alt_inactive(&l2s); af(); } ) }
-    fn down_lalt_consuming_action (l2s:L2S, af:AF) -> AF { Arc::new ( move || { consume_down_lalt(&l2s); af(); } ) }
 
-    pub fn add_lalt_mapping (k:&Krusty, key:Key, action:AF) {
-        k.am.borrow_mut() .lalt_act_map .insert (key, down_lalt_consuming_action(k.l2s.clone(), action));
+    // for alt/win combos, since an alt/win-dn goes out on first alt/win press, we'll make util fns to map w that alt/win-dn either kept active or inactivated
+    // we'll also mark the down lalt/lwin as consumed and mask its release with ctrl so it doesnt activate menus/start-btn etc
+
+
+    fn checked_masked_alt_release (l2s:&L2S) {
+        if !l2s.is_lalt_down.check() { Key::LAlt.release() }
+        else { release_alt_w_ctrl_masking(l2s) }
     }
-    pub fn add_lalt_mapping_w_alt_active (k:&Krusty, key:Key, action:AF) {
-        k.am.borrow_mut() .lalt_act_map .insert (key, alt_active_action(k.l2s.clone(), action));
+    pub fn alt_key_action_guarded (key:Key, key_action:fn(Key), l2s:&L2S) {
+        l2s.is_down_lalt_consumed.set_if_clear();
+        if l2s.is_alt_active.check() { key_action(key) }
+        else { Key::LAlt.press(); key_action(key); checked_masked_alt_release(&l2s); }
     }
-    pub fn add_lalt_mapping_w_alt_inactive (k:&Krusty, key:Key, action:AF) {
-        k.am.borrow_mut() .lalt_act_map .insert (key, alt_inactive_action(k.l2s.clone(), action));
+    pub fn alt_press_release_guarded      (key:Key, l2s:&L2S) { alt_key_action_guarded (key, press_release, l2s) }
+    pub fn ctrl_alt_press_release_guarded (key:Key, l2s:&L2S) { alt_key_action_guarded (key, ctrl_press_release, l2s) }
+
+    pub fn alt_action      (key:Key, l2s:L2S) -> AF { Arc::new (move || { alt_press_release_guarded      (key, &l2s); }) }
+    pub fn ctrl_alt_action (key:Key, l2s:L2S) -> AF { Arc::new (move || { ctrl_alt_press_release_guarded (key, &l2s); }) }
+
+    fn down_lalt_consuming_action (l2s:L2S, af:AF) -> AF {
+        Arc::new ( move || { consume_down_lalt(&l2s); af(); } )
     }
-
-    // todo: see if these are better placed elsewhere
-
     pub fn alt_active_action (l2s:L2S, af:AF) -> AF {
         Arc::new (move || {
             l2s.is_down_lalt_consumed.set_if_clear();
@@ -823,7 +778,42 @@ pub mod action_map_utils {
             else { checked_masked_alt_release(&l2s); af(); Key::LAlt.press(); }
         })
     }
+    pub fn add_lalt_mapping (k:&Krusty, key:Key, action:AF) {
+        k.am.borrow_mut() .lalt_act_map .insert (key, down_lalt_consuming_action(k.l2s.clone(), action));
+    }
+    pub fn add_lalt_mapping_w_alt_active (k:&Krusty, key:Key, action:AF) {
+        k.am.borrow_mut() .lalt_act_map .insert (key, alt_active_action(k.l2s.clone(), action));
+    }
+    pub fn add_lalt_mapping_w_alt_inactive (k:&Krusty, key:Key, action:AF) {
+        k.am.borrow_mut() .lalt_act_map .insert (key, alt_inactive_action(k.l2s.clone(), action));
+    }
 
+
+
+
+
+    // lwin is now basically mirror of lalt .. so track whether active, mark consumed, masked releases etc as above
+
+    fn checked_masked_win_release (l2s:&L2S) {
+        // not sure if these checks are necessary or useful .. maybe we could just mask everything all the time
+        if !l2s.is_lwin_down.check() { Key::LWin.release() }
+        else { release_win_w_ctrl_masking(l2s) }
+    }
+    pub fn win_key_action_guarded (key:Key, key_action:fn(Key), l2s:&L2S) {
+        l2s.is_down_lwin_consumed.set_if_clear();
+        if l2s.is_win_active.check() { key_action(key) }
+        else { Key::LWin.press(); key_action(key); checked_masked_win_release(&l2s); }
+    }
+    pub fn win_press_release_guarded      (key:Key, l2s:&L2S) { win_key_action_guarded (key, press_release, l2s) }
+    pub fn ctrl_win_press_release_guarded (key:Key, l2s:&L2S) { win_key_action_guarded (key, ctrl_press_release, l2s) }
+
+    pub fn win_action      (key:Key, l2s:L2S) -> AF { Arc::new (move || { win_press_release_guarded      (key, &l2s); }) }
+    pub fn ctrl_win_action (key:Key, l2s:L2S) -> AF { Arc::new (move || { ctrl_win_press_release_guarded (key, &l2s); }) }
+
+
+    fn down_lwin_consuming_action (l2s:L2S, af:AF) -> AF {
+        Arc::new ( move || { consume_down_lwin(&l2s); af(); } )
+    }
     pub fn win_active_action (l2s:L2S, af:AF) -> AF {
         Arc::new (move || {
             l2s.is_down_lwin_consumed.set_if_clear();
@@ -831,27 +821,12 @@ pub mod action_map_utils {
             else { Key::LWin.press(); af(); checked_masked_win_release(&l2s); }
         })
     }
-    fn checked_masked_alt_release (l2s:&L2S) {
-        if !l2s.is_lalt_down.check() { Key::LAlt.release() }
-        else { release_alt_w_ctrl_masking(l2s) }
-    }
-    fn checked_masked_win_release (l2s:&L2S) {
-        if !l2s.is_lwin_down.check() { Key::LWin.release() }
-        else { release_win_w_ctrl_masking(l2s) }
-    }
-    // ^^ not sure if these checks are necessary or useful .. maybe we could just mask everything all the time
-
-    pub fn alt_action      (key:Key, l2s:L2S) -> AF { alt_active_action (l2s, base_action(key)) }
-    pub fn win_action      (key:Key, l2s:L2S) -> AF { win_active_action (l2s, base_action(key)) }
-    pub fn ctrl_alt_action (key:Key, l2s:L2S) -> AF { alt_active_action (l2s, ctrl_action(key)) }
-    pub fn ctrl_win_action (key:Key, l2s:L2S) -> AF { win_active_action (l2s, ctrl_action(key)) }
-
     pub fn win_inactive_action (l2s:L2S, af:AF) -> AF {
         Arc::new (move || {
             l2s.is_down_lwin_consumed.set_if_clear();
             if !l2s.is_win_active.check() { af() }
             else {
-                //release_win_w_ctrl_masking(&l2s); af(); Key::LWin.press();
+                //checked_masked_win_release(&l2s); af(); Key::LWin.press();
                 // ^^ nu-uh, apparently win start menu triggers unless there's some timing gap between the masked release and another press
                 // .. and from quick expts apparently even 80ms is sometimes too little .. not sure if also machine dependent
                 let l2s = l2s.clone(); let af = af.clone();
@@ -863,14 +838,6 @@ pub mod action_map_utils {
             }
         })
     }
-
-
-    // lwin is now basically mirror of lalt .. so track whether active, mark consumed, masked releases etc as above
-
-    fn _win_active_action          (l2s:L2S, af:AF) -> AF { Arc::new ( move || { ensure_win_active(&l2s); af(); } ) }
-    fn _win_inactive_action        (l2s:L2S, af:AF) -> AF { Arc::new ( move || { ensure_win_inactive(&l2s); af(); } ) }
-    fn down_lwin_consuming_action (l2s:L2S, af:AF) -> AF { Arc::new ( move || { consume_down_lwin(&l2s); af(); } ) }
-
     pub fn add_win_mapping (k:&Krusty, key:Key, action:AF) {
         k.am.borrow_mut() .win_act_map .insert (key, down_lwin_consuming_action(k.l2s.clone(), action));
     }
@@ -880,15 +847,6 @@ pub mod action_map_utils {
     pub fn add_win_mapping_w_win_inactive (k:&Krusty, key:Key, action:AF) {
         k.am.borrow_mut() .win_act_map .insert (key, win_inactive_action(k.l2s.clone(), action));
     }
-
-
-    // finally, for the caps mapping, and all of its combos that we support
-    // NOTE: we dont need one for caps-ctrl, as caps default is ctrl ... (though if we really ran out of combos, lol(!), we could add it)
-    pub fn add_caps_mapping       (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_act_map       .insert (key, action); }
-    pub fn add_caps_ralt_mapping  (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_ralt_act_map  .insert (key, action); }
-    pub fn add_caps_lalt_mapping  (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_lalt_act_map  .insert (key, action); }
-    pub fn add_caps_win_mapping   (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_win_act_map   .insert (key, action); }
-    pub fn add_caps_shift_mapping (k:&Krusty, key:Key, action:AF) { k.am.borrow_mut() .caps_shift_act_map .insert (key, action); }
 
 
 }
@@ -946,8 +904,6 @@ pub mod l2_utils {
     /// composes the complete l2 action for the key
     fn l2_afg (l2s:L2S, nav_af:AF, sel_af:AF, del_af:AF) -> AF {
         Arc::new ( move || {
-            //ensure_alt_inactive(&l2s);
-            // ^^ shouldnt be necessary anymore since we now immediately inactivate alt in (alt/caps)-dn handlers anytime both are down
             if l2s.in_caret_sel_mode.check() { sel_af() }
             else if l2s.in_caret_del_mode.check() { del_af() }
             else { nav_af() }
@@ -1256,6 +1212,7 @@ pub fn setup_krusty_board () {
     // caps-e is Enter .. specifically as left-hand-only enter while the right hand might be at mouse (else theres also ralt-space)
     // caps-alt-E as alt-enter as its freq used in intelliJ, but we have it globally captured by 'Everything' indexer
     //add_caps_mapping      (&k, Key::E, base_action(Key::Enter));
+    add_lalt_mapping_w_alt_inactive (&k, Key::E, base_action(Key::Enter));
     //add_caps_lalt_mapping (&k, Key::E, alt_action(Key::Enter, k.l2s.clone()));
     add_caps_lalt_mapping (&k, Key::E, base_action(Key::Enter));
     // ^^ trying out E as caret fast mode instead .. so setting caps-alt-e as enter if desperate for left hand enter (most enter is ralt-space anyway)
