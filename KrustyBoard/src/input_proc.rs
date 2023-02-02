@@ -22,6 +22,11 @@ const FAKE_EXTRA_INFO: usize = 0xFFC3D44F;
 static KEYBD_HHOOK: Lazy<AtomicPtr<HHOOK>> = Lazy::new(AtomicPtr::default);
 static MOUSE_HHOOK: Lazy<AtomicPtr<HHOOK>> = Lazy::new(AtomicPtr::default);
 
+static KEY_SWAPS_MAP: Lazy<HashMap<KbdKey,u64>> = Lazy::new ( || { [
+    (KbdKey::RAlt, 0xE038 as u64), (KbdKey::RCtrl, 0xE01D as u64) , (KbdKey::RShift, 0x0036 as u64),
+    (KbdKey::LAlt, 0x0038 as u64), (KbdKey::LCtrl, 0x001D as u64) , (KbdKey::LShift, 0x002A as u64)
+] .into_iter() .collect::<HashMap<KbdKey,u64>>() } );
+
 impl KbdKey {
     /// Returns true if a given `KeybdKey` is currently pressed (in the down position).
     pub fn is_pressed(self) -> bool {
@@ -30,20 +35,25 @@ impl KbdKey {
 
     /// Presses a given `KeybdKey`. Note: this means the key will remain in the down
     /// position. You must manually call release to create a full 'press'.
+
+
     pub fn press(self) {
-        if u64::from(self) < 0xE0 {
-            send_keybd_input(u64::from(self) as u16, false, false);
+        // todo : prob build a separate sc-code mechanism so dont have to do hacks like these
+        let (code, scNotVk)  = if KEY_SWAPS_MAP.contains_key(&self) { (*KEY_SWAPS_MAP.get(&self).unwrap(), true) } else { (u64::from(self), false) };
+        if code < 0xE0 {
+            send_keybd_input(code as u16, false, scNotVk);
         } else {
-            send_keybd_input(u64::from(self) as u16, false, true);
+            send_keybd_input(code as u16, false, true);
         }
     }
 
     /// Releases a given `KeybdKey`. This means the key would be in the up position.
     pub fn release(self) {
-        if u64::from(self) < 0xE0 {
-            send_keybd_input(u64::from(self) as u16, true, false);
+        let (code, scNotVk)  = if KEY_SWAPS_MAP.contains_key(&self) { (*KEY_SWAPS_MAP.get(&self).unwrap(), true) } else { (u64::from(self), false) };
+        if code < 0xE0 {
+            send_keybd_input(code as u16, true, scNotVk);
         } else {
-            send_keybd_input(u64::from(self) as u16, true, true);
+            send_keybd_input(code as u16, true, true);
         }
     }
 

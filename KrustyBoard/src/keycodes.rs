@@ -109,8 +109,8 @@ impl From<KbdKey> for u64 {
             CapsLock => 0x14,
             LShift => 0xA0,
             RShift => 0xA1,
-            LControl => 0xA2,
-            RControl => 0xA3,
+            LCtrl => 0xA2,
+            RCtrl => 0xA3,
             LAlt => 0xA4,
             RAlt => 0xA5,
             BrowserBack => 0xA6,
@@ -145,6 +145,10 @@ impl From<KbdKey> for u64 {
             ExtPgDn => 0xE051,
             ExtInsert => 0xE052,
             ExtDelete => 0xE053,
+
+            //RAlt => 0xE038,
+            //RCtrl => 0xE01D,
+            //RShift => 0xE036,
 
             OtherKey(code) => code,
         }
@@ -257,8 +261,8 @@ impl From<u64> for KbdKey {
             0x14 => CapsLock,
             0xA0 => LShift,
             0xA1 => RShift,
-            0xA2 => LControl,
-            0xA3 => RControl,
+            0xA2 => LCtrl,
+            0xA3 => RCtrl,
             0xA4 => LAlt,
             0xA5 => RAlt,
             0xA6 => BrowserBack,
@@ -293,6 +297,15 @@ impl From<u64> for KbdKey {
             0xE051 => ExtPgDn,
             0xE052 => ExtInsert,
             0xE053 => ExtDelete,
+
+            //0xE01D => RCtrl,
+            //0xE036 => RShift,
+            //0xE038 => RAlt,
+
+
+            // ugh maybe get scan codes from http://www.philipstorr.id.au/pcbook/book3/scancode.htm ..
+            // adn actually make a scandodes + vk table .. ?
+            // certainly for left-right ctrl/alt/shift/win those seem more reliable, plus show up in browser key-location in key-events
 
             _ => OtherKey(code),
         }
