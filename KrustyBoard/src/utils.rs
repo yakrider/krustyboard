@@ -14,7 +14,7 @@ pub mod brightness_ps_wmi {
             .map (|o| String::from_utf8(o.stdout).ok()) .flatten()
             .map (|s| s.lines().next().map(|s| s.to_owned().parse::<i32>().ok()).flatten()) .flatten();
 
-        let set_b_cmd = |v:i32| { Command::new(PS_LOC).arg(set_cmd(v)).spawn(); };
+        let set_b_cmd = |v:i32| { let _ = Command::new(PS_LOC).arg(set_cmd(v)).spawn(); };
         cur_b .iter() .for_each(|v| set_b_cmd((v + incr).abs()));
     }
 }
@@ -58,25 +58,25 @@ pub mod process_utils {
     static IDEA_LOC: &str = r#"C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2021.1.1\bin\idea64.exe"#;
 
     pub fn start_chrome() {
-        Command::new(APP_RUNNER_LOC).arg(CHROME_LOC).arg(r#"--profile-directory="Default""#) .spawn();
+        let _ = Command::new(APP_RUNNER_LOC).arg(CHROME_LOC).arg(r#"--profile-directory="Default""#) .spawn();
         setup_opened_window("Chrome");
     }
     pub fn start_chrome_incognito() {
-        Command::new(APP_RUNNER_LOC).arg(CHROME_LOC).arg(r#"--profile-directory="Default" -incognito"#) .spawn();
+        let _ = Command::new(APP_RUNNER_LOC).arg(CHROME_LOC).arg(r#"--profile-directory="Default" -incognito"#) .spawn();
         setup_opened_window("Chrome");
     }
 
     pub fn start_irfanview() {
-        Command::new(APP_RUNNER_LOC).arg(IRFAN_VIEW_LOC) .spawn();
+        let _ = Command::new(APP_RUNNER_LOC).arg(IRFAN_VIEW_LOC) .spawn();
         setup_opened_window("IrfanView");
     }
 
     pub fn start_winmerge_clipboard() {
-        Command::new(APP_RUNNER_LOC).arg(WINMERGE_LOC).arg("/clipboard-compare").spawn();
+        let _ = Command::new(APP_RUNNER_LOC).arg(WINMERGE_LOC).arg("/clipboard-compare").spawn();
     }
 
     pub fn start_idea_diff() {
-        Command::new(APP_RUNNER_LOC).arg(IDEA_LOC).arg("diff").spawn();
+        let _ = Command::new(APP_RUNNER_LOC).arg(IDEA_LOC).arg("diff").spawn();
     }
 
     fn setup_opened_window (win_class_part_match: &str) {
@@ -100,7 +100,9 @@ pub mod window_utils {
             PostMessageW, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK
         },
     };
-    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_RESTORE, WM_NCLBUTTONUP, WM_SYSCOMMAND};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, WM_NCLBUTTONUP, WM_SYSCOMMAND
+    };
 
     pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
         let hwnd = GetForegroundWindow();
@@ -140,7 +142,7 @@ pub mod window_utils {
     } }
 
 
-    pub fn win_fgnd_toggle_max () { unsafe {
+    pub fn win_fgnd_toggle_max () {
         // should in theory work by sending doubleclick at window titlebar (which works manually)
         //PostMessageW (GetForegroundWindow(), WM_NCLBUTTONDBLCLK, WPARAM(HTCAPTION as _), LPARAM(0));
         // ^^ except, for win32 windows, it works to max, but when already max it CLOSES them (coz it sends it at left-top icon?)
@@ -150,7 +152,7 @@ pub mod window_utils {
         // ^^ only maximizes not toggle, and no easy way to know if its maxed other than guessing from dimensions
         win_fgnd_toggle_max_guess();
         // ^^ so we'll finally just do it based on window rect dimensions .. should work for vast majority cases
-    } }
+    }
     fn win_fgnd_toggle_max_guess () { unsafe {
         let (scr_w, scr_h) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
         let (hwnd, r) = win_get_fgnd_rect();
@@ -165,6 +167,11 @@ pub mod window_utils {
         } else {
             PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MAXIMIZE as _), LPARAM(0));
         }
+    } }
+
+    pub fn win_fgnd_min () { unsafe {
+        let hwnd = GetForegroundWindow();
+        PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
     } }
 
 
@@ -188,9 +195,9 @@ pub mod window_utils {
         //super::brightness::incr_brightness(1);
         //enum_windows_test();
 
-        unsafe {
+        //unsafe {
             //
-        }
+        //}
 
     }
 

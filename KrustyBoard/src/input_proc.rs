@@ -22,10 +22,11 @@ const FAKE_EXTRA_INFO: usize = 0xFFC3D44F;
 static KEYBD_HHOOK: Lazy<AtomicPtr<HHOOK>> = Lazy::new(AtomicPtr::default);
 static MOUSE_HHOOK: Lazy<AtomicPtr<HHOOK>> = Lazy::new(AtomicPtr::default);
 
-static KEY_SWAPS_MAP: Lazy<HashMap<KbdKey,u64>> = Lazy::new ( || { [
-    (KbdKey::RAlt, 0xE038 as u64), (KbdKey::RCtrl, 0xE01D as u64) , (KbdKey::RShift, 0x0036 as u64),
-    (KbdKey::LAlt, 0x0038 as u64), (KbdKey::LCtrl, 0x001D as u64) , (KbdKey::LShift, 0x002A as u64)
-] .into_iter() .collect::<HashMap<KbdKey,u64>>() } );
+static KEY_SWAPS_MAP: Lazy<HashMap<KbdKey,u64>> = Lazy::new ( || {
+    [   (KbdKey::RAlt, 0xE038 as u64), (KbdKey::RCtrl, 0xE01D as u64) , (KbdKey::RShift, 0x0036 as u64),
+        (KbdKey::LAlt, 0x0038 as u64), (KbdKey::LCtrl, 0x001D as u64) , (KbdKey::LShift, 0x002A as u64)
+    ] .into_iter() .collect::<HashMap<KbdKey,u64>>()
+} );
 
 impl KbdKey {
     /// Returns true if a given `KeybdKey` is currently pressed (in the down position).
@@ -39,9 +40,12 @@ impl KbdKey {
 
     pub fn press(self) {
         // todo : prob build a separate sc-code mechanism so dont have to do hacks like these
-        let (code, scNotVk)  = if KEY_SWAPS_MAP.contains_key(&self) { (*KEY_SWAPS_MAP.get(&self).unwrap(), true) } else { (u64::from(self), false) };
+        let (code, sc_not_vk) = if KEY_SWAPS_MAP.contains_key(&self) {
+            ( *KEY_SWAPS_MAP.get(&self).unwrap(), true )
+        } else { ( u64::from(self), false ) };
+
         if code < 0xE0 {
-            send_keybd_input(code as u16, false, scNotVk);
+            send_keybd_input(code as u16, false, sc_not_vk);
         } else {
             send_keybd_input(code as u16, false, true);
         }
@@ -49,9 +53,12 @@ impl KbdKey {
 
     /// Releases a given `KeybdKey`. This means the key would be in the up position.
     pub fn release(self) {
-        let (code, scNotVk)  = if KEY_SWAPS_MAP.contains_key(&self) { (*KEY_SWAPS_MAP.get(&self).unwrap(), true) } else { (u64::from(self), false) };
+        let (code, sc_not_vk) = if KEY_SWAPS_MAP.contains_key(&self) {
+            ( *KEY_SWAPS_MAP.get(&self).unwrap(), true )
+        } else { ( u64::from(self), false ) };
+
         if code < 0xE0 {
-            send_keybd_input(code as u16, true, scNotVk);
+            send_keybd_input(code as u16, true, sc_not_vk);
         } else {
             send_keybd_input(code as u16, true, true);
         }

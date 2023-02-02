@@ -1,7 +1,6 @@
 use crate::common::*;
 use std::{thread::sleep, time::Duration};
 
-use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 pub enum BlockInput {
