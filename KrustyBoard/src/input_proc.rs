@@ -5,6 +5,7 @@ use std::{
     ptr::null_mut,
     sync::atomic::AtomicPtr,
 };
+use std::collections::LinkedList;
 use std::os::raw::c_int;
 
 use windows::Win32::{
@@ -364,4 +365,42 @@ fn send_keybd_input(key_code: u16, up_not_down:bool, sc_not_vk:bool) {
         }
     } ];
     unsafe { SendInput(&mut inputs, size_of::<INPUT>() as c_int) };
+}
+
+
+pub type KeyInputsStream = LinkedList <(u16, bool, bool)>; // (key-code, ev_is_up, sc_no_vk)
+
+pub fn send_keys (ks: LinkedList <(KbdKey,bool)>) {
+    let ks = ks .into_iter() .map ( |(key, is_up)| (u64::from(key) as u16, is_up, false) ) .collect::<KeyInputsStream>();
+    send_key_inputs_stream (&ks)
+}
+
+pub fn send_key_stream (ks: &crate::krusty::KeyStream) {
+    let ks = ks.events .iter() .map ( |ke| (u64::from(ke.key) as u16, ke.up_not_down, u64::from(ke.key) >= 0xE0) ) .collect::<KeyInputsStream>();
+    send_key_inputs_stream (&ks)
+}
+
+fn send_key_inputs_stream (ks:&KeyInputsStream) {
+    let mut inputs : Vec <INPUT> = Vec::new();
+    for (key_code, up_not_down, sc_not_vk) in ks {
+        let keyup_flag = if *up_not_down { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) };
+        let ext_key_flag = if *sc_not_vk && *key_code > 0xFF { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) };
+        let (w_vk, w_sc, sc_flag) = if *sc_not_vk {(0, *key_code, KEYEVENTF_SCANCODE)} else {(*key_code, 0, KEYBD_EVENT_FLAGS(0))};
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(w_vk),
+                    wScan: w_sc,
+                    dwFlags: ext_key_flag | sc_flag | keyup_flag,
+                    time: 0,
+                    dwExtraInfo: FAKE_EXTRA_INFO,
+                }
+            }
+        };
+        inputs.push(input);
+    }
+    unsafe {
+        let _ = SendInput ( &mut inputs[..], size_of::<INPUT>() as c_int );
+    }
 }

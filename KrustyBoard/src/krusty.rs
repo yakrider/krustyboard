@@ -3,7 +3,7 @@ mod mod_keys;
 
 use std::{time, time::Instant, cell::RefCell};
 use std::thread::{sleep, spawn};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
@@ -26,6 +26,60 @@ type CB  = Box <dyn Fn(KbdEvent) + Send + Sync + 'static> ;
 type AF  = Arc <dyn Fn() + Send + Sync + 'static> ;
 
 type Key = KbdKey ;
+
+
+
+# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+pub struct KeyEvent {
+    _private : (),
+    pub key: KbdKey,
+    pub up_not_down: bool
+}
+type KE = KeyEvent;
+
+impl KeyEvent {
+    pub fn press   (key:Key) -> KeyEvent { KeyEvent { _private:(), key, up_not_down:false } }
+    pub fn release (key:Key) -> KeyEvent { KeyEvent { _private:(), key, up_not_down:true  } }
+
+    pub fn ks (&self) -> KeyStream { KeyStream::from(*self) }
+}
+
+# [ derive (Debug, Default, Clone) ]
+pub struct KeyStream {
+    _private : (),
+    pub events   : LinkedList <KeyEvent>,
+}
+type KS = KeyStream;
+
+impl KeyStream {
+    pub fn empty() -> KS {
+        KS { _private: (), events: LinkedList::new() }
+    }
+    pub fn from (ke:KeyEvent) -> KS {
+        KS { _private: (), events: LinkedList::from([ke]) }
+    }
+    fn from_evs (events: LinkedList<KE>) -> KS {
+        KS { _private:(), events}
+    }
+    pub fn append_ke (&mut self, ke:KE) -> &mut KS {
+        self.events.push_back (ke); self
+    }
+    pub fn append_ks (&mut self, mut ks:KS) -> &mut KS {
+        self.events.append (&mut ks.events); self
+    }
+    pub fn send (&self) {
+        crate::input_proc::send_key_stream(self)
+    }
+}
+
+pub type KeyStreamGenerator = Arc <dyn Fn() -> KeyStream + Send + Sync + 'static>;
+type KSG = KeyStreamGenerator;
+
+fn empty_ksg() -> KSG { Arc::new(|| KS::empty())}
+
+
+
+
 
 
 //type KrS = Arc <KrustyState>;
@@ -905,6 +959,38 @@ pub fn setup_krusty_board () {
     //add_combo (&k, &k.cg(F12).m(alt), &k.cg(F19).m(lshift));
     //add_combo (&k, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
 
+    add_combo (&k, &k.cg(Backslash).m(lwin), &k.cg(F19).m(lshift));
+
+
+    fn get_test_keystream () -> LinkedList<(KbdKey,bool)> {
+        let mut ks : LinkedList<(KbdKey,bool)> = LinkedList::new();
+        ks.push_back ((A,false)); ks.push_back ((A,true)); ks.push_back ((B,false)); ks.push_back ((B,true)); ks.push_back ((C,false)); ks.push_back ((C,true));
+        ks.push_back ((D,false)); ks.push_back ((D,true)); ks.push_back ((E,false)); ks.push_back ((E,true)); ks.push_back ((F,false)); ks.push_back ((F,true));
+        ks.push_back ((A,false)); ks.push_back ((A,true)); ks.push_back ((B,false)); ks.push_back ((B,true)); ks.push_back ((C,false)); ks.push_back ((C,true));
+        ks.push_back ((D,false)); ks.push_back ((D,true)); ks.push_back ((E,false)); ks.push_back ((E,true)); ks.push_back ((F,false)); ks.push_back ((F,true));
+        ks.push_back ((A,false)); ks.push_back ((A,true)); ks.push_back ((B,false)); ks.push_back ((B,true)); ks.push_back ((C,false)); ks.push_back ((C,true));
+        ks.push_back ((D,false)); ks.push_back ((D,true)); ks.push_back ((E,false)); ks.push_back ((E,true)); ks.push_back ((F,false)); ks.push_back ((F,true));
+        ks.push_back ((A,false)); ks.push_back ((A,true)); ks.push_back ((B,false)); ks.push_back ((B,true)); ks.push_back ((C,false)); ks.push_back ((C,true));
+        ks.push_back ((D,false)); ks.push_back ((D,true)); ks.push_back ((E,false)); ks.push_back ((E,true)); ks.push_back ((F,false)); ks.push_back ((F,true));
+        ks.push_back ((Enter,false)); ks.push_back ((Enter,true));
+        ks
+    }
+    let tks = get_test_keystream();
+
+    add_bare_af_combo (&k, &k.cg(Numrow_0).m(caps).m(lalt), Arc::new (move || crate::send_keys(tks.clone())));
+
+    let ksg = k.ks.lshift.active_ksg(k.ks.lctrl.active_ksg(SMK::press_rel_ksg(F19)));
+    add_bare_af_combo (&k, &k.cg(Numrow_9).m(lalt), Arc::new (move || ksg().send()));
+
+    let ksg = k.ks.lshift.active_ksg(k.ks.lalt.active_ksg(SMK::press_rel_ksg(F19)));
+    add_bare_af_combo (&k, &k.cg(Numrow_8).m(lalt), Arc::new (move || ksg().send()));
+
+
+    // ^^ huh .. expected that to have much less (or even no) interleaving seen in results in key events printers in browser or ahk ..
+    // >   but it seems events sent in chunks like this still get interleaved somehow .. not clear where from, as the api docs clearly
+    // >   say that calls to this puts the block in thread eventstream w/o interleaving .. and were certainly making single call per keypress
+    // >   .. hmm, so maybe its higher layers themselves screwing up, though that seems unlikely too ..
+    // .. anyway .. so prob means for how not gonna move forwrd with this ,, maybe commit off to a branch so its there for reference
 
 
 

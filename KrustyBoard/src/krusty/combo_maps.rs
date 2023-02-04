@@ -1,6 +1,6 @@
 
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, LinkedList};
 
 use once_cell::sync::Lazy;
 
@@ -114,7 +114,10 @@ impl<'a> CG_K<'a> {
         cg_gen_combos (&self.k_mods, &self.modes, self.key)
     }
     pub fn gen_af (&self) -> AF {
-        cg_gen_af (&self.k_mods, key_utils::base_action(self.key), self.ks)
+        cg_gen_af (&self.k_mods, base_action(self.key), self.ks)
+    }
+    pub fn gen_ksg (&self) -> KSG {
+        cg_gen_ksg (&self.k_mods, SMK::press_rel_ksg(self.key), self.ks)
     }
 }
 
@@ -152,7 +155,6 @@ fn lrmk_smks (ks:&KrS) -> [&SMK;4] { [&ks.lctrl, &ks.lshift, &ks.lalt, &ks.lwin]
 fn mod_smk_pairs (ks:&KrS) -> [(MK, &SMK);6] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
     (lwin, &ks.lwin), (lalt, &ks.lalt), (lctrl, &ks.lctrl), (rctrl, &ks.rctrl), (lshift, &ks.lshift), (rshift, &ks.rshift),
 ] }
-
 
 
 
@@ -245,12 +247,44 @@ pub fn gen_consuming_af (k_mods:&Vec<MK>, af:AF, ks:&KrS) -> AF {
     af
 }
 
+pub fn gen_consuming_ksg (k_mods:&Vec<MK>, ksg:KSG, ks:&KrS) -> KSG {
+    let mc = |mk:MK| k_mods.contains(&mk) ;
+    let mut ksg = ksg;
+    mod_smk_pairs(ks) .iter() .for_each ( |(kmod,smk)| {
+        if mc(*kmod) { ksg = smk.keydn_consuming_ksg(ksg.clone()) }
+    });
+    ksg
+}
+
+
+pub fn cg_gen_ksg (k_mods:&Vec<MK>, ksg:KSG, ks:&KrS) -> KSG {
+    // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
+    let mc = |mk:MK| k_mods.contains(&mk) ;
+    let lr_zip = LR_MODS.iter() .zip(lrmk_smks(ks).into_iter()) .collect::<Vec<(&(MK,MK,MK),&SMK)>>();
+    let mut ksg = ksg;
+    lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
+        if mc(*lrmk) || mc(*lmk) || mc(*rmk) { ksg = smk.active_ksg(ksg.clone()); }
+        else { ksg = smk.inactive_ksg(ksg.clone()); }
+    });
+    Arc::new ( move || { ksg() } )
+}
+
+
 
 
 /// use this fn to register combos that will auto wrap activation/inactivation AFs around any mods in the combo
-pub fn add_combo (k:&Krusty, cgc:&CG_K, cga:&CG_K) {
+pub fn add_combo_old (k:&Krusty, cgc:&CG_K, cga:&CG_K) {
     // note that although the active/inactive will also mark mk keydn consumed, we only do that for L-keys, hence wrapping consuming AF too
     let af = gen_consuming_af (&cgc.k_mods, cga.gen_af(), &k.ks);
+    for c in cgc.gen_combos() {
+        //println! ("{:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cga.key, cga.mods );
+        k .combos_map .borrow_mut() .insert (c, af.clone());
+} }
+
+pub fn add_combo (k:&Krusty, cgc:&CG_K, cga:&CG_K) {
+    // note that although the active/inactive will also mark mk keydn consumed, we only do that for L-keys, hence wrapping consuming AF too
+    let ksg = gen_consuming_ksg (&cgc.k_mods, cga.gen_ksg(), &k.ks);
+    let af = Arc::new (move || ksg().send() );
     for c in cgc.gen_combos() {
         //println! ("{:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cga.key, cga.mods );
         k .combos_map .borrow_mut() .insert (c, af.clone());

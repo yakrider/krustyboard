@@ -305,7 +305,7 @@ impl SMK {
     }
     pub fn active_on_key (&self, key:Key) -> AF { self.active_action (key_utils::base_action(key)) }
     // ^^ some sugar to make common things simpler
-    
+
 
 
     /// use this to wrap actions ONLY when setting combos with this mod key itself AND we want the mod-key to be INACTIVE in the combo
@@ -338,6 +338,124 @@ impl SMK {
     }
     pub fn inactive_on_key (&self, key:Key) -> AF { self.inactive_action (key_utils::base_action(key)) }
     // ^^ some sugar to make common things simpler .. could add for ctrl etc too if there was use
+
+
+
+
+    pub fn press_ksg     (key:Key) -> KSG { Arc::new (move || KE::press  (key).ks()) }
+    pub fn release_ksg   (key:Key) -> KSG { Arc::new (move || KE::release(key).ks()) }
+    pub fn press_rel_ksg (key:Key) -> KSG { Arc::new (move || KE::press(key).ks() .append_ke (KE::release(key)).clone() ) }
+
+
+    fn masked_rel_ksg (&self) -> KSG {
+        // masking w unassigned key helps avoid/reduce focus loss to menu etc for alt/win
+        self.active.clear_if_set();
+        if !self.is_rel_masking() { SMK::release_ksg(self.key) } // note that this could be ctrl itself, which does non-masked release
+        else {
+            let smk = self.clone();
+            Arc::new ( move || {
+                KE::press(smk.mask()).ks() .append_ke(KE::release(smk.key)) .append_ke(KE::release(smk.mask())) .to_owned()
+        } ) }
+    }
+
+    fn reactivate_ksg (&self) -> KSG {
+        let smk = self.clone();
+        smk.active.set_if_clear();
+        Arc::new ( move || { KE::press(smk.key).ks() } )
+    }
+    fn paired_reactivate_ksg (&self) -> KSG {
+        let smk = self.clone();
+        Arc::new ( move || {
+            smk.pair.read().unwrap() .iter() .map (|p| p.reactivate_ksg()()) .nth(0) .unwrap_or(KS::empty())
+        } )
+    }
+
+    // we'll try an expt with masked re-activates to see if that can avoid having to do a delay before win reactivate
+    // --> nah didnt seem to make a difference
+    fn masked_reactivate_ksg (&self) -> KSG {
+        self.active.set_if_clear();
+        if !self.is_rel_masking() { self.consumed.set_if_clear(); SMK::press_ksg(self.key) }
+        else {
+            let smk = self.clone();
+            Arc::new ( move || {
+                let mut ks = KS::empty();
+                //ks.append_ke(KE::press(smk.mask())) .append_ke(KE::press(smk.key)) .append_ke(KE::release(smk.mask()));
+                ks.append_ke(KE::press(smk.mask())) .append_ke(KE::release(smk.mask()))
+                    .append_ke(KE::press(smk.mask()))
+                    .append_ke(KE::press(smk.key))
+                    .append_ke(KE::release(smk.mask()));
+                ks
+        } ) }
+    }
+    fn paired_masked_reactivate_ksg (&self) -> KSG {
+        let smk = self.clone();
+        Arc::new ( move || {
+            smk.pair.read().unwrap() .iter() .map (|p| p.masked_reactivate_ksg()()) .nth(0) .unwrap_or(KS::empty())
+        } )
+    }
+
+
+    ///
+    pub fn keydn_consuming_ksg (&self, ksg:KSG) -> KSG {
+        let smk = self.clone();
+        Arc::new ( move || { smk.consumed.set_if_clear(); ksg() } )
+    }
+
+    ///
+    pub fn active_ksg (&self, ksg:KSG) -> KSG {
+        let smk = self.clone();
+        let ksg = ksg.clone();
+        Arc::new ( move || {
+            smk.consumed.set_if_clear();
+            if smk.pair_any_active() { ksg() }
+            else { KE::press(smk.key).ks() .append_ks(ksg()) .append_ks(smk.masked_rel_ksg()()) .to_owned() }
+        })
+    }
+    pub fn active_on_key_ksg (&self, key:Key) -> KSG { self.active_ksg (SMK::press_rel_ksg(key)) }
+
+
+    /// use this to wrap actions ONLY when setting combos with this mod key itself AND we want the mod-key to be INACTIVE in the combo
+    /// .. e.g. if setting up alt-X to send win-y, we'd set lalt-mapping on Key::X as k.alt.inactive_action(k.win.inactive_on_key(Key::Y))
+    pub fn inactive_ksg (&self, ksg:KSG) -> KSG { // note that given our setup, this only gets called for left-side of LR mod keys
+        // in theory, we should be able to just do a masked release here, and that work for alt .. win however is finicky
+        // apparently win start menu triggers unless there's some timing gap between the masked release and another press
+        // .. and from quick expts apparently even 80ms is sometimes too little .. not sure if also machine dependent
+        let smk = self.clone();
+        Arc::new ( move || {
+            if !smk.pair_any_active() { ksg() }
+            else {
+                let mut ks = KeyStream::empty();
+                smk.consumed.set_if_clear();
+                if smk.active.check() { ks.append_ks(smk.masked_rel_ksg()()); }
+                if smk.paired_active() { smk.pair.read().unwrap() .iter() .for_each (|p| { ks.append_ks (p.masked_rel_ksg()()); } ) }
+                ks .append_ks(ksg());
+                //*
+                if !smk.is_rel_delaying() { // post release reactivation delays (for win)
+                    // basically any/both thats down is activated, but if none are down, still reactivate self (which is the left one)
+                    if smk.paired_down() { ks.append_ks (smk.paired_reactivate_ksg()()); } else { ks.append_ks(smk.reactivate_ksg()()); }
+                    if smk.down.check() && !smk.active.check() { ks.append_ks (smk.reactivate_ksg()()); }
+                    // ^^ if still not active from above when down, do it
+                } else {
+                    let smk = smk.clone(); // for the delay closure
+                    spawn ( move || {
+                        sleep(time::Duration::from_millis(100));
+                        // since we're delayed, we'll check if the modkeys are still down before reactivating
+                        if smk.down.check() { smk.reactivate() }
+                        if smk.paired_down() { smk.paired_reactivate() }
+                    } );
+                }//*/
+                // ^^ instead we'll try masked-reactivates but without delay
+                /*{ //naah, didnt work
+                    if smk.paired_down() && !smk.paired_active() { ks.append_ks (smk.paired_masked_reactivate_ksg()()); } //else { ks.append_ks(smk.masked_reactivate_ksg()()); }
+                    if smk.down.check() && !smk.active.check() { ks.append_ks (smk.masked_reactivate_ksg()()); }
+                    // ^^ if still not active from above when down, do it
+                }*/
+                ks
+        } } )
+    }
+    pub fn inactive_ksg_on_key (&self, key:Key) -> KSG { self.inactive_ksg (SMK::press_rel_ksg(key)) }
+    // ^^ some sugar to make common things simpler .. could add for ctrl etc too if there was use
+
 
 
 }
