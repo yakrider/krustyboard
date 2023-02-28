@@ -164,7 +164,7 @@ impl KbdKey {
     pub fn non_blocking_bind<F> (self, key_state: KbdEvntCbMapKeyType, callback: F)
         where F: Fn(KbdEvent) + Send + Sync + 'static,
     {
-        KEYBD_CALLBACKS.lock().unwrap().insert(
+        KEYBD_CALLBACKS.write().unwrap().insert(
             KbdEvntCbMapKey::from_key_state(self, key_state),
             KbdEvntCallback::NonBlockingCallback { cb: Arc::new(callback) }
         );
@@ -173,7 +173,7 @@ impl KbdKey {
     pub fn block_bind<F>(self, key_state: KbdEvntCbMapKeyType, callback: F)
         where F: Fn(KbdEvent) + Send + Sync + 'static,
     {
-        KEYBD_CALLBACKS.lock().unwrap().insert(
+        KEYBD_CALLBACKS.write().unwrap().insert(
             KbdEvntCbMapKey::from_key_state(self, key_state),
             KbdEvntCallback::BlockingCallback { cb : Arc::new(callback) }
         );
@@ -182,7 +182,7 @@ impl KbdKey {
     pub fn blockable_bind<F>(self, key_state: KbdEvntCbMapKeyType, callback: F)
         where F: Fn(KbdEvent) -> BlockInput + Send + Sync + 'static,
     {
-        KEYBD_CALLBACKS.lock().unwrap().insert(
+        KEYBD_CALLBACKS.write().unwrap().insert(
             KbdEvntCbMapKey::from_key_state(self, key_state),
             KbdEvntCallback::BlockableCallback { cb : Arc::new(callback) }
         );
@@ -190,7 +190,7 @@ impl KbdKey {
 
     pub fn unbind(self, key_state: KbdEvntCbMapKeyType) {
         let cb_map_key = KbdEvntCbMapKey::from_key_state(self, key_state);
-        KEYBD_CALLBACKS.lock().unwrap().remove(&cb_map_key);
+        KEYBD_CALLBACKS.write().unwrap().remove(&cb_map_key);
     }
 }
 
@@ -210,7 +210,7 @@ impl MouseButton {
     pub fn non_blocking_bind<F>(self, down_not_up:bool, callback: F)
         where F: Fn(MouseEvent) + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_btn_action(self, down_not_up),
             MouseEventCallback::NonBlockingCallback { cb : Arc::new(callback) }
         );
@@ -219,7 +219,7 @@ impl MouseButton {
     pub fn block_bind<F>(self, down_not_up:bool, callback: F)
         where F: Fn(MouseEvent) + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_btn_action(self, down_not_up),
             MouseEventCallback::BlockingCallback { cb : Arc::new(callback) }
         );
@@ -228,7 +228,7 @@ impl MouseButton {
     pub fn blockable_bind<F>(self, down_not_up:bool, callback: F)
         where F: Fn(MouseEvent) -> BlockInput + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_btn_action(self, down_not_up),
             MouseEventCallback::BlockableCallback { cb : Arc::new(callback) }
         );
@@ -236,7 +236,7 @@ impl MouseButton {
 
     pub fn unbind(self, down_not_up:bool) {
         let cb_map_key = MouseEventCbMapKey::for_btn_action(self, down_not_up);
-        MOUSE_CALLBACKS.lock().unwrap().remove(&cb_map_key);
+        MOUSE_CALLBACKS.write().unwrap().remove(&cb_map_key);
     }
 }
 
@@ -257,7 +257,7 @@ impl MouseWheel {
     pub fn non_blocking_bind<F>(self, fwd_not_bkwd:bool, callback: F)
         where F: Fn(MouseEvent) + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_wheel_action(self, fwd_not_bkwd),
             MouseEventCallback::NonBlockingCallback { cb : Arc::new(callback) }
         );
@@ -266,7 +266,7 @@ impl MouseWheel {
     pub fn block_bind<F>(self, fwd_not_bkwd:bool, callback: F)
         where F: Fn(MouseEvent) + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_wheel_action(self, fwd_not_bkwd),
             MouseEventCallback::BlockingCallback { cb : Arc::new(callback) }
         );
@@ -275,7 +275,7 @@ impl MouseWheel {
     pub fn blockable_bind<F>(self, fwd_not_bkwd:bool, callback: F)
         where F: Fn(MouseEvent) -> BlockInput + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_wheel_action(self, fwd_not_bkwd),
             MouseEventCallback::BlockableCallback { cb : Arc::new(callback) }
         );
@@ -283,7 +283,7 @@ impl MouseWheel {
 
     pub fn unbind(self, fwd_not_bkwd:bool) {
         let cb_map_key = MouseEventCbMapKey::for_wheel_action(self, fwd_not_bkwd);
-        MOUSE_CALLBACKS.lock().unwrap().remove(&cb_map_key);
+        MOUSE_CALLBACKS.write().unwrap().remove(&cb_map_key);
     }
 }
 
@@ -298,7 +298,7 @@ impl MousePointer {
     pub fn non_blocking_bind<F>(self, callback: F)
         where F: Fn(MouseEvent) + Send + Sync + 'static,
     {
-        MOUSE_CALLBACKS .lock() .unwrap() .insert(
+        MOUSE_CALLBACKS .write() .unwrap() .insert(
             MouseEventCbMapKey::for_pointer(),
             MouseEventCallback::NonBlockingCallback { cb : Arc::new(callback) }
         );
@@ -306,7 +306,7 @@ impl MousePointer {
 
     pub fn unbind(self) {
         let cb_map_key = MouseEventCbMapKey::for_pointer();
-        MOUSE_CALLBACKS.lock().unwrap().remove(&cb_map_key);
+        MOUSE_CALLBACKS.write().unwrap().remove(&cb_map_key);
     }
 }
 

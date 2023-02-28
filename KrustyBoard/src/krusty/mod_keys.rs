@@ -3,11 +3,33 @@ use std::{time};
 use std::thread::{sleep, spawn};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
+use once_cell::sync::OnceCell;
 
 
-use crate::{BlockInput, KbdEvntCbMapKeyType::*};
+use crate::{BlockInput, KbdEvntCbMapKeyType::*, krusty};
 
-use crate::krusty::*;
+use crate::krusty::{key_utils, combo_maps, Key, Flag, KrS, AF};
+
+
+
+
+# [ derive (Debug) ]
+pub struct CapsModKey {
+    // we've defined this just to be consistent with other mod-keys, but its really just a wrapper for caps key!
+    _private : (),
+    pub key  : Key,
+    pub down : Flag,
+}
+
+# [ derive (Debug, Clone) ]
+pub struct CMK (Arc<CapsModKey>);
+
+impl Deref for CMK {
+    type Target = CapsModKey;
+    fn deref(&self) -> &CapsModKey { &self.0 }
+}
+// NOTE rest of the impl for this further down
+
 
 
 
@@ -38,23 +60,20 @@ pub struct SyncdModKey {
     // this struct holds flags required for a outside-state syncd tracking of a modifier key (we only do this for alt and win)
     // the alt and win keys are now tracked identically and so doing this helps us avoid duplication of that bunch of related code
     // these flags track whether the key is down, if it has been sent out (active), and if we should release it masked (consumed)
-    _private : (),
+    _private     : (),
     pub key      : Key,
     pub down     : Flag,
     pub active   : Flag,
     pub consumed : Flag,
 
-    pub ks       : Arc<RwLock<Option<KrS>>>, // backlink for parent ks we'll try and populate later
     pub pair     : Arc<RwLock<Option<SMK>>>, // backlink to populate to the left/right counterpart if desired
-    // ^^ not the most ideal to have these cyclic backlinks, but its mostly for non-essential checking ctrl state to restore upon masked release etc
-    // >  either way, we'll populate it at krusty creation time, so is reliable anyway
+    // ^^ not the most ideal to have these cyclic backlinks, but we'll populate it at krusty creation time, so is reliable anyway
 }
 
 # [ derive (Debug, Clone) ]
 pub struct SMK (Arc<SyncdModKey>);
 // ^^ wrapping like this lets us impl functionality direclty on this cheaply clonable new-type to pass around
 // .. the alternate of making SyncdModKey clonable would be more costly as it would clone each of the underlying flags
-
 
 // and we'll impl deref on it so we dont have to keep using smk.0.<bla-bla> etc .. and its kosher as its underlying is Arc anyway
 impl Deref for SMK {
@@ -63,6 +82,63 @@ impl Deref for SMK {
 }
 // NOTE:  the impl for the actual SMK functionality is further down
 
+
+
+
+
+impl CMK {
+
+    // ^^ CMK : Caps-Modifier-Key type .. basically tracks caps state and sets up caps as the global Layer-2/3/qks etc modifier key
+    // (other mod-keys are via SMK (Syncd-Tracked modifier key: alt/win)  or TMK (Tracked modifier keys: ralt/lctrl/rctrl/lshift/rshift))
+
+    pub fn instance () -> CMK {
+        // note that since ofc there's only one caps key, we'll set this up as singleton (unlike for the TMKs and SMKs below)
+        static INSTANCE: OnceCell<CMK> = OnceCell::new();
+        INSTANCE .get_or_init (||
+            CMK ( Arc::new ( CapsModKey {
+                _private : (),
+                key      : Key::CapsLock,
+                down     : Flag::default(),
+            } ) )
+        ).clone()
+    }
+
+    pub fn setup_tracking (&self, ksr:&KrS) {
+        // note that for caps, we completely block it from ever being sent up, and just manage internally
+        if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
+            key_utils::press_release (Key::CapsLock);
+        }
+
+        let ks = ksr.clone();
+        Key::CapsLock.block_bind(KeyDownCallback, move |_| {
+            if !ks.caps.down.check() {
+                // capslock can come as repeats like other mod keys .. this was a fresh one
+                ks.caps.down.set();
+                ks.is_wheel_spin_invalidated.set_if_clear();
+                // lets notify the synced tracked mod keys, so they can invalidate/release themselves
+                combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_down());
+            }
+            if ks.mouse_left_btn_down.check() && !ks.in_managed_ctrl_down_state.check() {
+                ks.in_managed_ctrl_down_state.set();
+                ks.lctrl.ensure_active();
+            }
+        });
+
+        let ks = ksr.clone();
+        Key::CapsLock.block_bind(KeyUpCallback, move |_| {
+           ks.caps.down.clear_if_set();
+            if ks.in_managed_ctrl_down_state.check() {
+                ks.in_managed_ctrl_down_state.clear();
+                ks.lctrl.ensure_inactive();
+            }
+            // the following isnt strictly necessary, but useful in case some keyup falls through
+            ks.clear_mode_flags();
+            // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
+            combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_release());
+        });
+    }
+
+}
 
 
 
@@ -129,15 +205,10 @@ impl SMK {
             down     : Flag::default(),
             active   : Flag::default(),
             consumed : Flag::default(),
-            ks       : Arc::new(RwLock::new(None)),
             pair     : Arc::new(RwLock::new(None)),
         } ) )
     }
 
-
-    pub fn link_parent (&self, ks:&KrS ) {
-        let _ = self.ks.write().unwrap() .insert (ks.clone());
-    }
 
     pub fn link_pair (&self, smk:&SMK) {
         let _ = self.pair.write().unwrap() .insert (smk.clone());
@@ -160,7 +231,7 @@ impl SMK {
             // and since we can have caps come in after the mod-key is already down, we'll have to capture disparity states ..
             //  .. as well as restoring them when either caps/alt gets released etc
             // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
-            if ks.caps_down.check() {
+            if ks.caps.down.check() {
                 // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
                 smk.down.set_if_clear();
                 smk.consumed.clear_if_set();
@@ -182,7 +253,7 @@ impl SMK {
             // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
             // else if win was consumed, we release with mask, else we can actually pass it through unblocked
             smk.down.clear_if_set();
-            if !smk.active.check() || ks.caps_down.check() {
+            if !smk.active.check() || ks.caps.down.check() {
                 // if inactive or caps-down we just suppress this keyup
             } else {
                 if smk.is_keyup_unified() && smk.paired_down() {

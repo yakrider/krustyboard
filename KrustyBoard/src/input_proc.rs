@@ -36,32 +36,17 @@ impl KbdKey {
 
     /// Presses a given `KeybdKey`. Note: this means the key will remain in the down
     /// position. You must manually call release to create a full 'press'.
-
-
-    pub fn press(self) {
-        // todo : prob build a separate sc-code mechanism so dont have to do hacks like these
-        let (code, sc_not_vk) = if KEY_SWAPS_MAP.contains_key(&self) {
-            ( *KEY_SWAPS_MAP.get(&self).unwrap(), true )
-        } else { ( u64::from(self), false ) };
-
-        if code < 0xE0 {
-            send_keybd_input(code as u16, false, sc_not_vk);
-        } else {
-            send_keybd_input(code as u16, false, true);
-        }
-    }
+    pub fn press(self) { self.send_key_event(false) }
 
     /// Releases a given `KeybdKey`. This means the key would be in the up position.
-    pub fn release(self) {
-        let (code, sc_not_vk) = if KEY_SWAPS_MAP.contains_key(&self) {
-            ( *KEY_SWAPS_MAP.get(&self).unwrap(), true )
-        } else { ( u64::from(self), false ) };
+    pub fn release(self) { self.send_key_event(true) }
 
-        if code < 0xE0 {
-            send_keybd_input(code as u16, true, sc_not_vk);
-        } else {
-            send_keybd_input(code as u16, true, true);
-        }
+    fn send_key_event (self, ev_is_up:bool) {
+        // todo : prob build a separate sc-code mechanism so dont have to do hacks like these
+        let (code, sc_not_vk) = KEY_SWAPS_MAP .get(&self) .map (|c| (*c, true))
+            .or (Some((u64::from(self), false))) .map (|(c,b)| (c, b || c >= 0xE0)) .unwrap();
+
+        send_keybd_input(code as u16, ev_is_up, sc_not_vk);
     }
 
     /// Returns true if a keyboard key which supports toggling (ScrollLock, NumLock,
@@ -142,10 +127,10 @@ impl MouseWheel {
 
 /// Starts listening for bound input events.
 pub fn handle_input_events() {
-    if !MOUSE_CALLBACKS.lock().unwrap().is_empty() {
+    if !MOUSE_CALLBACKS.read().unwrap().is_empty() {
         set_hook(WH_MOUSE_LL, &*MOUSE_HHOOK, mouse_proc);
     };
-    if !KEYBD_CALLBACKS.lock().unwrap().is_empty() {
+    if !KEYBD_CALLBACKS.read().unwrap().is_empty() {
         set_hook(WH_KEYBOARD_LL, &*KEYBD_HHOOK, keybd_proc);
     };
     // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
@@ -166,7 +151,7 @@ fn keybd_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 
-    if KEYBD_CALLBACKS.lock().unwrap().is_empty() {
+    if KEYBD_CALLBACKS.read().unwrap().is_empty() {
         unset_hook(&*KEYBD_HHOOK);
         return return_call();
     }
@@ -192,7 +177,7 @@ fn keybd_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     let key = KbdKey::from(u64::from(kb_struct.vkCode));
     let cb_lookup_key = KbdEvntCbMapKey::from_key_state(key, KbdEvntCbMapKeyType::from_key_down_state(ev_is_key_down));
 
-    if let Some (cbv) = KEYBD_CALLBACKS.lock().unwrap().get(&cb_lookup_key) {
+    if let Some (cbv) = KEYBD_CALLBACKS.read().unwrap().get(&cb_lookup_key) {
         let kbd_event = KbdEvent { event, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32 };
         //println!("{:?}", kbd_event);
         match cbv {
@@ -229,7 +214,7 @@ fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 
-    if MOUSE_CALLBACKS.lock().unwrap().is_empty() {
+    if MOUSE_CALLBACKS.read().unwrap().is_empty() {
         unset_hook(&*MOUSE_HHOOK);
         return return_call();
     }
@@ -278,7 +263,7 @@ fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         _ => None,
     } {
         //{ let ec = event.clone(); spawn(move || println!("{:?}", ec)); }   // for debug
-        if let Some(cbv) = MOUSE_CALLBACKS.lock().unwrap().get(&lookup_key) {
+        if let Some(cbv) = MOUSE_CALLBACKS.read().unwrap().get(&lookup_key) {
             match cbv {
                 MouseEventCallback::NonBlockingCallback {cb} => {
                     let cb = Arc::clone(cb);

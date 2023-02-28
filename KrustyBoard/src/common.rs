@@ -7,6 +7,7 @@ pub use std::{
     thread::spawn,
 };
 use std::fmt;
+use std::sync::RwLock;
 
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -55,7 +56,7 @@ pub enum KbdEvntCallback {
 
 pub type KbdEvntCbMap = HashMap <KbdEvntCbMapKey, KbdEvntCallback>;
 
-pub static KEYBD_CALLBACKS: Lazy<Mutex<KbdEvntCbMap>> = Lazy::new(|| Mutex::new(KbdEvntCbMap::new()));
+pub static KEYBD_CALLBACKS: Lazy<RwLock<KbdEvntCbMap>> = Lazy::new(|| RwLock::new(KbdEvntCbMap::new()));
 
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -169,4 +170,4 @@ impl fmt::Debug for MouseEventCallback {
 
 pub type MouseEventCbMap = HashMap <MouseEventCbMapKey, MouseEventCallback>;
 
-pub static MOUSE_CALLBACKS: Lazy<Mutex<MouseEventCbMap>> = Lazy::new(|| Mutex::new(MouseEventCbMap::new()));
+pub static MOUSE_CALLBACKS: Lazy<RwLock<MouseEventCbMap>> = Lazy::new(|| RwLock::new(MouseEventCbMap::new()));

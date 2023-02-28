@@ -25,12 +25,21 @@ pub type MK = ModKey;
 # [ allow (non_camel_case_types) ]
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
 pub enum ModeState {
-    sel, del, word, fast, qks, qks2, qks3, rght_ms_scrl, mngd_ctrl_dn
+    sel, del, word, fast, qks, qks1, qks2, qks3, rght_ms_scrl, mngd_ctrl_dn
 }
 
 
+static L2_MODES:   Lazy <HashSet <ModeState>> = Lazy::new (||
+    [sel, del, word, fast] .into_iter() .collect()
+);
+static QKS_MODES:   Lazy <HashSet <ModeState>> = Lazy::new (||
+    [qks, qks1, qks2, qks3] .into_iter() .collect()
+);
+static CAPS_MODES: Lazy <HashSet <ModeState>> = Lazy::new (||
+    [sel, del, word, fast, qks, qks1, qks2, qks3, rght_ms_scrl] .into_iter() .collect()
+);
 
-static K_MOD_IDXS: Lazy<HashMap<ModKey,usize>> = Lazy::new ( || {
+static K_MOD_IDXS: Lazy <HashMap <ModKey,usize>> = Lazy::new ( || {
     ModKey::iter() .enumerate() .map (|(i,x)| (x, i)) .collect()
 } );
 
@@ -39,9 +48,42 @@ static MODE_IDXS : Lazy<HashMap<ModeState,usize>> = Lazy::new ( || {
 } );
 
 
+pub const COMBO_STATE_N_BITS: usize = 23;
+// ^^ 13 mod keys from above list, 4+4+2=10 for modes from above list (sel/del/word/fast, qks/qks1/qks2/qks3, rght-ms-scrl/mngd-ctrl-dn)
 
-pub const COMBO_STATE_N_BITS: usize = 22;
-// ^^ 9 mod keys, 4 for lr-(alt/win/shift/ctrl), 4+3+2 for modes (sel/del/word/fast, qks/qks2/qks3, rght-ms-scrl/mngd-ctrl-dn)
+
+pub static LR_MODS : [(MK,MK,MK);4] = [
+    (ctrl,  lctrl,  rctrl),
+    (shift, lshift, rshift),
+    (alt,   lalt,   ralt),
+    (win,   lwin,   rwin),
+];
+// note ^^ this order is relied on elsewhere, plus we want the fn composition to have ctrl innermost (if we use ctrl masking, which we dont anymore)
+// .. and the successive wrapping means the first one on this list is innermost .. and so its state will be updated with others masking
+// also, we'd rather have win at the end here (and wrap outermost), because that has a spawn and delay in reactivation .. still ok but still
+
+
+// this will give the SMKs in order defined at LR_MODS so they can be matched up at runtime
+fn lrmk_smks (ks:&KrS) -> [&SMK;4] { [&ks.lctrl, &ks.lshift, &ks.lalt, &ks.lwin] }
+
+
+pub fn mod_smk_pairs (ks:&KrS) -> [(MK, &SMK);6] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
+    (lwin, &ks.lwin), (lalt, &ks.lalt), (lctrl, &ks.lctrl), (rctrl, &ks.rctrl), (lshift, &ks.lshift), (rshift, &ks.rshift),
+] }
+
+pub fn l2_mode_flag_pairs (ks:&KrS) -> [(ModeState, &Flag);4] { [
+    (sel, &ks.l2_sel_mode_key_down), (del,  &ks.l2_del_mode_key_down), (word, &ks.l2_word_mode_key_down), (fast, &ks.l2_fast_mode_key_down),
+] }
+pub fn qks_mode_flag_pairs (ks:&KrS) -> [(ModeState, &Flag);4] { [
+    (qks, &ks.qks_mode_key_down),    (qks1, &ks.qks1_mode_key_down),   (qks2, &ks.qks2_mode_key_down),    (qks3, &ks.qks3_mode_key_down),
+] }
+pub fn mode_flag_pairs (ks:&KrS) -> [(ModeState, &Flag);8] { [
+    (sel, &ks.l2_sel_mode_key_down), (del,  &ks.l2_del_mode_key_down), (word, &ks.l2_word_mode_key_down), (fast, &ks.l2_fast_mode_key_down),
+    (qks, &ks.qks_mode_key_down),    (qks1, &ks.qks1_mode_key_down),   (qks2, &ks.qks2_mode_key_down),    (qks3, &ks.qks3_mode_key_down),
+] }
+
+
+
 
 
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
@@ -50,7 +92,6 @@ pub struct Combo {
     pub key : Key,
     pub state : [bool; COMBO_STATE_N_BITS],
 }
-
 
 
 impl Combo {
@@ -66,7 +107,7 @@ impl Combo {
 
         // and populate the mode states that are specified too
         modes .iter() .for_each (|mode| {
-            MODE_IDXS .get(mode) .iter() .for_each (|i| { state[13 + **i] = true; })
+            MODE_IDXS .get(mode) .iter() .for_each (|i| { state[K_MOD_IDXS.len() + **i] = true; })
         });
 
         Combo {_private:(), key, state }
@@ -99,7 +140,6 @@ pub struct CG_AF<'a> {
 }
 
 
-
 impl<'a> CG_K<'a> {
     pub fn new (key:Key, ks:&KrS) -> CG_K {
         CG_K { _private:(), ks, k_mods:Vec::new(), modes:Vec::new(), key }
@@ -114,7 +154,7 @@ impl<'a> CG_K<'a> {
         cg_gen_combos (&self.k_mods, &self.modes, self.key)
     }
     pub fn gen_af (&self) -> AF {
-        cg_gen_af (&self.k_mods, key_utils::base_action(self.key), self.ks)
+        cg_gen_af (&self.k_mods, base_action(self.key), self.ks)
     }
 }
 
@@ -134,95 +174,66 @@ impl<'a> CG_AF<'a> {
 
 
 
-pub static LR_MODS : [(MK,MK,MK);4] = [
-    (ctrl,  lctrl,  rctrl),
-    (shift, lshift, rshift),
-    (alt,   lalt,   ralt),
-    (win,   lwin,   rwin),
-];
-// note ^^ this order is relied on elsewhere, plus we want the fn composition to have ctrl innermost (as others use ctrl masking)
-// .. and the successive wrapping means the first one on this list is innermost .. and so it state will be updated with others masking
-// also, we'd rather have win at the end here (and wrap outermost), because that has a spawn and delay in reactivation .. still ok but still
-
-
-// this will give the SMKs in order defined at LR_MODS so they can be matched up at runtime
-fn lrmk_smks (ks:&KrS) -> [&SMK;4] { [&ks.lctrl, &ks.lshift, &ks.lalt, &ks.lwin] }
-
-
-fn mod_smk_pairs (ks:&KrS) -> [(MK, &SMK);6] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
-    (lwin, &ks.lwin), (lalt, &ks.lalt), (lctrl, &ks.lctrl), (rctrl, &ks.rctrl), (lshift, &ks.lshift), (rshift, &ks.rshift),
-] }
-
-
-
 
 /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
 pub fn gen_cur_combo (key:Key, ks:&KrS) -> Combo {
-
-    // we'll match up all the flags for the mod keys and put them into our mods vec to gen combo
-    let mut mods : Vec<MK> = Vec::new();
-
-    [lwin, lalt, lshift, rshift, lctrl, rctrl, ralt, caps] .to_vec() .iter() .zip (
-        [&ks.lwin.down, &ks.lalt.down, &ks.lshift.down, &ks.rshift.down,
-            &ks.lctrl.down, &ks.rctrl.down, &ks.ralt.down, &ks.caps_down] .to_vec() .iter()
-    ) .collect::<Vec<(&MK,&&Flag)>>() .iter() .for_each ( |(mk, b)| { if b.check() { mods.push(**mk); } } );
-
-    // also populate the mode states
+    // we'll match up all the flags for the mod-keys and mode-states and put them into our mods vec to gen combo
+    // (note that ordering does not matter here .. bitmap indices will be looked up for each key to set the correct combo-bitmap bit)
+    let mut mks : Vec<MK> = Vec::new();
     let mut modes : Vec<ModeState> = Vec::new();
-    [sel, del, word, fast, qks, qks2, qks3] .to_vec() .iter() .zip (
-        [ &ks.l2_sel_mode_key_down, &ks.l2_del_mode_key_down, &ks.l2_word_mode_key_down, &ks.l2_fast_mode_key_down,
-            &ks.qks_mode_key_down, &ks.qks2_mode_key_down, &ks.qks3_mode_key_down
-        ] .to_vec() .iter()
-    ) .collect::<Vec<(&ModeState,&&Flag)>>() .iter() .for_each ( |(ms, b)| {
-        if b.check() && mods.len()==1 && mods.contains(&caps) { modes.push(**ms); }
-    } ); // ^^ note that these modes can only be on when caps is the only mod down
 
-    // finally lets add the two other non-mode like global flag states too
+    // lets add the lone TMK mod-key (ralt) state
+    if ks.ralt.down.check() { mks.push (ralt) }
+
+    // and add in all the SMK mod-key states
+    mod_smk_pairs(ks) .iter() .for_each (|(kmod,smk)| { if smk.down.check() { mks.push (*kmod) } });
+
+    // and populate all the mode states (and the caps that they require)
+    // (note that these modes are active when caps is down, regardless of any other modkey state!)
+    if ks.caps.down.check() {
+        mks.push (caps);
+        mode_flag_pairs(ks) .iter() .for_each (|(ms,mf)| { if mf.check() { modes.push (*ms) } });
+    }
+    // finally lets add the two other non-mode global flag states too
     if ks.in_right_btn_scroll_state.check()  { modes.push (rght_ms_scrl) }
     if ks.in_managed_ctrl_down_state.check() { modes.push (mngd_ctrl_dn) }
-    Combo::new(key, &mods as &[ModKey], &modes as &[ModeState])
+
+    Combo::new(key, &mks as &[ModKey], &modes as &[ModeState])
 }
 
 
 
-fn fan_lrmk (k_mods:&Vec<MK>, lrmk:&MK, lmk:&MK, rmk:&MK) -> Vec<Vec<MK>> {
+fn fan_lrmk (k_mods:Vec<MK>, lrmk:&MK, lmk:&MK, rmk:&MK) -> Vec<Vec<MK>> {
     // if a mod vec had this l/r mod (e.g. Alt), we'll instead gen three mod vecs having (LAlt, RAlt, LAlt && RAlt)
     let mut mvs: Vec<Vec<MK>> = Vec::new();
     if k_mods.contains(lrmk) {
-        let others = k_mods.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .map (|m| *m) .collect::<Vec<MK>>();
-        let (mut va, mut vb, mut vab) : (Vec<MK>,Vec<MK>,Vec<MK>) = (Vec::new(), Vec::new(), Vec::new());
-        va.append(&mut others.clone()); vb.append(&mut others.clone()); vab.append(&mut others.clone());
-        va.push(*lmk); vb.push(*rmk); vab.push(*lmk); vab.push(*rmk);
-        mvs.push(va); mvs.push(vb); mvs.push(vab);
+        let mut vlr = k_mods.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .map (|m| *m) .collect::<Vec<MK>>();
+        let (mut vl, mut vr) = (vlr.clone(), vlr.clone());
+        vl.push(*lmk); vr.push(*rmk); vlr.push(*lmk); vlr.push(*rmk);
+        mvs.push(vl); mvs.push(vr); mvs.push(vlr);
     } else {
-        mvs.push(k_mods.clone())
+        mvs.push(k_mods)
     }
     mvs
 }
-
-fn fan_lrmks (mvs: &Vec<Vec<MK>>, lrmk:&MK, lmk:&MK, rmk:&MK) -> Vec<Vec<MK>> {
-    // this just does the fan_lrmk above for each of the expanded mods-vec in the vec-of-vecs
-    let mut mvsf : Vec<Vec<MK>> = Vec::new();
-    mvs .iter() .for_each (|mv| {
-       fan_lrmk (mv, lrmk, lmk, rmk) .iter() .for_each (|mv| mvsf.push(mv.clone()));
-    });
-    mvsf
-}
-
-fn fan_lr (k_mods:&Vec<MK>) -> Vec<Vec<MK>> {
-    // we'll expand out this mod-vec into vec-of-vec with all L/R optional mods expanded into piles of L/R/L+R mod-vecs
-    let mut mvsf : Vec<Vec<MK>> = Vec::new();
-    mvsf.push(k_mods.clone());
-    LR_MODS .iter() .for_each (|(lrmk, lmk, rmk)| {
-        mvsf = fan_lrmks (&mvsf, lrmk, lmk, rmk);
+fn fan_lr (k_mods:Vec<MK>) -> Vec<Vec<MK>> {
+    // we'll expand out this mod-vec into vec-of-vec with all L/R optional mods fanned out into piles of L/R/L+R mod-vecs
+    let mut mvs : Vec<Vec<MK>> = Vec::new();
+    mvs.push(k_mods);      // prepare seed vec-of-vec with initial mods-vec
+    LR_MODS .iter() .for_each ( |(lrmk, lmk, rmk)| {
+        // expand repeatedly for each lrmk, consuming the list and replacing with expanded version (w/o cloning)
+        mvs = mvs .drain(..) .flat_map (|mv| fan_lrmk(mv, lrmk, lmk, rmk)) .collect();
     } );
-    mvsf
+    mvs
 }
-
 
 
 pub fn cg_gen_combos (k_mods:&Vec<MK>, modes:&Vec<ModeState>, key:Key) -> Vec<Combo> {
-    fan_lr(k_mods) .iter() .map(|mv| {Combo::new (key, &mv[..], modes)}) .collect::<Vec<Combo>>()
+    let is_qk = modes .iter() .any (|m| CAPS_MODES.contains(m));
+    let mut kms = k_mods.clone();
+    if is_qk && !kms.contains(&caps) { kms.push(caps); }
+    // ^^ we'll auto add caps to any caps based modes (for easier setup)
+    fan_lr(kms) .iter() .map(|mv| {Combo::new (key, &mv[..], modes)}) .collect::<Vec<Combo>>()
 }
 
 pub fn cg_gen_af (k_mods:&Vec<MK>, af:AF, ks:&KrS) -> AF {
@@ -296,18 +307,45 @@ pub fn get_combo_af_gen_for_key (k:&Krusty, key:Key) -> CAFG {
 
 
 /// note: registering a mode key auto sets their caps-only action to nothing, others combos can be set as usual
-pub fn register_mode_key (k: &Krusty, key:Key, mode_flag:&Flag) {
-    k .mode_keys_map .borrow_mut() .insert(key, mode_flag.clone());
-    //add_af_combo_bare (k, k.cg(key).m(MK::caps).s(ms), &no_action());
-    // ^^ not adequate as we'll have all sorts of mode combinations .. better to just disable it in runtime fallbacks
+pub fn register_mode_key (k: &Krusty, key:Key, ms:ModeState) {
+
+    // registering is simply putting an entry into mod-keys-map .. (we could make multiple keys trigger same mode too!)
+    k .mode_keys_map .borrow_mut() .insert(key, ms);
+
+    //add_bare_af_combo (k, k.cg(key).m(caps).s(ms), no_action());
+    // ^^ not adequate as we'll have multi-mode and multi-modkey combos .. better to just disable it in runtime fallbacks
+
+    // however, we can add in some replacement actions here .. basically ralt w/ those can give the expected w/caps actions
+    add_combo (&k, &k.cg(key).s(ms).m(ralt),           &k.cg(key).m(lctrl));
+    add_combo (&k, &k.cg(key).s(ms).m(ralt).m(lalt),   &k.cg(key).m(lctrl).m(lalt));
+    add_combo (&k, &k.cg(key).s(ms).m(ralt).m(lshift), &k.cg(key).m(lctrl).m(lshift));
+    add_combo (&k, &k.cg(key).s(ms).m(ralt).m(lwin),   &k.cg(key).m(lctrl).m(lwin));
+
 }
+
 
 /// if the key is registered as mode keys, this will generate  (is_mode_key, key-dn, key-up) mode-flag setting actions
 fn gen_mode_key_actions (k:&Krusty, key:Key) -> (bool, AF,AF) {
-    if let Some(cmfr) = k.mode_keys_map.borrow().get(&key) {
-        let (cmf_c1, cmf_c2) = (cmfr.clone(), cmfr.clone()); // gotta clone to move into AF
-        return (true, Arc::new (move || cmf_c1.set_if_clear()), Arc::new (move || cmf_c2.clear_if_set()) )
-    } // ^^ key-dn and key-up caret-mode-actions for a caret-mode-key is to set and clear its mode-flag
+    if let Some(ms) = k.mode_keys_map.borrow().get(&key) {
+        if let Some((_, mf)) = mode_flag_pairs(&k.ks) .iter() .find (|(msr,_)| *msr == *ms) {
+            let (is_l2, is_qks) = (L2_MODES.contains(ms), QKS_MODES.contains(ms));
+            // on key-down, we'll want to set its mode flag, but also collective flags if applicable so we runtime checks are reduced
+            let (mfc, ks) = ((*mf).clone(), k.ks.clone());
+            let keydn_action = Arc::new (move || {
+                mfc.set_if_clear(); ks.some_caps_mode_active.set_if_clear();
+                if is_l2  { ks.some_l2_mode_active.set_if_clear() }
+                if is_qks { ks.some_qks_mode_active.set_if_clear() }
+            });
+            // and on key-up, we'll want to clear its flag, and any collective flags if applicable too
+            let (mfc, ks) = ((*mf).clone(), k.ks.clone());
+            let keyup_action = Arc::new (move || {
+                mfc.clear_if_set();
+                if is_qks && qks_mode_flag_pairs(&ks).iter().all(|(_,mf)| !mf.check()) { ks.some_qks_mode_active.clear_if_set() }
+                if is_l2  &&  l2_mode_flag_pairs(&ks).iter().all(|(_,mf)| !mf.check()) { ks.some_l2_mode_active .clear_if_set() }
+                if !ks.some_qks_mode_active.check() && !ks.some_l2_mode_active.check() { ks.some_caps_mode_active.clear_if_set() }
+            });
+            return (true, keydn_action, keyup_action)
+    } }
     (false, no_action(), no_action()) // empty (dn,up) mode-flag-actions for non-mode keys
 }
 
@@ -315,19 +353,19 @@ fn gen_mode_key_actions (k:&Krusty, key:Key) -> (bool, AF,AF) {
 
 
 type BFK = Box <dyn Fn(Key)>;
-fn wrapped_bfn (wk:Key, kbf:BFK) -> BFK {
-    Box::new ( move |key:Key| { wk.press(); kbf(key); wk.release(); } )
+fn wrapped_bfn (wk:Key, bfk:BFK) -> BFK {
+    Box::new ( move |key:Key| { wk.press(); bfk(key); wk.release(); } )
 }
 fn caps_fallback_action_fn (key:Key, ks:&KrS) {
     // if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
     // however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary
-    let mut kf : BFK = Box::new(|key:Key| press_release(key));
-    // ^^ stable rust doesnt let me use existential/dyn stuff in vars to wrap progressively, so use boxes at minimal cost
-    if ks.caps_down.check() || ks.some_ctrl_down()  { kf = wrapped_bfn (Key::LCtrl, kf) }
-    if ks.ralt.down.check() || ks.some_shift_down() { kf = wrapped_bfn (Key::LShift, kf) }
-    if ks.lalt.down.check() { kf = wrapped_bfn (Key::LAlt, kf) }
-    if ks.some_win_down()   { kf = wrapped_bfn (Key::LWin, kf) }
-    kf(key);
+    let mut bfk: BFK = Box::new(|key:Key| press_release(key));
+    // ^^ stable rust doesnt let me use existential/dyn stuff in vars to wrap progressively, so use boxes at some minimal cost
+    if ks.caps.down.check() || ks.some_ctrl_down()  { bfk = wrapped_bfn (Key::LCtrl, bfk) }
+    if ks.ralt.down.check() || ks.some_shift_down() { bfk = wrapped_bfn (Key::LShift, bfk) }
+    if ks.lalt.down.check() { bfk = wrapped_bfn (Key::LAlt, bfk) }
+    if ks.some_win_down()   { bfk = wrapped_bfn (Key::LWin, bfk) }
+    bfk(key);
 }
 
 fn compose_action_maps_cb (k:&Krusty, key:Key) -> (CB, CB) {
@@ -336,14 +374,25 @@ fn compose_action_maps_cb (k:&Krusty, key:Key) -> (CB, CB) {
     let ks = k.ks.clone();
     let cb_dn = Box::new ( move |_| {
         // note that we're ^^ ignoring the KbdEvent passed in (it'd have KbdEventType and key vk/sc codes)
-        cma_dn();
+        cma_dn();   // must always do mode-flag registration if any
         if let Some(cmaf) = cmafg (&gen_cur_combo(key,&ks)) {
-            cmaf();  // yay found combo match!
-        } else if ks.only_caps_mod_key_down() && (is_cmk || ks.some_qks_mode_key_down()) {
-            // during quick-keys modes, or for actual mode keys when caps is down, default action is to do nothing
-        } else if ks.caps_down.check() { caps_fallback_action_fn (key,&ks); }  // caps has extensive remapping fallback
-        else if ks.ralt.down.check() { shift_press_release(key) }               // unmapped ralt is set to shift
-        else { press_release(key) }                                              // all else works naturally via passthrough
+            // if we found some mapped combo, we call it and we're done
+            cmaf();
+        } else if ks.caps.down.check() {
+            if ks.some_caps_mode_active.check() { //|| is_cmk { // cmk check not needed if suppressing in all caps-modes (instead of just qks* modes)
+                // when caps down, we'll suppress caps-mode-trigger keys (incl in combo w other modkeys)
+                // we'll also suppress all unregistered caps-mode combos
+            } else {
+                // .. but for other caps combos, there are extensive fallback setups
+                caps_fallback_action_fn (key,&ks);
+            }
+        } else if ks.ralt.down.check() {
+            // unmapped ralt is set to shift (other mods pass through)
+            shift_press_release(key)
+        } else {
+             // all else works naturally via passthrough
+            press_release(key)
+        }
     } );
     // and finally, the key up action, which is really just mode-flag action if any
     let cb_up = Box::new ( move |_| { cma_up() } );
