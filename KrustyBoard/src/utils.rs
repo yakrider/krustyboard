@@ -88,20 +88,27 @@ pub mod process_utils {
         }
     }
 
+    pub fn open_mic_cpl () {
+        let _ = Command::new("rundll32.exe").arg("shell32.dll,Control_RunDLL").arg("mmsys.cpl,,1").spawn();
+    }
+
 }
 
 
 pub mod window_utils {
-
+    #[allow(unused_imports)]
     use windows::{
-        Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM},
+        Win32::Foundation::{HWND, LPARAM, RECT, WPARAM},
         Win32::UI::WindowsAndMessaging::{
-            GetForegroundWindow, GetSystemMetrics, GetWindowRect, HTCAPTION, HTTOP, MoveWindow,
-            PostMessageW, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK
+            GetForegroundWindow, GetSystemMetrics, GetWindowRect, HTCAPTION, HTTOP, MoveWindow, ShowWindow,
+            SendMessageW, PostMessageW, GetClassNameW, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK,
+            HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, WM_APPCOMMAND, WM_NCLBUTTONUP, WM_SYSCOMMAND
         },
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, WM_NCLBUTTONUP, WM_SYSCOMMAND
+        Win32::System::SystemServices::{
+            APPCOMMAND_MEDIA_PLAY_PAUSE, APPCOMMAND_MEDIA_NEXTTRACK, APPCOMMAND_MEDIA_PREVIOUSTRACK,
+            APPCOMMAND_VOLUME_MUTE, APPCOMMAND_VOLUME_UP, APPCOMMAND_VOLUME_DOWN,
+            APPCOMMAND_MICROPHONE_VOLUME_MUTE, APPCOMMAND_MIC_ON_OFF_TOGGLE,  APPCOMMAND_MICROPHONE_VOLUME_UP, APPCOMMAND_MICROPHONE_VOLUME_DOWN,
+        },
     };
 
     pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
@@ -185,9 +192,27 @@ pub mod window_utils {
     pub fn get_fgnd_win_title () -> String { "".to_string() }
 
 
+    pub fn mic_mute_toggle () { unsafe {
+        // note that the 'mute' appcommands actually do toggle, both for mic and volume
+        PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MICROPHONE_VOLUME_MUTE.0 << 16) as _));
+        //PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));
+        //PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MEDIA_PLAY_PAUSE.0 << 16) as _));
+    } }
 
+    #[test]
     pub fn test () {
         // todo: remove
+        crate::process_utils::open_mic_cpl();
+        //mic_mute_toggle();
+        //let _ = std::process::Command::new("rundll32.exe").arg("user32.dll,MessageBeep").spawn();
+        let _ = std::process::Command::new("rundll32.exe").arg("shell32.dll,Control_RunDLL").arg("mmsys.cpl,,1").spawn();
+        unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        //unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MEDIA_PLAY_PAUSE.0 << 16) as _));}
+        //std::thread::sleep(std::time::Duration::from_millis(100));
+
         // quick fn hooked to main in examples/test to quickly rerun testing here
         println! ("todo..");
         //println!("{:?}",get_fgnd_win_class());

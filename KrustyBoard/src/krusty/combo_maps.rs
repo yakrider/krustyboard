@@ -12,6 +12,8 @@ use crate::krusty::{*, mod_keys::*, key_utils::*};
 
 use crate::krusty::combo_maps::{ModKey::*, ModeState::*};
 
+use crate::{KbdEventCallbackEntry, KbdEventCallbackFnType::*, KbdEvCbComboProcDirective::*, EventPropagationDirective::*};
+
 
 # [ allow (non_camel_case_types) ]
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
@@ -242,7 +244,9 @@ pub fn cg_gen_af (k_mods:&Vec<MK>, af:AF, ks:&KrS) -> AF {
     let mut af = af;
     let lr_zip = LR_MODS.iter() .zip(lrmk_smks(ks).into_iter()) .collect::<Vec<(&(MK,MK,MK),&SMK)>>();
     lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
-        af = if mc(*lrmk) || mc(*lmk) || mc(*rmk) { smk.active_action(af.clone()) } else { smk.inactive_action(af.clone()) }
+        af = if mc(*lrmk) || mc(*lmk) || mc(*rmk) {
+            smk.active_action(af.clone())
+        } else { smk.inactive_action(af.clone()) }
     });
     af
 }
@@ -264,7 +268,7 @@ pub fn add_combo (k:&Krusty, cgc:&CG_K, cga:&CG_K) {
     let af = gen_consuming_af (&cgc.k_mods, cga.gen_af(), &k.ks);
     for c in cgc.gen_combos() {
         //println! ("{:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cga.key, cga.mods );
-        k .combos_map .borrow_mut() .insert (c, af.clone());
+        k .combos_map .write().unwrap() .insert (c, af.clone());
 } }
 
 /// note that this will wrap the AF in with mod-actions for all mods either active (if specified) or inactive (if not)
@@ -272,36 +276,22 @@ pub fn add_af_combo (k:&Krusty, cgc:&CG_K, cgaf:&CG_AF) {
     let af = gen_consuming_af (&cgc.k_mods, cgaf.gen_af(), &k.ks);
     for c in cgc.gen_combos() {
         //println! ("{:?}, {:?}, {:?} {:?} -> {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cgaf.mods );
-        k .combos_map .borrow_mut() .insert (c, af.clone());
+        k .combos_map .write().unwrap() .insert (c, af.clone());
 } }
 
 /// use this consuming bare fn to add combos if the AF supplied shouldnt be wrapped for active/inactive by mod, but just marked for consumption
 pub fn add_cnsm_bare_af_combo(k:&Krusty, cgc:&CG_K, af:AF) {
     let af = gen_consuming_af (&cgc.k_mods, af, &k.ks);
     for c in cgc.gen_combos () {
-        k .combos_map .borrow_mut() .insert (c, af.clone());
+        k .combos_map .write().unwrap() .insert (c, af.clone());
 } }
 
 /// use this bare fn to add combos if the AF supplied needs special care to avoid wrapping with mod active/inactive .. e.g ctrl/tab etc
 pub fn add_bare_af_combo(k:&Krusty, cgc:&CG_K, af:AF) {
-    for c in cgc.gen_combos () { k .combos_map .borrow_mut() .insert (c, af.clone()); }
+    for c in cgc.gen_combos () { k .combos_map .write().unwrap() .insert (c, af.clone()); }
 }
 
 
-/// combo Action-Function generator type for the cb composition time combo-AF-gen fn below
-pub type CAFG =  Arc <dyn Fn(&Combo) -> Option<AF> + Send + Sync + 'static>;
-
-/// this will gen the runtime combo action closure for each key to register in callbacks ..
-/// note that since each key can be in many combos, it will extract and move a mini subset combo hashmap into the closure!
-pub fn get_combo_af_gen_for_key (k:&Krusty, key:Key) -> CAFG {
-    let mut ckm : HashMap<Combo,AF> = HashMap::new();
-    k .combos_map .borrow() .iter() .for_each ( |(c,af)| {
-        if c.key.eq(&key) { ckm.insert(*c, af.clone()); }
-    } );
-    Arc::new ( move |cc:&Combo| {
-        ckm .get (cc) .map (|af| af.clone())
-    } )
-}
 
 
 
@@ -310,7 +300,7 @@ pub fn get_combo_af_gen_for_key (k:&Krusty, key:Key) -> CAFG {
 pub fn register_mode_key (k: &Krusty, key:Key, ms:ModeState) {
 
     // registering is simply putting an entry into mod-keys-map .. (we could make multiple keys trigger same mode too!)
-    k .mode_keys_map .borrow_mut() .insert(key, ms);
+    k .mode_keys_map .write().unwrap() .insert(key, ms);
 
     //add_bare_af_combo (k, k.cg(key).m(caps).s(ms), no_action());
     // ^^ not adequate as we'll have multi-mode and multi-modkey combos .. better to just disable it in runtime fallbacks
@@ -323,31 +313,58 @@ pub fn register_mode_key (k: &Krusty, key:Key, ms:ModeState) {
 
 }
 
-
 /// if the key is registered as mode keys, this will generate  (is_mode_key, key-dn, key-up) mode-flag setting actions
 fn gen_mode_key_actions (k:&Krusty, key:Key) -> (bool, AF,AF) {
-    if let Some(ms) = k.mode_keys_map.borrow().get(&key) {
+    if let Some(ms) = k.mode_keys_map.read().unwrap().get(&key) {
         if let Some((_, mf)) = mode_flag_pairs(&k.ks) .iter() .find (|(msr,_)| *msr == *ms) {
             let (is_l2, is_qks) = (L2_MODES.contains(ms), QKS_MODES.contains(ms));
-            // on key-down, we'll want to set its mode flag, but also collective flags if applicable so we runtime checks are reduced
+            // on key-down, we'll want to set its mode flag, but also collective flags if applicable so runtime checks are reduced
             let (mfc, ks) = ((*mf).clone(), k.ks.clone());
             let keydn_action = Arc::new (move || {
-                mfc.set_if_clear(); ks.some_caps_mode_active.set_if_clear();
-                if is_l2  { ks.some_l2_mode_active.set_if_clear() }
-                if is_qks { ks.some_qks_mode_active.set_if_clear() }
+                mfc.set();
+                if is_l2  { ks.some_l2_mode_active.set() }
+                if is_qks { ks.some_qks_mode_active.set() }
+                ks.some_caps_mode_active.set();
             });
             // and on key-up, we'll want to clear its flag, and any collective flags if applicable too
             let (mfc, ks) = ((*mf).clone(), k.ks.clone());
             let keyup_action = Arc::new (move || {
-                mfc.clear_if_set();
-                if is_qks && qks_mode_flag_pairs(&ks).iter().all(|(_,mf)| !mf.check()) { ks.some_qks_mode_active.clear_if_set() }
-                if is_l2  &&  l2_mode_flag_pairs(&ks).iter().all(|(_,mf)| !mf.check()) { ks.some_l2_mode_active .clear_if_set() }
-                if !ks.some_qks_mode_active.check() && !ks.some_l2_mode_active.check() { ks.some_caps_mode_active.clear_if_set() }
+                mfc.clear();
+                if is_qks && qks_mode_flag_pairs(&ks).iter().find(|(_,mf)| mf.check()).is_none() { ks.some_qks_mode_active.clear() }
+                if is_l2  &&  l2_mode_flag_pairs(&ks).iter().find(|(_,mf)| mf.check()).is_none() { ks.some_l2_mode_active .clear() }
+                if !ks.some_qks_mode_active.check() && !ks.some_l2_mode_active.check() { ks.some_caps_mode_active.clear() }
             });
             return (true, keydn_action, keyup_action)
     } }
     (false, no_action(), no_action()) // empty (dn,up) mode-flag-actions for non-mode keys
 }
+
+/// for mode-key btns we'll want additional individual binding callbacks that update flags
+/// note that after these binding callbacks process, they will still go through bulk processing for their default/combo actions
+/// (this is as opposed to default-keys/combos that are handled in bulk w/o individual callback bindings)
+pub fn bind_mode_key_actions (k:&Krusty) {
+    use crate::KbdEventCbMapKeyType::*;
+    k .mode_keys_map .read().unwrap() .iter() .for_each (|(key,_)| {
+        let (is_cmk, cma_dn, cma_up) = gen_mode_key_actions (k, *key);
+        if is_cmk {
+            key.bind ( KeyDownCallback, KbdEventCallbackEntry {
+                event_prop_directive: EventProp_Continue,
+                combo_proc_directive: ComboProc_Enable,
+                cb : KbdEvCbFn_InlineCallback {
+                    cb : Arc::new ( move |_| { cma_dn(); EventProp_Continue } )
+                },
+            } );
+            key.bind ( KeyUpCallback, KbdEventCallbackEntry {
+                event_prop_directive: EventProp_Continue,
+                combo_proc_directive: ComboProc_Enable,
+                cb : KbdEvCbFn_InlineCallback {
+                    cb : Arc::new ( move |_| { cma_up(); EventProp_Continue } )
+                },
+            } );
+        }
+    } );
+}
+
 
 
 
@@ -368,57 +385,58 @@ fn caps_fallback_action_fn (key:Key, ks:&KrS) {
     bfk(key);
 }
 
-fn compose_action_maps_cb (k:&Krusty, key:Key) -> (CB, CB) {
-    let (is_cmk, cma_dn, cma_up) = gen_mode_key_actions (k, key);
-    let cmafg = get_combo_af_gen_for_key (k, key);
-    let ks = k.ks.clone();
-    let cb_dn = Box::new ( move |_| {
-        // note that we're ^^ ignoring the KbdEvent passed in (it'd have KbdEventType and key vk/sc codes)
-        cma_dn();   // must always do mode-flag registration if any
-        if let Some(cmaf) = cmafg (&gen_cur_combo(key,&ks)) {
-            // if we found some mapped combo, we call it and we're done
-            cmaf();
-        } else if ks.caps.down.check() {
-            if ks.some_caps_mode_active.check() { //|| is_cmk { // cmk check not needed if suppressing in all caps-modes (instead of just qks* modes)
-                // when caps down, we'll suppress caps-mode-trigger keys (incl in combo w other modkeys)
-                // we'll also suppress all unregistered caps-mode combos
-            } else {
-                // .. but for other caps combos, there are extensive fallback setups
-                caps_fallback_action_fn (key,&ks);
-            }
-        } else if ks.ralt.down.check() {
-            // unmapped ralt is set to shift (other mods pass through)
-            shift_press_release(key)
+
+pub fn combo_maps_handle_kbd_event (key:Key, ks:&KrS, cm:&Arc<RwLock<HashMap<Combo,AF>>> ) {
+    // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
+    // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
+    if let Some(cmaf) = cm.read().unwrap() .get(&gen_cur_combo(key,&ks)) {
+        cmaf()  // found a combo matched action .. we're done!
+    } else if ks.caps.down.check() {
+        if ks.some_caps_mode_active.check() {
+            // when caps down, we'll suppress caps-mode-trigger keys (incl in combo w other modkeys)
+            // we'll also suppress all unregistered caps-mode combos
         } else {
-             // all else works naturally via passthrough
-            press_release(key)
+            // .. but for other caps combos, there are extensive fallback setups
+            caps_fallback_action_fn (key,ks);
         }
-    } );
-    // and finally, the key up action, which is really just mode-flag action if any
-    let cb_up = Box::new ( move |_| { cma_up() } );
-    // aight, these are ready to be bound .. ship it!
-    (cb_dn, cb_up)
-}
-
-
-
-
-pub fn bind_all_from_action_maps (k:&Krusty) {
-    // first we want to register all the keys the combo maps and in default-binds list into a keyset
-    let mut keys = HashSet::new();
-    k .combos_map        .borrow() .iter() .for_each ( |(c,_)|   { keys.insert(c.key); } );
-    k .mode_keys_map     .borrow() .iter() .for_each ( |(key,_)| { keys.insert(*key); } );
-    k .default_bind_keys .borrow() .iter() .for_each ( |key|     { keys.insert(*key); } );
-
-    // then for each key in the set, we'll gen the composed action and bind it
-    for key in keys.iter() {
-        let (cb_dn, cb_up) = compose_action_maps_cb (k, *key);
-        key.block_bind (KeyDownCallback, cb_dn);
-        key.block_bind (KeyUpCallback,   cb_up);
+    } else if ks.ralt.down.check() {
+        // unmapped ralt is set to shift (other mods pass through)
+        shift_press_release(key)
+    } else {
+        // all else works naturally via passthrough
+        press_release(key)
     }
-    // might as well clear up some setup resources now that done setting things up for runtime!
-    k.combos_map.borrow_mut().clear();
-    k.mode_keys_map.borrow_mut().clear();
-    k.default_bind_keys.borrow_mut().clear();
 }
+
+pub fn gen_combo_maps_processor (k:&Krusty) -> KbdEventCallbackEntry {
+    use crate::{KbdEventType::*, EventPropagationDirective::*};
+    // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
+    // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
+    let mut handled_keys = HashSet::new();
+    k .combos_map        .read().unwrap() .iter() .for_each ( |(c,_)|   { handled_keys.insert(c.key); } );
+    k .mode_keys_map     .read().unwrap() .iter() .for_each ( |(key,_)| { handled_keys.insert(*key); } );
+    k .default_bind_keys .read().unwrap() .iter() .for_each ( |key|     { handled_keys.insert(*key); } );
+
+    let (ks, cm) = (k.ks.clone(), k.combos_map.clone());
+    let cb = Arc::new ( move |e:KbdEvent| {
+        if handled_keys.contains(&e.key) {
+            if e.event == KbdEvent_KeyDown || e.event == KbdEvent_SysKeyDown {
+                let (ks, cm) = (ks.clone(), cm.clone());
+                spawn (move || combo_maps_handle_kbd_event(e.key, &ks, &cm));
+                return EventProp_Stop
+            } else if e.event == KbdEvent_KeyUp || e.event == KbdEvent_SysKeyUp {
+                // nothing to do on keyup, as anything we want to send, we send in keydn/keyup pairs at keydown itself
+                return EventProp_Stop
+            } // all else fall back down to pass-through
+        }
+        return EventProp_Continue
+    });
+    KbdEventCallbackEntry {
+        event_prop_directive: EventProp_Undetermined,
+        combo_proc_directive: ComboProc_Enable,  // (doesnt actually matter, as this is in combo proc itself!)
+        cb: KbdEvCbFn_InlineCallback {cb}
+    }
+}
+
+
 

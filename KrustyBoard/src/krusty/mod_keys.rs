@@ -6,9 +6,10 @@ use std::sync::{Arc, RwLock};
 use once_cell::sync::OnceCell;
 
 
-use crate::{BlockInput, KbdEvntCbMapKeyType::*, krusty};
-
 use crate::krusty::{key_utils, combo_maps, Key, Flag, KrS, AF};
+use crate::{ KbdEvCbFn_InlineCb_T, KbdEventCallbackEntry, KbdEventCallbackFnType::*,
+             KbdEventCbMapKeyType::*, EventPropagationDirective::*, KbdEvCbComboProcDirective::* };
+
 
 
 
@@ -103,39 +104,56 @@ impl CMK {
         ).clone()
     }
 
+    fn handle_key_down (&self, ksr:&KrS) {
+        // note that for caps, we completely block it from ever being sent up, and just manage internally
+        let ks = ksr.clone();
+        if !ks.caps.down.check() {
+            // capslock can come as repeats like other mod keys .. this was a fresh one
+            ks.caps.down.set();
+            ks.is_wheel_spin_invalidated.set();
+            // lets notify the synced tracked mod keys, so they can invalidate/release themselves
+            combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_down());
+        }
+        if ks.mouse_left_btn_down.check() && !ks.in_managed_ctrl_down_state.check() {
+            ks.in_managed_ctrl_down_state.set();
+            ks.lctrl.ensure_active();
+        }
+    }
+
+    fn handle_key_up (&self, ks:&KrS) {
+        ks.caps.down.clear();
+        ks.is_wheel_spin_invalidated.set();
+        if ks.in_managed_ctrl_down_state.check() {
+            ks.in_managed_ctrl_down_state.clear();
+            if !ks.lctrl.down.check() { ks.lctrl.ensure_inactive() }
+        }
+        // the following isnt strictly necessary, but useful in case some keyup falls through
+        ks.clear_mode_flags();
+        // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
+        combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_release());
+    }
+
     pub fn setup_tracking (&self, ksr:&KrS) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
         if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
             key_utils::press_release (Key::CapsLock);
         }
-
         let ks = ksr.clone();
-        Key::CapsLock.block_bind(KeyDownCallback, move |_| {
-            if !ks.caps.down.check() {
-                // capslock can come as repeats like other mod keys .. this was a fresh one
-                ks.caps.down.set();
-                ks.is_wheel_spin_invalidated.set_if_clear();
-                // lets notify the synced tracked mod keys, so they can invalidate/release themselves
-                combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_down());
-            }
-            if ks.mouse_left_btn_down.check() && !ks.in_managed_ctrl_down_state.check() {
-                ks.in_managed_ctrl_down_state.set();
-                ks.lctrl.ensure_active();
-            }
-        });
-
+        Key::CapsLock .bind ( KeyDownCallback, KbdEventCallbackEntry {
+            event_prop_directive: EventProp_Stop,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {
+                cb : Arc::new ( move |_| { ks.caps.handle_key_down(&ks); EventProp_Stop } )
+            },
+        } );
         let ks = ksr.clone();
-        Key::CapsLock.block_bind(KeyUpCallback, move |_| {
-           ks.caps.down.clear_if_set();
-            if ks.in_managed_ctrl_down_state.check() {
-                ks.in_managed_ctrl_down_state.clear();
-                ks.lctrl.ensure_inactive();
-            }
-            // the following isnt strictly necessary, but useful in case some keyup falls through
-            ks.clear_mode_flags();
-            // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
-            combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_release());
-        });
+        Key::CapsLock .bind ( KeyUpCallback, KbdEventCallbackEntry {
+            event_prop_directive: EventProp_Stop,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {
+                cb: Arc::new ( move |_| { ks.caps.handle_key_up(&ks); EventProp_Stop } )
+            },
+        } );
     }
 
 }
@@ -160,29 +178,31 @@ impl TMK {
         // the setup for these is mostly just tracking their down state ..
         // however, we will also disable repeats, mostly for no functional reason than to ease looking at keystreams
         let tmk = self.clone();
-        if do_block {
-            // here we just block it completely and just track state .. e.g. for ralt
-            self.key .block_bind (KeyDownCallback, move |_| { tmk.down.set_if_clear(); } );
+        let (ev_prop_drctv, cb) = if do_block {
+            let cb : KbdEvCbFn_InlineCb_T = Arc::new ( move |_| { tmk.down.set(); EventProp_Stop } );
+            (EventProp_Stop, cb)
         } else {
-            // set it so if its already down, its a repeat, and we'll block it .. e.g. for lctrl/rctrl/lshift/rshift
-            self.key .blockable_bind (KeyDownCallback, move |_| {
-                if tmk.down.check() {
-                    BlockInput::Block
-                } else {
-                    tmk.down.set();
-                    BlockInput::DontBlock
-                }
-            } );
-        }
+            let cb : KbdEvCbFn_InlineCb_T = Arc::new (move |_| {
+                if tmk.down.check() { EventProp_Stop }
+                else { tmk.down.set(); EventProp_Continue }
+            });
+            (EventProp_Continue, cb)
+        };
+        self.key .bind ( KeyDownCallback, KbdEventCallbackEntry {
+            event_prop_directive: ev_prop_drctv,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {cb},
+        } );
 
         // for key-ups, we simply update flag and let them go through
-        let tmk = self.clone();
-        let cb = move |_| tmk.down.clear_if_set();
-        if do_block {
-            self.key .block_bind (KeyUpCallback, cb)
-        } else {
-            self.key .non_blocking_bind (KeyUpCallback, cb)
-        }
+        let ev_prop_drctv = if do_block { EventProp_Stop } else { EventProp_Continue };
+        let (tmk, epd) = (self.clone(), ev_prop_drctv.clone());
+        let cb = Arc::new ( move |_| { tmk.down.clear(); epd } );
+        self.key .bind ( KeyUpCallback, KbdEventCallbackEntry {
+            event_prop_directive: ev_prop_drctv,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {cb},
+        } );
     }
 
 }
@@ -215,58 +235,79 @@ impl SMK {
     }
 
 
-    pub fn setup_tracking (&self, ksr:&KrS) {
+    // NOTE: given that kbds seem to have idiosyncrasies with what scancode vs vk codes they sent, we end up getting out of sync w
+    // what keys with let through and what we simulate .. e.g in my machine lshift comes in vk while rshift comes sc and so sending our
+    // vk shift doesnt clear it out .. so we've decided to just block everything and send our uniform up/down reports instead!
 
-        // NOTE: given that kbds seem to have idiosyncrasies with what scancode vs vk codes they sent, we end up getting out of sync w
-        // what keys with let through and what we simulate .. e.g in my machine lshift comes in vk while rshift comes sc and so sending our
-        // vk shift doesnt clear it out .. so we've decided to just block everything and send our uniform up/down reports instead!
+    // beyond that, we'll block repeats to keep code logic (and keystream inspections) manageable
+    // we'll also track and update both physical and externally expressed states and try and keep our model always in sync w the outside
+    // we'll also track if we've used up the press so we can mask its release later (for things like win/alt that trigger menus on release)
 
-        // beyond that, we'll block repeats to keep code logic (and keystream inspections) manageable
-        // we'll also track and update both physical and externally expressed states and try and keep our model always in sync w the outside
-        // we'll also track if we've used up the press so we can mask its release later (for things like win/alt that trigger menus on release)
+    // so goal here is, any presses with caps active, we suppress mod-key going outside
+    // and since we can have caps come in after the mod-key is already down, we'll have to capture disparity states ..
+    //  .. as well as restoring them when either caps/alt gets released etc
+    // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
-        let (ks, smk) = (ksr.clone(), self.clone());
-        smk.key.block_bind (KeyDownCallback, move |_| {
-            // so goal here is, any presses with caps active, we suppress mod-key going outside
-            // and since we can have caps come in after the mod-key is already down, we'll have to capture disparity states ..
-            //  .. as well as restoring them when either caps/alt gets released etc
-            // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
-            if ks.caps.down.check() {
-                // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
-                smk.down.set_if_clear();
-                smk.consumed.clear_if_set();
+    pub fn handle_key_down (&self, ks:&KrS) {
+        if ks.caps.down.check() {
+            // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
+            self.down.set();
+            self.consumed.clear();
+        } else {
+            if self.down.check() {
+                // caps isnt down, but alt was, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
             } else {
-                if smk.down.check() {
-                    // caps isnt down, but alt was, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
-                } else {
-                    // caps isnt down, and alt wasnt down, so record states and let it through
-                    smk.down.set();
-                    smk.active.set_if_clear();
-                    smk.consumed.clear_if_set();
-                    ks.is_wheel_spin_invalidated.set_if_clear();
-                    smk.key.press();
-            } }
-        } );
+                // caps isnt down, and alt wasnt down, so record states and let it through
+                self.down.set();
+                self.active.set();
+                self.consumed.clear();
+                ks.is_wheel_spin_invalidated.set();
+                let key = self.key;
+                spawn (move || key.press());
+        } }
+    }
 
-        let (ks, smk) = (ksr.clone(), self.clone());
-        smk.key.block_bind(KeyUpCallback, move |_| {
-            // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
-            // else if win was consumed, we release with mask, else we can actually pass it through unblocked
-            smk.down.clear_if_set();
-            if !smk.active.check() || ks.caps.down.check() {
-                // if inactive or caps-down we just suppress this keyup
+    fn handle_key_up (&self, ks:&KrS) {
+        // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
+        // else if win was consumed, we release with mask, else we can actually pass it through unblocked
+        self.down.clear();
+        ks.is_wheel_spin_invalidated.set();
+        if !self.active.check() || ks.caps.down.check() {
+            // if inactive or caps-down we just suppress this keyup
+        } else {
+            if self.is_keyup_unified() && self.paired_down() {
+                // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
             } else {
-                if smk.is_keyup_unified() && smk.paired_down() {
-                    // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
-                } else {
+                let smk = self.clone();
+                spawn ( move || {
                     smk.release_w_masking();  // this checks/updates flags too
                     if smk.is_keyup_unified() { // and for up-unified, try and clear the other too
                         smk.pair.read().unwrap() .iter() .for_each (|p| {
                             if !p.down.check() && p.active.check() { p.release_w_masking(); }
-                } ) } }
-        } } );
-
+                    } ) }
+                } );
+        }  }
     }
+
+    pub fn setup_tracking (&self, ksr:&KrS) {
+        let (ks, smk) = (ksr.clone(), self.clone());
+        self.key .bind ( KeyDownCallback, KbdEventCallbackEntry {
+            event_prop_directive: EventProp_Stop,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {
+                cb: Arc::new ( move |_| { smk.handle_key_down(&ks); EventProp_Stop } )
+            },
+        } );
+        let (ks, smk) = (ksr.clone(), self.clone());
+        self.key .bind ( KeyUpCallback, KbdEventCallbackEntry {
+            event_prop_directive: EventProp_Stop,
+            combo_proc_directive: ComboProc_Disable,
+            cb : KbdEvCbFn_InlineCallback {
+                cb: Arc::new ( move |_| { smk.handle_key_up(&ks); EventProp_Stop } )
+            },
+        } );
+    }
+
 
 
     pub fn process_caps_down (&self) {
@@ -274,8 +315,9 @@ impl SMK {
         // note that internally tracked physical is_alt_down will continue to be down!
         // note also that each of paired mod-keys will get their own notification too
         if self.down.check() && self.active.check() {
-            self.consumed.set_if_clear();
-            self.release_w_masking(); // this will update flags too
+            self.consumed.set();
+            let smk = self.clone();
+            spawn ( move || smk.release_w_masking() ); // this will update flags too
         }
     }
     pub fn process_caps_release (&self) {
@@ -283,12 +325,13 @@ impl SMK {
         // note: we'll setup a delay for activation to allow for some sloppy combo releases etc
         // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
         // .. so to check the logic here must use lower level key inspections like via ahk key history!!
+        // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
         if self.down.check() {
             let smk = self.clone();
             spawn ( move || {
                 sleep(time::Duration::from_millis(200));
                 if smk.down.check() && !smk.active.check() {
-                    smk.key.press(); smk.active.set(); smk.consumed.set_if_clear();
+                    smk.key.press(); smk.active.set(); smk.consumed.set();
             } } );
         }
     }
@@ -309,37 +352,25 @@ impl SMK {
 
     fn release_w_masking(&self) {
         // masking w an unassigned key helps avoid/reduce focus loss to menu etc for alt/win
-        self.active.clear_if_set();
+        self.active.clear();
         if !self.is_rel_masking() || !self.consumed.check() { self.key.release(); }
         else { self.mask().press(); self.key.release(); self.mask().release(); }
     }
 
-    fn reactivate        (&self) { self.active.set_if_clear(); self.key.press(); }
+    fn reactivate        (&self) { self.active.set(); self.key.press(); }
     fn paired_reactivate (&self) { self.pair.read().unwrap() .iter() .for_each (|p| p.reactivate()) }
-
-    // we'll try an expt with masked re-activates to see if that can avoid having to do a delay before win reactivate
-    // --> nah didnt seem to make a difference
-    fn activate_w_masking (&self) {
-        self.active.set_if_clear();
-        if !self.is_rel_masking() { self.consumed.set_if_clear(); self.key.press(); }
-        else { self.mask().press(); self.key.press(); self.mask().release(); }
-    }
-    fn paired_masked_activate (&self) {
-        self.pair.read().unwrap() .iter() .for_each (|p| p.activate_w_masking())
-    }
-
 
     pub fn ensure_inactive (&self) {
         // utility to ensure modkey is inactive regardless if held down
         // shouldnt really be necessary since there are action wrappers available to set/restore mod-key for any need at any mod-key state
-        self.consumed.set_if_clear();
+        self.consumed.set();
         if self.active.check() { self.release_w_masking(); } // rel call will clear active flag too
     }
     pub fn ensure_active (&self) {
         // utility to get the mod out reliably whether its currently pressed or not, while keeping state tracking updated
         // this should really ONLY be necessary where we want the mod to be left hanging on until later .. e.g. to simulate alt-tab
-        self.consumed.set_if_clear();
-        if !self.active.check() { self.active.set_if_clear(); self.key.press(); }
+        self.consumed.set();
+        if !self.active.check() { self.active.set(); self.key.press(); }
     }
 
 
@@ -347,11 +378,13 @@ impl SMK {
     // >  guarded to ensure that our internal model is always in-sync with the outside state .. hence the util fns below
     // we'll also mark the down lalt/lwin as consumed and mask its release with ctrl so it doesnt activate menus/start-btn etc
 
+    #[allow(dead_code)]
     fn do_w_mod (&self, key:Key, key_action:fn(Key)) {
-        self.consumed.set_if_clear();
+        self.consumed.set();
         if self.active.check() { key_action(key) }
         else { self.key.press(); self.active.set(); key_action(key); self.release_w_masking(); }
     }
+    #[allow(dead_code)]
     pub fn mod_press_release_guarded (&self, key:Key) { self.do_w_mod (key, key_utils::press_release) }
     // ^^ these direct guarding fns are left here if needed for complex actions later, but currently all is handled via action guards below
 
@@ -360,7 +393,7 @@ impl SMK {
     /// .. the consumed flag marks it to have its later release be masked with control to avoid activating win-menu etc
     pub fn keydn_consuming_action (&self, af:AF) -> AF {
         let smk = self.clone();
-        Arc::new ( move || { smk.consumed.set_if_clear(); af(); } )
+        Arc::new ( move || { smk.consumed.set(); af(); } )
     }
 
 
@@ -369,11 +402,12 @@ impl SMK {
     pub fn active_action (&self, af:AF) -> AF {
         let smk = self.clone();
         Arc::new ( move || {
-            smk.consumed.set_if_clear();
+            smk.consumed.set();
             if smk.pair_any_active() { af() }
             else { smk.key.press(); af(); smk.release_w_masking(); }
         })
     }
+    #[allow(dead_code)]
     pub fn active_on_key (&self, key:Key) -> AF { self.active_action (key_utils::base_action(key)) }
     // ^^ some sugar to make common things simpler
     
@@ -389,7 +423,7 @@ impl SMK {
         Arc::new ( move || {
             if !smk.pair_any_active() { af() }
             else {
-                smk.consumed.set_if_clear();
+                smk.consumed.set();
                 if smk.active.check() { smk.release_w_masking() }
                 if smk.paired_active() { smk.pair.read().unwrap() .iter() .for_each (|p| p.release_w_masking()) }
                 af();
@@ -407,6 +441,7 @@ impl SMK {
                     } );
         } } } )
     }
+    #[allow(dead_code)]
     pub fn inactive_on_key (&self, key:Key) -> AF { self.inactive_action (key_utils::base_action(key)) }
     // ^^ some sugar to make common things simpler .. could add for ctrl etc too if there was use
 

@@ -66,8 +66,8 @@ impl MouseButton {
     /// position. You must manually call release to create a full 'click'.
     pub fn press(self) {
         match self {
-            MouseButton::LeftButton => send_mouse_input(MOUSEEVENTF_LEFTDOWN, 0, 0, 0),
-            MouseButton::RightButton => send_mouse_input(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0),
+            MouseButton::LeftButton   => send_mouse_input(MOUSEEVENTF_LEFTDOWN,   0, 0, 0),
+            MouseButton::RightButton  => send_mouse_input(MOUSEEVENTF_RIGHTDOWN,  0, 0, 0),
             MouseButton::MiddleButton => send_mouse_input(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0),
             _ => {}
         }
@@ -76,8 +76,8 @@ impl MouseButton {
     /// Releases a given `MouseButton`. This means the button would be in the up position.
     pub fn release(self) {
         match self {
-            MouseButton::LeftButton => send_mouse_input(MOUSEEVENTF_LEFTUP, 0, 0, 0),
-            MouseButton::RightButton => send_mouse_input(MOUSEEVENTF_RIGHTUP, 0, 0, 0),
+            MouseButton::LeftButton   => send_mouse_input(MOUSEEVENTF_LEFTUP,   0, 0, 0),
+            MouseButton::RightButton  => send_mouse_input(MOUSEEVENTF_RIGHTUP,  0, 0, 0),
             MouseButton::MiddleButton => send_mouse_input(MOUSEEVENTF_MIDDLEUP, 0, 0, 0),
             _ => {}
         }
@@ -113,7 +113,7 @@ impl MouseWheel {
     /// Scrolls the mouse wheel (whether default or horiz wheel) by given delta .. note that typically 120 delta is 1 incr
     pub fn scroll(self, delta: i32) {
         if let Some(flag) = match self {
-            MouseWheel::DefaultWheel => Some(MOUSEEVENTF_WHEEL),
+            MouseWheel::DefaultWheel    => Some(MOUSEEVENTF_WHEEL),
             MouseWheel::HorizontalWheel => Some(MOUSEEVENTF_HWHEEL),
             _ => None
         } {
@@ -126,11 +126,11 @@ impl MouseWheel {
 
 
 /// Starts listening for bound input events.
-pub fn handle_input_events() {
+pub fn handle_input_events () {
     if !MOUSE_CALLBACKS.read().unwrap().is_empty() {
         set_hook(WH_MOUSE_LL, &*MOUSE_HHOOK, mouse_proc);
     };
-    if !KEYBD_CALLBACKS.read().unwrap().is_empty() {
+    if COMBO_MAPS_PROCESSOR.read().unwrap().is_some() || !KEYBD_CALLBACKS.read().unwrap().is_empty() {
         set_hook(WH_KEYBOARD_LL, &*KEYBD_HHOOK, keybd_proc);
     };
     // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
@@ -145,16 +145,20 @@ pub fn handle_input_events() {
 
 /// Keyboard lower-level-hook processor
 unsafe extern "system"
-fn keybd_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+fn keybd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+
+    use crate::{EventPropagationDirective::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
 
     let return_call = || { CallNextHookEx(HHOOK(0), code, w_param, l_param) };
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 
-    if KEYBD_CALLBACKS.read().unwrap().is_empty() {
+    /*
+    // .. disabling this, as it's basically never applicable for our usage, and incurs runtime cost on every event
+    if COMBO_MAPS_PROCESSOR.read().unwrap().is_none() && KEYBD_CALLBACKS.read().unwrap().is_empty() {
         unset_hook(&*KEYBD_HHOOK);
         return return_call();
-    }
+    }*/
 
     let kb_struct = *(l_param.0 as *const KBDLLHOOKSTRUCT);
 
@@ -168,56 +172,73 @@ fn keybd_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     if kb_struct.dwExtraInfo == FAKE_EXTRA_INFO { return return_call() }
 
     let (event, ev_is_key_down) = match w_param.0 as u32 {
-        WM_KEYDOWN      => ( KbdEvntType::KbdEvntKeyDown, true ),
-        WM_SYSKEYDOWN   => ( KbdEvntType::KbdEvntSysKeyDown, true ),
-        WM_KEYUP        => ( KbdEvntType::KbdEvntKeyUp, false ),
-        WM_SYSKEYUP     => ( KbdEvntType::KbdEvntSysKeyUp, false ),
-        _               => ( KbdEvntType::Unrecognized, false ),
+        WM_KEYDOWN      => (KbdEventType::KbdEvent_KeyDown,      true  ),
+        WM_SYSKEYDOWN   => (KbdEventType::KbdEvent_SysKeyDown,   true  ),
+        WM_KEYUP        => (KbdEventType::KbdEvent_KeyUp,        false ),
+        WM_SYSKEYUP     => (KbdEventType::KbdEvent_SysKeyUp,     false ),
+        _               => (KbdEventType::KbdEvent_Unrecognized, false ),
     };
     let key = KbdKey::from(u64::from(kb_struct.vkCode));
-    let cb_lookup_key = KbdEvntCbMapKey::from_key_state(key, KbdEvntCbMapKeyType::from_key_down_state(ev_is_key_down));
 
-    if let Some (cbv) = KEYBD_CALLBACKS.read().unwrap().get(&cb_lookup_key) {
-        let kbd_event = KbdEvent { event, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32 };
-        //println!("{:?}", kbd_event);
-        match cbv {
-            KbdEvntCallback::NonBlockingCallback {cb} => {
-                let cb = Arc::clone(cb);
-                spawn(move || cb(kbd_event));
-                // returns at end as usual
+    let kbd_event = KbdEvent { event, key, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32 };
+
+    let cb_lookup_key = KbdEventCbMapKey::from_key_down_state(key, ev_is_key_down);
+
+    let (mut do_ev_prop, mut do_combo_proc) = (EventProp_Continue, ComboProc_Enable);
+
+    // first route it through any per-key registered callbacks
+    if let Some(cbe) = KEYBD_CALLBACKS.read().unwrap() .get(&cb_lookup_key) .as_ref() {
+        do_ev_prop = cbe.event_prop_directive;
+        do_combo_proc = cbe.combo_proc_directive;
+        match &cbe.cb {
+            KbdEvCbFn_InlineCallback {cb}  => {
+                let ev_prop_drctv = cb(kbd_event);
+                if cbe.event_prop_directive == EventProp_Undetermined { do_ev_prop = ev_prop_drctv }
             }
-            KbdEvntCallback::BlockingCallback {cb} => {
-                let cb = Arc::clone(cb);
-                spawn(move || cb(kbd_event));
-                return LRESULT(1); // return with non-zero (blocking) code
+            KbdEvCbFn_SpawnedCallback {cb} => {
+                let (cb, kbe) = (cb.clone(), kbd_event.clone());    // clone as we'll need the event later again
+                spawn (move || cb(kbe));
             }
-            KbdEvntCallback::BlockableCallback {cb} => {
-                if let BlockInput::Block = cb(kbd_event) {
-                    return LRESULT(1);
-                } // else falls back and returns at end
+    } }
+
+    // now lets call the bulk defaults/combos processor if its available, and if combo_proc for this event not disabled from above
+    if do_combo_proc == ComboProc_Enable {
+        let mut ev_prop = EventProp_Continue;
+        if let Some (cbe) = COMBO_MAPS_PROCESSOR.read().unwrap().as_ref() {
+            match &cbe.cb {
+                KbdEvCbFn_InlineCallback {cb} => {
+                    ev_prop = cb(kbd_event);
+                }
+                _ => {}
             }
         }
+        do_ev_prop = if ev_prop == EventProp_Stop { EventProp_Stop } else { do_ev_prop }
+    }
+    if do_ev_prop == EventProp_Stop {
+        return LRESULT(1);  // returning with non-zero code signals OS to block further processing on the input event
     }
     return return_call()
 }
 
 
+#[allow(non_snake_case)]
 fn HIWORD(l: u32) -> u16 { ((l >> 16) & 0xffff) as u16 }
 
 /// mouse lower-level-hook processor
 unsafe extern "system"
 fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
-    use crate::{MouseButton::*, MouseWheel::*};
+    use crate::{MouseButton::*, MouseWheel::*, EventPropagationDirective::*, MouseEventCallbackFnType::*};
 
     let return_call = || { CallNextHookEx(HHOOK(0), code, w_param, l_param) };
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 
+    /*
     if MOUSE_CALLBACKS.read().unwrap().is_empty() {
         unset_hook(&*MOUSE_HHOOK);
         return return_call();
-    }
+    }*/
 
     let mh_struct = &*(l_param.0 as *const MSLLHOOKSTRUCT);
 
@@ -227,57 +248,58 @@ fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     }
 
     let ev_and_key_for_btn_ev = |btn:MouseButton, down_not_up:bool| {
-        Some ( ( MouseEvent::from_btn_ev(btn, down_not_up), MouseEventCbMapKey::for_btn_action(btn, down_not_up) ) )
+        Some ( ( MouseEvent::from_btn_ev(btn, down_not_up), MouseEventCbMapKey::for_btn_down_state(btn, down_not_up) ) )
     };
     let ev_and_key_for_wheel_ev = |wheel:MouseWheel, delta:i32| {
-        Some ( ( MouseEvent::from_wheel_ev(wheel, delta), MouseEventCbMapKey::for_wheel_action(wheel, delta >= 0) ) )
+        Some ( ( MouseEvent::from_wheel_ev(wheel, delta), MouseEventCbMapKey::for_wheel_fwd_state(wheel, delta >= 0) ) )
+    };
+    let ev_and_key_for_pointer_ev = |x:i32, y:i32| {
+        Some ( ( MouseEvent::from_pointer_ev(x,y), MouseEventCbMapKey::for_pointer() ) )
     };
 
     //println!("{:#?}", mh_struct);
 
     if let Some ((event, lookup_key)) = match w_param.0 as u32 {
-        WM_LBUTTONDOWN => ev_and_key_for_btn_ev(LeftButton, true),
-        WM_RBUTTONDOWN => ev_and_key_for_btn_ev(RightButton, true),
-        WM_MBUTTONDOWN => ev_and_key_for_btn_ev(MiddleButton, true),
+        WM_LBUTTONDOWN => ev_and_key_for_btn_ev (LeftButton,   true),
+        WM_RBUTTONDOWN => ev_and_key_for_btn_ev (RightButton,  true),
+        WM_MBUTTONDOWN => ev_and_key_for_btn_ev (MiddleButton, true),
         WM_XBUTTONDOWN => {
             match MOUSEHOOKSTRUCTEX_MOUSE_DATA ( HIWORD (mh_struct.mouseData.0) as u32) {
-                XBUTTON1 => ev_and_key_for_btn_ev(X1Button, true),
-                XBUTTON2 => ev_and_key_for_btn_ev(X2Button, true),
+                XBUTTON1 => ev_and_key_for_btn_ev (X1Button, true),
+                XBUTTON2 => ev_and_key_for_btn_ev (X2Button, true),
                 _ => None,
             }
         }
-        WM_LBUTTONUP => ev_and_key_for_btn_ev(LeftButton, false),
-        WM_RBUTTONUP => ev_and_key_for_btn_ev(RightButton, false),
-        WM_MBUTTONUP => ev_and_key_for_btn_ev(MiddleButton, false),
+        WM_LBUTTONUP => ev_and_key_for_btn_ev (LeftButton,   false),
+        WM_RBUTTONUP => ev_and_key_for_btn_ev (RightButton,  false),
+        WM_MBUTTONUP => ev_and_key_for_btn_ev (MiddleButton, false),
         WM_XBUTTONUP => {
             match MOUSEHOOKSTRUCTEX_MOUSE_DATA ( HIWORD (mh_struct.mouseData.0) as u32) {
-                XBUTTON1 => ev_and_key_for_btn_ev(X1Button, false),
-                XBUTTON2 => ev_and_key_for_btn_ev(X2Button, false),
+                XBUTTON1 => ev_and_key_for_btn_ev (X1Button, false),
+                XBUTTON2 => ev_and_key_for_btn_ev (X2Button, false),
                 _ => None,
             }
         }
-        WM_MOUSEWHEEL  => ev_and_key_for_wheel_ev (DefaultWheel, HIWORD(mh_struct.mouseData.0) as i16 as i32),
+        WM_MOUSEWHEEL  => ev_and_key_for_wheel_ev (DefaultWheel,    HIWORD(mh_struct.mouseData.0) as i16 as i32),
         WM_MOUSEHWHEEL => ev_and_key_for_wheel_ev (HorizontalWheel, HIWORD(mh_struct.mouseData.0) as i16 as i32),
 
-        //WM_MOUSEMOVE   => MouseEvent::from_pointer_ev (??, ??)
+        //WM_MOUSEMOVE   => ev_and_key_for_pointer_ev (mh_struct.pt.x, mh_struct.pt.y),
         _ => None,
     } {
         //{ let ec = event.clone(); spawn(move || println!("{:?}", ec)); }   // for debug
-        if let Some(cbv) = MOUSE_CALLBACKS.read().unwrap().get(&lookup_key) {
-            match cbv {
-                MouseEventCallback::NonBlockingCallback {cb} => {
-                    let cb = Arc::clone(cb);
-                    spawn(move || cb(event));
+
+        let mut do_ev_prop = EventProp_Continue;
+
+        if let Some(cbe) = MOUSE_CALLBACKS.read().unwrap().get(&lookup_key).as_ref() {
+            do_ev_prop = cbe.event_prop_directive;
+            match &cbe.cb {
+                MouseEvCbFn_InlineCallback {cb}  => {
+                    let ev_prop_drctv = cb(event);
+                    if cbe.event_prop_directive == EventProp_Undetermined { do_ev_prop = ev_prop_drctv }
                 }
-                MouseEventCallback::BlockingCallback {cb} => {
-                    let cb = Arc::clone(cb);
-                    spawn(move || cb(event));
-                    return LRESULT(1);
-                }
-                MouseEventCallback::BlockableCallback {cb} => {
-                    if let BlockInput::Block = cb(event) {
-                        return LRESULT(1);
-                    }
+                MouseEvCbFn_SpawnedCallback {cb} => {
+                    let cb = cb.clone();
+                    spawn (move || cb(event));
                 }
             }
         } else {
@@ -286,9 +308,13 @@ fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
                 println!("current mouse-cb map is :\n {:#?} ", (MOUSE_CALLBACKS.lock().unwrap()));
             });*/
         }
+        if do_ev_prop == EventProp_Stop {
+            return LRESULT(1);  // returning with non-zero code signals OS to block further processing on the input event
+        }
     }
     return return_call();
 }
+
 
 
 
@@ -305,6 +331,7 @@ fn set_hook(
 }
 
 /// unset lower-level hook
+#[allow(dead_code)]
 fn unset_hook(hook_ptr: &AtomicPtr<HHOOK>) {
     if !hook_ptr.load(Ordering::Relaxed).is_null() {
         unsafe { UnhookWindowsHookEx (*hook_ptr.load(Ordering::Relaxed)) };
