@@ -3,18 +3,39 @@ use std::{time};
 use std::thread::{sleep, spawn};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
+
 use once_cell::sync::OnceCell;
+//use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
 
-use crate::krusty::{key_utils, combo_maps, Key, Flag, KrS, AF};
 use crate::{ KbdEvCbFn_InlineCb_T, KbdEventCallbackEntry, KbdEventCallbackFnType::*,
              KbdEventCbMapKeyType::*, EventPropagationDirective::*, KbdEvCbComboProcDirective::* };
+
+use crate::krusty::{key_utils, Key, Flag, KrS, AF};
+use crate::krusty::combo_maps::{COMBO_STATE__MOD_KEY_BITS_N, ComboStatesBits_ModKeys};
+use crate::krusty::mod_keys::ModKey::*;
+
+
+
+
+
+# [ allow (non_camel_case_types) ]
+# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
+/// all the supported modifier-keys (incl some w incomplete impl like rwin)
+pub enum ModKey {
+    caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift, alt, win, ctrl, shift
+    // ^^ the last four (Alt/Win/Ctrl/Shfit) are intended to imply either of the L/R versions
+    // .. and those are only for use during combo specification for l/r/lr expansion .. they dont exist in combo-bitmaps
+}
+pub type MK = ModKey;
 
 
 
 
 
 # [ derive (Debug) ]
+/// mostly a wrapper that holds the caps-lock key and its impl as the base for most l2/l3 functionality
 pub struct CapsModKey {
     // we've defined this just to be consistent with other mod-keys, but its really just a wrapper for caps key!
     _private : (),
@@ -23,6 +44,7 @@ pub struct CapsModKey {
 }
 
 # [ derive (Debug, Clone) ]
+/// arc-wrapped CapsModKey for cheap passing between threads etc
 pub struct CMK (Arc<CapsModKey>);
 
 impl Deref for CMK {
@@ -34,7 +56,9 @@ impl Deref for CMK {
 
 
 
+
 # [ derive (Debug) ]
+/// TrackedModKeys only get key-down-state tracked, but no syncing against active-state externally (currently only for ralt)
 pub struct TrackedModKey {
     // we'll use this for modifier keys that we want to simply track down state, w/o attempting to track or sync their external active states
     // again, motivation for making this separate is to share fumctionality implementations
@@ -44,6 +68,7 @@ pub struct TrackedModKey {
 }
 
 # [ derive (Debug, Clone) ]
+/// Arc wraps TrackedModKey functionality for easier cloning/sharing
 pub struct TMK (Arc<TrackedModKey>);
 
 impl Deref for TMK {
@@ -55,8 +80,10 @@ impl Deref for TMK {
 
 
 
+
 // note that we dont want this cloneable to avoid cloning all underlying, we'll work with it Arc-wrapped instead
 # [ derive (Debug) ]
+/// Synced-Modifier-Key tracks modifier key down-states as well as externally active state (used for lalt/lwin/lctrl/rctrl/lshift/rshift)
 pub struct SyncdModKey {
     // this struct holds flags required for a outside-state syncd tracking of a modifier key (we only do this for alt and win)
     // the alt and win keys are now tracked identically and so doing this helps us avoid duplication of that bunch of related code
@@ -72,6 +99,7 @@ pub struct SyncdModKey {
 }
 
 # [ derive (Debug, Clone) ]
+/// Arc wrapped Synced-Modifer-Key for cheap cloning/sharing
 pub struct SMK (Arc<SyncdModKey>);
 // ^^ wrapping like this lets us impl functionality direclty on this cheaply clonable new-type to pass around
 // .. the alternate of making SyncdModKey clonable would be more costly as it would clone each of the underlying flags
@@ -87,6 +115,164 @@ impl Deref for SMK {
 
 
 
+# [ derive (Debug) ]
+/// holds representation for all modifier keys together, interlinked functionality etc impld here
+pub struct ModifierKeys {
+
+    // caps will be tracked for internal reference, and we'll assume we'll ALWAYS operate with caps-lock off
+    // we'll also track all mod keys as syncd-modifier-keys, where we track the phys and logical states, as well as whether to mask their release
+    // this allows us to add any composition of these in combos with any other key incl other mod keys while keeping internal/external models accurate
+
+    // except r-alt which we track, but dont try to keep synced w external state .. (as we completely disable it every going out!)
+    // (previously, there used to be ctrl/shift here that were pass through tracked like ralt, but they got upgraded to full SMK treatment!)
+
+    // note also that we're not tracking rwin that some machines (not mine) have .. could easily add that later if need be
+
+    _private   : (),
+    // capslock tracking
+    pub caps   : CMK,
+    // ralt is only tracked, but not synced
+    pub ralt   : TMK,
+    // the rest are synced mode keys (rwin not added so far as its not in my machine)
+    pub lalt   : SMK,
+    pub lwin   : SMK,
+    pub lctrl  : SMK,
+    pub rctrl  : SMK,
+    pub lshift : SMK,
+    pub rshift : SMK,
+
+}
+
+# [ derive (Debug, Clone) ]
+/// Arc wraps our collection of ModiferKeys for cheap cloning/sharing
+pub struct MKS (Arc<ModifierKeys>);
+
+impl Deref for MKS {
+    type Target = ModifierKeys;
+    fn deref(&self) -> &ModifierKeys { &self.0 }
+}
+
+
+
+
+
+/// holds representation for all modifier keys together, interlinked functionality etc impld here
+impl MKS {
+
+    pub fn new() -> MKS {
+        MKS ( Arc::new ( ModifierKeys {
+            _private : (),
+            // caps is a special singleton for itself
+            caps   : CMK::instance(),
+            // ralt is the only TMK left by now, for which we track but dont keep it sync
+            ralt   : TMK::new(Key::RAlt),
+            // the rest are SMKs (synced mod keys) .. (rwin excluded for now since I dont have it in this machine to test with)
+            lalt   : SMK::new(Key::LAlt),
+            lwin   : SMK::new(Key::LWin),
+            lctrl  : SMK::new(Key::LCtrl),
+            rctrl  : SMK::new(Key::RCtrl),
+            lshift : SMK::new(Key::LShift),
+            rshift : SMK::new(Key::RShift)
+        } ) )
+    }
+
+    /// NOTE: this static will be our source of ordering for the mod-keys in the combo-mod-keys-state bitmap!!
+    pub fn static_combo_bits_mod_keys() -> [ModKey; COMBO_STATE__MOD_KEY_BITS_N] {
+        // Note that there are bits in combo-bitmap only for physical keys
+        // (i.e. it excludes the virtual l/r agnostic enum-vals used during combo construction)
+        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; COMBO_STATE__MOD_KEY_BITS_N] = {
+            [caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift]
+        };
+        COMBO_STATE_BITS_MOD_KEYS
+    }
+
+    /// NOTE: the ordering in this static tuples array will be used to expand the l/r agnostic combo keys into their specialized versions
+    // note that this order is relied on elsewhere, plus we want the fn composition to have ctrl innermost (if we use ctrl masking, which we dont anymore)
+    // .. and the successive wrapping means the first one on this list is innermost .. and so its state will be updated with others masking
+    // also, we'd rather have win at the end here (and wrap outermost), because that has a spawn and delay in reactivation .. still ok but still
+    pub fn static_lr_mods_triplets () -> [(MK,MK,MK);4] {
+        static LR_MODS_TRIPLETS : [(MK,MK,MK);4] = [
+            (ctrl,  lctrl,  rctrl),
+            (shift, lshift, rshift),
+            (alt,   lalt,   ralt),
+            (win,   lwin,   rwin),
+        ];
+        LR_MODS_TRIPLETS
+    }
+
+    /// this will give the SMKs in order defined at the static LR_MODS_TRIPLETS so they can be matched up at runtime
+    pub fn lrmk_smks (&self) -> [&SMK;4] {
+        [&self.lctrl, &self.lshift, &self.lalt, &self.lwin]
+    }
+    pub fn mod_smk_pairs (&self) -> [(MK, &SMK);6] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
+        (lwin,   &self.lwin  ), (lalt,   &self.lalt  ),
+        (lctrl,  &self.lctrl ), (rctrl,  &self.rctrl ),
+        (lshift, &self.lshift), (rshift, &self.rshift),
+    ] }
+    pub fn mk_flag_pairs (&self) -> [(MK,Option<&Flag>);9] { [
+        (caps,   Some(&self.caps.down)),
+        (lalt,   Some(&self.lalt.down)),
+        (ralt,   Some(&self.ralt.down)),
+        (lwin,   Some(&self.lwin.down)),
+        (rwin,   None),
+        (lctrl,  Some(&self.lctrl.down)),
+        (rctrl,  Some(&self.rctrl.down)),
+        (lshift, Some(&self.lshift.down)),
+        (rshift, Some(&self.rshift.down)),
+        // ^^ note again, that for the combo bitmap construction, the l/r agnostic keys should have been expanded out and eliminated
+    ] }
+
+    pub fn get_cur_mod_keys_states_bitmap(&self) -> ComboStatesBits_ModKeys {
+        self.mk_flag_pairs() .map (|(_,fgo)| fgo.filter(|fg| fg.check()).is_some())
+    }
+    pub fn make_combo_mod_keys_states_bitmap(mod_keys:&[ModKey]) -> ComboStatesBits_ModKeys {
+        MKS::static_combo_bits_mod_keys() .map (|mk| mod_keys.contains(&mk))
+    }
+
+    pub fn some_shift_down (&self) -> bool { self.lshift.down.check() || self.rshift.down.check() }
+    pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.check()  || self.rctrl.down.check() }
+    pub fn some_alt_down   (&self) -> bool { self.lalt.down.check() } // ralt is disabled for all purposes
+    pub fn some_win_down   (&self) -> bool { self.lwin.down.check() } // we've not impld rwin so far
+
+    pub fn unstick_all (&self) {
+        [   &self.lalt, &self.lwin, &self.lctrl,
+            &self.rctrl, &self.lshift, &self.rshift
+        ] .into_iter() .for_each (|smk| {
+            smk.key.release(); smk.down.clear(); smk.active.clear();
+        });
+        self.ralt.down.clear(); self.ralt.key.release(); // this is the only TMK, others above were SMK
+
+        if self.caps.key.is_toggled() { key_utils::press_release(self.caps.key) }
+        self.caps.down.clear();
+    }
+
+    pub fn setup_tracking (&self, ksr:&KrS) {
+        // setup capslock, we'll completely disable it other than for krusty use
+        self.caps.setup_tracking (ksr);
+
+        // setup tracking for right-alt .. its completely blocked but tracked, we use it as shifts and combos
+        // (ctrl/shift etc used to be like this, but they have been promoted to full synced-mod-key tracking since)
+        self.ralt .setup_tracking (true);      // for ralt can setup w doBlock=true
+
+        // lalt and lwin are set as syncd-tracked-modifier-key with special (but identical) impl .. more details under SyncdModKey impl
+        // (we're not doing rwin simply coz its not in my machine .. and ofc ralt is used in fully disabled mode above)
+        self.lalt.setup_tracking (ksr);
+        self.lwin.setup_tracking (ksr);
+
+        // and we also updated both L/R of both shift and ctrl to do identical full-synced-tracked management like for lalt/lwin
+        self.lctrl.setup_tracking (ksr);
+        self.rctrl.setup_tracking (ksr);
+        self.lshift.setup_tracking (ksr);
+        self.rshift.setup_tracking (ksr);
+    }
+
+}
+
+
+
+
+
+/// impl for the caps-lock key specific functionality
 impl CMK {
 
     // ^^ CMK : Caps-Modifier-Key type .. basically tracks caps state and sets up caps as the global Layer-2/3/qks etc modifier key
@@ -104,33 +290,32 @@ impl CMK {
         ).clone()
     }
 
-    fn handle_key_down (&self, ksr:&KrS) {
+    fn handle_key_down (&self, ks:&KrS) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
-        let ks = ksr.clone();
-        if !ks.caps.down.check() {
+        if !ks.mod_keys.caps.down.check() {
             // capslock can come as repeats like other mod keys .. this was a fresh one
-            ks.caps.down.set();
+            self.down.set();
             ks.is_wheel_spin_invalidated.set();
             // lets notify the synced tracked mod keys, so they can invalidate/release themselves
-            combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_down());
+            ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_down());
         }
         if ks.mouse_left_btn_down.check() && !ks.in_managed_ctrl_down_state.check() {
             ks.in_managed_ctrl_down_state.set();
-            ks.lctrl.ensure_active();
+            ks.mod_keys.lctrl.ensure_active();
         }
     }
 
     fn handle_key_up (&self, ks:&KrS) {
-        ks.caps.down.clear();
+        ks.mod_keys.caps.down.clear();
         ks.is_wheel_spin_invalidated.set();
         if ks.in_managed_ctrl_down_state.check() {
             ks.in_managed_ctrl_down_state.clear();
-            if !ks.lctrl.down.check() { ks.lctrl.ensure_inactive() }
+            if !ks.mod_keys.lctrl.down.check() { ks.mod_keys.lctrl.ensure_inactive() }
         }
         // the following isnt strictly necessary, but useful in case some keyup falls through
-        ks.clear_mode_flags();
+        ks.mode_states.clear_flags();
         // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
-        combo_maps::mod_smk_pairs(&ks) .iter() .for_each (|(_,smk)| smk.process_caps_release());
+        ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_release());
     }
 
     pub fn setup_tracking (&self, ksr:&KrS) {
@@ -143,7 +328,7 @@ impl CMK {
             event_prop_directive: EventProp_Stop,
             combo_proc_directive: ComboProc_Disable,
             cb : KbdEvCbFn_InlineCallback {
-                cb : Arc::new ( move |_| { ks.caps.handle_key_down(&ks); EventProp_Stop } )
+                cb : Arc::new ( move |_| { ks.mod_keys.caps.handle_key_down(&ks); EventProp_Stop } )
             },
         } );
         let ks = ksr.clone();
@@ -151,7 +336,7 @@ impl CMK {
             event_prop_directive: EventProp_Stop,
             combo_proc_directive: ComboProc_Disable,
             cb : KbdEvCbFn_InlineCallback {
-                cb: Arc::new ( move |_| { ks.caps.handle_key_up(&ks); EventProp_Stop } )
+                cb: Arc::new ( move |_| { ks.mod_keys.caps.handle_key_up(&ks); EventProp_Stop } )
             },
         } );
     }
@@ -161,6 +346,8 @@ impl CMK {
 
 
 
+
+/// impl for Tracked-Modifier-Key functionality (currently only for R-Alt)
 impl TMK {
 
     // ^^ TMK : Tracked-Modifier-Key type .. unlike the SMK, this only tracks the physical (is down) state of the modifier key
@@ -210,13 +397,12 @@ impl TMK {
 
 
 
+
+/// impl for Synced-Modifier-Key functionality .. (e.g. for lalt/lwin/lctrl/rctrl/lshift/rshift)
 impl SMK {
 
     // ^^ SMK : Synced-Modifier-Key type .. tracks internal (is down), external (is active), and to-mask (is consumed) states
-    // .. we should currently be doing this for left-alt and left-win identically
-
-    // for the constructors, we'll create specific ones to create tracked-mod-keys for alt and win out of the initialized ks flags
-    // .. note that we want the SMK struct which is Arc wrapped SyncdModKey with deref .. that gives us cheaper clone and good code ergo
+    // .. we should currently be doing this for left-alt and left-win identically (.. expanded out to ctrl/shift too)
 
     pub fn new (key:Key) -> SMK {
         SMK ( Arc::new ( SyncdModKey {
@@ -249,7 +435,7 @@ impl SMK {
     // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
     pub fn handle_key_down (&self, ks:&KrS) {
-        if ks.caps.down.check() {
+        if ks.mod_keys.caps.down.check() {
             // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
             self.down.set();
             self.consumed.clear();
@@ -270,9 +456,10 @@ impl SMK {
     fn handle_key_up (&self, ks:&KrS) {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
+        // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
         self.down.clear();
         ks.is_wheel_spin_invalidated.set();
-        if !self.active.check() || ks.caps.down.check() {
+        if !self.active.check() || ks.mod_keys.caps.down.check() {
             // if inactive or caps-down we just suppress this keyup
         } else {
             if self.is_keyup_unified() && self.paired_down() {
@@ -311,8 +498,8 @@ impl SMK {
 
 
     pub fn process_caps_down (&self) {
-        // we will immediately invalidate and clear any down lalt found upon caps activation!
-        // note that internally tracked physical is_alt_down will continue to be down!
+        // we will immediately invalidate and clear any down mod-key found upon caps activation!
+        // note that internally tracked physical is_down will continue to be down
         // note also that each of paired mod-keys will get their own notification too
         if self.down.check() && self.active.check() {
             self.consumed.set();
@@ -321,7 +508,7 @@ impl SMK {
         }
     }
     pub fn process_caps_release (&self) {
-        // since we deactivate alt/win on caps press, check to see if we want to reactivate them
+        // since we deactivate mod-keys on caps press, check to see if we want to reactivate them
         // note: we'll setup a delay for activation to allow for some sloppy combo releases etc
         // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
         // .. so to check the logic here must use lower level key inspections like via ahk key history!!

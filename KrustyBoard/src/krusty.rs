@@ -3,12 +3,12 @@ mod mod_keys;
 
 use std::{time, time::Instant};
 use std::thread::{sleep, spawn};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use derivative::Derivative;
+//use derivative::Derivative;
 
 //use closure::closure;
 // ^^ gives a nice macro that eliminates clutter from having to clone everywhere
@@ -16,29 +16,24 @@ use derivative::Derivative;
 
 use crate::{KbdEvent, KbdKey, MouseButton, MouseWheel, utils};
 
-use crate::krusty::{mod_keys::*};
-use crate::krusty::combo_maps::ModeState;
+use crate::krusty::{mod_keys::*, combo_maps::*};
 
 
 // todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
 
 
 // we'll define some easier type aliases (CallBack, ActionFn etc) to pass around triggered actions and so on
+/// Arc/Action-Function Fn() representation that can be passed around between threads
 type AF  = Arc <dyn Fn() + Send + Sync + 'static> ;
 
 type Key = KbdKey ;
 
 
-//type KrS = Arc <KrustyState>;
-//type CMK = Arc <CapsModKey>;
-//type TMK = Arc <TrackedModKey>;
-//type SMK = Arc <SyncdModKey>;
-// ^^ made these into new-type (some in their own module/file), with deref impld, and then impld all functionality on those
-// .. on gains on L2K, but on SMK, lets us impl functionality on the Arc wrapped SMK so we can clone and use it w/o doing smk.0.<bla-bla>
 
 
 
 # [ derive (Debug, Default, Clone) ]
+/// representation for all our flags for states mod-states, modifier-keys, mouse-btn-state etc
 pub struct Flag (Arc<AtomicBool>);
 // ^^ simple sugar that helps reduce clutter in code
 
@@ -50,71 +45,39 @@ impl Flag {
 
 
 
-# [ derive (Derivative) ]
-# [ derivative (Debug, Default) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
+
+
+# [ derive (Debug) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
+/// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
 pub struct KrustyState {
+    // having this disallows direct instantiation
+    _private : (),
+
     // used for toggling key processing .. should only listen to turn-back-on combo
-    in_disabled_state: Flag,
+    pub in_disabled_state: Flag,
 
-    // caps will be tracked for internal reference, and we'll assume we'll ALWAYS operate with caps-lock off
-    # [ derivative ( Default ( value = "CMK::instance()" ) ) ]
-    caps : CMK,
+    // mod-keys .. details in its declaration
+    pub mod_keys : MKS,
 
-    // we'll track all mod keys except r-alt as syncd-modifier-keys, where we track the phys and logical states, as well as whether to mask their release
-    // this allows us to add any composition of these in combos with any other key incl other mod keys while keeping internal/external models accurate
-    # [ derivative ( Default ( value = "SMK::new(Key::LAlt)" ) ) ]
-    lalt : SMK,
-    # [ derivative ( Default ( value = "SMK::new(Key::LWin)" ) ) ]
-    lwin : SMK,
-    # [ derivative ( Default ( value = "SMK::new(Key::LCtrl)" ) ) ]
-    lctrl : SMK,
-    # [ derivative ( Default ( value = "SMK::new(Key::RCtrl)" ) ) ]
-    rctrl : SMK,
-    # [ derivative ( Default ( value = "SMK::new(Key::LShift)" ) ) ]
-    lshift : SMK,
-    # [ derivative ( Default ( value = "SMK::new(Key::RShift)" ) ) ]
-    rshift : SMK,
+    // mode states .. details in its declaration
+    pub mode_states : MSS,
 
-    // the only other mod key r-alt we'll do a simpler tracked-modifier-key (which we dont try to keep syncd w external state)
-    // and for r-alt, at binding time, it is completely blocked (there used to be ctrl/shift here before that were pass through tracked)
-    # [ derivative ( Default ( value = "TMK::new(Key::RAlt)" ) ) ]
-    ralt : TMK,
-
-    // note that we're not tracking rwin that some machines (not mine) have .. could easily add that later if need be
-
-
-    // these track the word/fast nav and sel/del caret modes for l2 action
-    l2_sel_mode_key_down:  Flag,
-    l2_del_mode_key_down:  Flag,
-    l2_word_mode_key_down: Flag,
-    l2_fast_mode_key_down: Flag,
-
-    // the quick keys (aka shortcuts) mode designates a shortcuts combo (ctrl-Q) in combo with which any other key combo can be mapped
-    qks_mode_key_down:  Flag,
-    qks1_mode_key_down: Flag,
-    qks2_mode_key_down: Flag,
-    qks3_mode_key_down: Flag,
-
-    // we'll add these three flags just so we dont have to check all 4/8 flags at runtime for every keypress fallback action
-    some_l2_mode_active:   Flag,
-    some_qks_mode_active:  Flag,
-    some_caps_mode_active: Flag,
-
-    mouse_left_btn_down:  Flag,
-    mouse_right_btn_down: Flag,
+    // mouse btn states .. need to impl caps-as-ctrl, or right-mouse-scroll behavior etc
+    pub mouse_left_btn_down:  Flag,
+    pub mouse_right_btn_down: Flag,
 
     // for caps-ctrl eqv for caps-tab or caps-wheel, we'll send ctrl press/release at the right times, and will need to track that
-    in_managed_ctrl_down_state: Flag,
+    pub in_managed_ctrl_down_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
-    in_right_btn_scroll_state: Flag,
+    pub in_right_btn_scroll_state: Flag,
 
-    # [ derivative ( Default (value = "RwLock::new(Instant::now())") ) ]
-    last_wheel_stamp: RwLock<Instant>,
-    is_wheel_spin_invalidated: Flag, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
+    pub last_wheel_stamp: RwLock<Instant>,
+    pub is_wheel_spin_invalidated: Flag, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
 }
 
 
 # [ derive (Debug, Clone) ]
+/// Arc wrapped KrustyState for cheap cloning/sharing
 pub struct KrS (Arc <KrustyState>);
 // ^^ we'll use this wrapped type so cloning and passing around is cheap
 
@@ -123,55 +86,68 @@ impl Deref for KrS {
     fn deref(&self) -> &KrustyState { &self.0 }
 }
 
-impl KrS {
-    pub fn new () -> KrS {
-        KrS ( Arc::new ( KrustyState::default() ) )
-    }
-    fn clear_mode_flags (&self) {
-        self.l2_sel_mode_key_down.clear(); self.l2_del_mode_key_down.clear(); self.l2_word_mode_key_down.clear(); self.l2_fast_mode_key_down.clear();
-        self.qks_mode_key_down.clear();    self.qks1_mode_key_down.clear();   self.qks2_mode_key_down.clear();    self.qks3_mode_key_down.clear();
-        self.some_l2_mode_active.clear();  self.some_qks_mode_active.clear(); self.some_caps_mode_active.clear();
-    }
-    fn some_shift_down (&self) -> bool { self.lshift.down.check() || self.rshift.down.check() }
-    fn some_ctrl_down  (&self) -> bool { self.lctrl.down.check()  || self.rctrl.down.check() }
-    fn some_alt_down   (&self) -> bool { self.lalt.down.check() } // ralt is disabled for all purposes
-    fn some_win_down   (&self) -> bool { self.lwin.down.check() } // we've not impld rwin so far
-
-    fn unstick_all (&self) {
-        self.clear_mode_flags();
-        let _ = [&self.lalt, &self.lwin, &self.lctrl, &self.rctrl, &self.lshift, &self.rshift] .into_iter() .for_each (|smk| {
-            smk.key.release(); smk.down.clear(); smk.active.clear();
-        });
-        self.ralt.down.clear(); self.ralt.key.release(); // this is the only TMK, others above were SMK
-        use MouseButton::*;
-        LeftButton.release(); RightButton.release(); MiddleButton.release(); X1Button.release(); X2Button.release();
-        let _ = [&self.mouse_left_btn_down, &self.mouse_right_btn_down, &self.in_right_btn_scroll_state, &self.in_managed_ctrl_down_state
-        ] .into_iter() .for_each (|flag| flag.clear());
-        if Key::CapsLock.is_toggled() { key_utils::press_release(Key::CapsLock) }
-        self.caps.down.clear();
-    }
-
-}
 
 
 
 
-
+/// Representation for all full state and data fro our Krusty-Board application
 pub struct Krusty {
     // this is mostly just a utility wrapper sugar to pass things around
     _private : (),   // prevents direct instantiation of this struct
     // KrS is Arc<KrustyState>, holds all state flags
     pub ks: KrS,
     // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
-    pub combos_map : Arc <RwLock <HashMap <combo_maps::Combo, AF>>>,
-    // we'll also keep a mapping of mode keys and the states they activate for l2/qks impl
-    pub mode_keys_map : Arc <RwLock <HashMap <Key, ModeState>>>,
+    pub cm: CombosMap,
     // instead of polluting combos_map, we'll hold a registry for keys to gen default bindings for
     pub default_bind_keys : Arc <RwLock <HashSet <Key>>>,
 }
 
 
 
+
+
+/// impl for Krusty-State
+impl KrS {
+
+    pub fn new () -> KrS {
+        KrS ( Arc::new ( KrustyState {
+            _private : (),
+            in_disabled_state : Flag::default(),
+
+            mod_keys    : MKS::new(),
+            mode_states : MSS::new(),
+
+            mouse_left_btn_down  : Flag::default(),
+            mouse_right_btn_down : Flag::default(),
+
+            in_managed_ctrl_down_state : Flag::default(),
+            in_right_btn_scroll_state  : Flag::default(),
+
+            last_wheel_stamp : RwLock::new(Instant::now()),
+            is_wheel_spin_invalidated : Flag::default(),
+        } ) )
+    }
+
+    fn unstick_all (&self) {
+        self.mode_states.clear_flags();
+        self.mod_keys.unstick_all();
+
+        use MouseButton::*;
+        LeftButton.release(); RightButton.release(); MiddleButton.release();
+        X1Button.release(); X2Button.release();
+
+        [   &self.mouse_left_btn_down, &self.mouse_right_btn_down,
+            &self.in_right_btn_scroll_state, &self.in_managed_ctrl_down_state
+        ] .into_iter() .for_each (|flag| flag.clear());
+    }
+
+}
+
+
+
+
+
+/// impl for Krusty data and state struct
 impl Krusty {
 
     // NOTE: we've decided to mostly impl things grouped by related functionality in disparate modules rather than under impl here
@@ -182,24 +158,23 @@ impl Krusty {
         let ks = KrS::new();
 
         // and we'll pair up the left/right values where applicable
-        ks.lctrl  .link_pair (&ks.rctrl);  ks.rctrl  .link_pair (&ks.lctrl);
-        ks.lshift .link_pair (&ks.rshift); ks.rshift .link_pair (&ks.lshift);
+        ks.mod_keys.lctrl  .link_pair (&ks.mod_keys.rctrl);  ks.mod_keys.rctrl  .link_pair (&ks.mod_keys.lctrl);
+        ks.mod_keys.lshift .link_pair (&ks.mod_keys.rshift); ks.mod_keys.rshift .link_pair (&ks.mod_keys.lshift);
 
         // now we can construct the Krusty struct we want
         Krusty {
             _private : (),
             ks,
-            combos_map        : Arc::new(RwLock::new (HashMap::new())),
-            mode_keys_map     : Arc::new(RwLock::new (HashMap::new())),
+            cm : CombosMap::new(),
             default_bind_keys : Arc::new(RwLock::new (HashSet::new())),
         }
     }
 
-    pub fn cg    (&self, key:Key) -> combo_maps::CG_K  { combo_maps::CG_K::new (key, &self.ks) }
-    pub fn cg_af (&self, af:AF)   -> combo_maps::CG_AF { combo_maps::CG_AF::new (af, &self.ks) }
+    pub fn cg    (&self, key:Key) -> ComboGen_wKey { ComboGen_wKey::new (key, &self.ks) }
+    pub fn cg_af (&self, af:AF)   -> ComboGen_wAF  { ComboGen_wAF::new  (af,  &self.ks) }
 
     #[allow(dead_code)]
-    fn setup_global_disable (&self) {
+    pub fn setup_global_disable (&self) {
         // todo: wont be straight-forward if we want to handle this at hook receipt
         // .. will need a global check there, as well as allowing selectively for the re-enable combo!
     }
@@ -209,6 +184,8 @@ impl Krusty {
 
 
 
+
+/// simple key-action utilities
 pub mod key_utils {
 
     use crate::krusty::*;
@@ -243,7 +220,10 @@ pub mod key_utils {
 
 
 
-pub mod mouse_btn_setups { // setups for mouse btn handling
+
+
+/// setups for binding mouse btns and handling their events
+pub mod mouse_btn_setups {
 
     use crate::krusty::{*, key_utils::*};
     use crate::{MouseEventCallbackEntry, EventPropagationDirective::*, MouseEventCallbackFnType::*, MouseEventCbMapKeyAction::*};
@@ -251,9 +231,9 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
     // tracking left btn down state is required for ctrl-wheel (zoom) etc
     fn handle_mouse_left_btn_down (ks:&KrS) {
         ks.mouse_left_btn_down.set();
-        if ks.caps.down.check() {
+        if ks.mod_keys.caps.down.check() {
             ks.in_managed_ctrl_down_state.set();
-            ks.lctrl.ensure_active();   // this allows caps-as-ctrl for drag drop etc
+            ks.mod_keys.lctrl.ensure_active();   // this allows caps-as-ctrl for drag drop etc
         }
         MouseButton::LeftButton.press()
     }
@@ -339,7 +319,10 @@ pub mod mouse_btn_setups { // setups for mouse btn handling
 
 
 
-pub mod mouse_wheel_setups { // setups for mouse wheel handling
+
+
+/// setups for mouse wheel bindings and handling their events
+pub mod mouse_wheel_setups {
 
     use crate::krusty::{*, key_utils::*};
     use crate::{MouseEventCallbackEntry, EventPropagationDirective::*, MouseEventCallbackFnType::*, MouseEventCbMapKeyAction::*};
@@ -370,33 +353,33 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
             // right-mouse-btn-wheel support for switche task switching
             ksr.in_right_btn_scroll_state.set();
             let key = if incr.is_positive() { Key::F17 } else { Key::F16 };
-            //ksr.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
-            //ksr.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll
+            //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
+            //ksr.mod_keys.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll
             press_release(key);                                 // we'd rather use direct press hotkeys for best perf
-        } else  if ksr.lalt.down.check() {
+        } else  if ksr.mod_keys.lalt.down.check() {
             // wheel support for scrolling in windows native alt-tab task-switching screen
             // this requires a system call to check alt-tab window, so push it out to thread?
             // .. naah, we're always spawned out from hook thread (for blocking binds), so theres no point
-            ksr.lalt.consumed.set();
+            ksr.mod_keys.lalt.consumed.set();
             if get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
-                ksr.lalt.ensure_active();    // we're already down but just in case its down/inactive
+                ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
                 handle_alt_tab_wheel(incr)
             } else {
                 // alt-wheel for (fine delta) control, caps-alt-wheel for larger adjustments
-                let mult = if ksr.caps.down.check() || ksr.some_shift_down() || ksr.lwin.down.check() {5} else {1};
+                let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() || ksr.mod_keys.lwin.down.check() {5} else {1};
                 incr_brightness (incr * mult)
             }
-        } else if ksr.lwin.down.check() {
+        } else if ksr.mod_keys.lwin.down.check() {
             // win-wheel for (fine delta) control, caps-win-wheel for larger adjustments
-            ksr.lwin.consumed.set();
-            let mult = if ksr.caps.down.check() || ksr.some_shift_down() {2} else {1};
+            ksr.mod_keys.lwin.consumed.set();
+            let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() {2} else {1};
             incr_volume (incr * mult)
-        } else if ksr.caps.down.check() {
+        } else if ksr.mod_keys.caps.down.check() {
             ksr.in_managed_ctrl_down_state.set();
             //Key::LCtrl.press();
-            ksr.lctrl.ensure_active();
+            ksr.mod_keys.lctrl.ensure_active();
             MouseWheel::DefaultWheel.scroll(delta); // caps-wheel as ctrl-wheel (zoom etc)
-        } else if ksr.some_shift_down() {
+        } else if ksr.mod_keys.some_shift_down() {
             //handle_horiz_scroll_wheel(incr);
             // ^^ todo:: .. (and for now, just let default pass through)
             MouseWheel::DefaultWheel.scroll(delta);
@@ -448,8 +431,10 @@ pub mod mouse_wheel_setups { // setups for mouse wheel handling
 
 
 
-pub mod special_keys_setups { // special keys handling
 
+
+/// handling for any 'special' keys that need to be bound/handled directly (like for mouse btns) rather than via combo-maps
+pub mod special_keys_setups {
 
     use crate::krusty::*;
 
@@ -471,36 +456,21 @@ pub mod special_keys_setups { // special keys handling
 
 
 
+/// setup for the entire krusty-board application, incl setting up key/btn bindings and combos
 pub fn setup_krusty_board () {
 
-    use crate::krusty::{*, key_utils::*, special_keys_setups::*, combo_maps::*,
-                        mouse_btn_setups::*, mouse_wheel_setups::*};
+    use crate::krusty::{*, key_utils::*, special_keys_setups::*, mouse_btn_setups::*, mouse_wheel_setups::*};
 
     use crate::utils::{window_utils::*, process_utils::*};
 
-    use crate::krusty::{KbdKey::*, combo_maps::{ModKey::*, ModeState::*}};
+    use crate::krusty::{KbdKey::*, mod_keys::ModKey::*, combo_maps::ModeState_T::*};
     // ^^ a little extreme, but we'll see if its tolerable
 
 
     let k = Krusty::new();
 
-    // setup capslock, we'll completely disable it other than for krusty use
-    k.ks.caps.setup_tracking (&k.ks);
-
-    // setup tracking for right-alt .. its completely blocked but tracked, we use it as shifts and combos
-    k.ks.ralt .setup_tracking (true);      // for ralt can setup w doBlock=true
-
-    // and shift .. this is simple non-blocking tracking, only tracked to enable a few combos with caps
-    k.ks.lshift.setup_tracking (&k.ks);     // these others have doBlock = false
-    k.ks.rshift.setup_tracking (&k.ks);
-
-    // and even ctrl .. again simple non-blocking, just tracking flags to allow for natural ctrl-alt-? when alt-? is remapped
-    k.ks.lctrl.setup_tracking (&k.ks);
-    k.ks.rctrl.setup_tracking (&k.ks);
-
-    // lalt and lwin are set as syncd-tracked-modifier-key with special (but identical) impl .. more details under SyncdModKey impl
-    k.ks.lalt.setup_tracking (&k.ks);
-    k.ks.lwin.setup_tracking (&k.ks);
+    // setup all the mod-keys .. (can override this with own setup if desired)
+    k.ks.mod_keys.setup_tracking(&k.ks);
 
 
     // handling for mouse left btn, mostly to allow caps-as-ctrl behavior during drag drops and clicks
@@ -544,25 +514,27 @@ pub fn setup_krusty_board () {
 
     // we'll start with some caps-atypical caps-as-shift mappings, basically nums or kbd-right symbols not otherwise involved in l2
     "1234567890-=[]\\;\'/." .chars() .for_each ( |c| {
-        Key::from_char(c) .into_iter() .for_each ( |key| add_combo (&k, &k.cg(key).m(caps), &k.cg(key).m(lshift)) )
+        Key::from_char(c) .into_iter() .for_each ( |key|
+            k.cm .add_combo (&k.ks, &k.cg(key).m(caps), &k.cg(key).m(lshift))
+        )
     } );
 
 
 
     // lets also disable the win-number combos as they annoyingly activate/minimize items from taskbar etc
     "1234567890" .chars() .map (|c| Key::from_char(c)) .flatten() .for_each ( |key| {
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin),                  no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(caps),          no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(lalt),          no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(ralt),          no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(caps).m(lalt),  no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(caps).m(ralt),  no_action());
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(lwin).m(caps).m(shift), no_action());
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin),                  no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(caps),          no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(lalt),          no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(ralt),          no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(caps).m(lalt),  no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(caps).m(ralt),  no_action() );
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(lwin).m(caps).m(shift), no_action() );
     } ); // some of ^^ these will get overwritten by specific win-combos added later .. which is fine
     // note that at least for now, we're choosing to ignore caps-shift, caps-ctrl etc combos, though ofc could impl if need arises
 
     // we'll disable win-d too, as I never use that show/hide desktop and it's disruptive
-    add_cnsm_bare_af_combo (&k, &k.cg(D).m(lwin), no_action());
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(D).m(lwin), no_action());
 
 
 
@@ -572,35 +544,48 @@ pub fn setup_krusty_board () {
     // further, combos incl all mode states and some other flags .. for a combo to trigger those would have to match too ..
     // soo .. we'll let this simple combo be, but it will mostly only be useful to clear mouse-btn states .. not even eqv of press-rel mod-keys
     let ks = k.ks.clone(); let clear = Arc::new (move || ks.unstick_all());
-    add_bare_af_combo (&k, &k.cg(Insert).m(caps).m(lalt), clear.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Insert).m(caps).m(lalt), clear.clone());
 
 
 
+    fn register_mode_key (k: &Krusty, key: Key, ms: &MS) {
+        // first we'll do the registration, then we can try and set any auxillary combos here too
+        ms .register_key (key);
+
+        //add_bare_af_combo (k, k.cg(key).m(caps).s(ms), no_action());
+        // ^^ not adequate as we'll have multi-mode and multi-modkey combos .. better to just disable it in runtime fallbacks
+
+        // however, we can add in some replacement actions here .. basically ralt w/ those can give the expected w/caps actions
+        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt),           &k.cg(key).m(lctrl));
+        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lalt),   &k.cg(key).m(lctrl).m(lalt));
+        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lshift), &k.cg(key).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lwin),   &k.cg(key).m(lctrl).m(lwin));
+    }
 
     // setup keys for layer-2 caret nav sel/del/fast modes
     // note: registering as mode key will set w/caps actions to nothing, other combos can be set as usual elsewhere
     // .. it will also add default replacement for caps-plus-combos to be caps-ralt-plus combos, but ofc can override those too
-    register_mode_key (&k, E, sel );
-    register_mode_key (&k, D, del );
-    register_mode_key (&k, F, word);
-    register_mode_key (&k, R, fast);
+    register_mode_key ( &k, E, &k.ks.mode_states.sel  );
+    register_mode_key ( &k, D, &k.ks.mode_states.del  );
+    register_mode_key ( &k, F, &k.ks.mode_states.word );
+    register_mode_key ( &k, R, &k.ks.mode_states.fast );
 
     // setup the key for l4 shortcuts mode, but the mechanism is same as for the caret modes
-    register_mode_key (&k, Q,        qks );
-    register_mode_key (&k, Numrow_1, qks1);
-    register_mode_key (&k, Numrow_2, qks2);
-    register_mode_key (&k, Numrow_3, qks3);
+    register_mode_key ( &k, Q,        &k.ks.mode_states.qks  );
+    register_mode_key ( &k, Numrow_1, &k.ks.mode_states.qks1 );
+    register_mode_key ( &k, Numrow_2, &k.ks.mode_states.qks2 );
+    register_mode_key ( &k, Numrow_3, &k.ks.mode_states.qks3 );
 
 
 
     // f in caret mode, so we'll remap some of the other combos to replace ctr-f etc
-    add_combo (&k, &k.cg(F).m(lalt),         &k.cg(F).m(ctrl));     // alt-f to ctrl-f
-    add_combo (&k, &k.cg(F).s(word).m(ralt), &k.cg(F).m(lalt));     // caps-ralt-f to alt-f (instead of default ctrl-f)
-    add_combo (&k, &k.cg(F).s(word).m(lalt), &k.cg(F).m(lalt));     // caps-lalt-f to alt-f too, though it goes against typical mode-key usage
-    add_combo (&k, &k.cg(F).s(word).s(qks1), &k.cg(F).m(lalt));     // caps-1-f also to alt-f (at least its one handed)
+    k.cm .add_combo (&k.ks, &k.cg(F).m(lalt),         &k.cg(F).m(ctrl));     // alt-f to ctrl-f
+    k.cm .add_combo (&k.ks, &k.cg(F).s(word).m(ralt), &k.cg(F).m(lalt));     // caps-ralt-f to alt-f (instead of default ctrl-f)
+    k.cm .add_combo (&k.ks, &k.cg(F).s(word).m(lalt), &k.cg(F).m(lalt));     // caps-lalt-f to alt-f too, though it goes against typical mode-key usage
+    k.cm .add_combo (&k.ks, &k.cg(F).s(word).s(qks1), &k.cg(F).m(lalt));     // caps-1-f also to alt-f (at least its one handed)
 
     // e in caret mode, so we'll put our left-handed-enter on alt-e instead .. (note that there are also caps-space-* combos for *-enter)
-    add_combo (&k, &k.cg(E).m(lalt),         &k.cg(Enter));             // alt-e -> enter
+    k.cm .add_combo (&k.ks, &k.cg(E).m(lalt),         &k.cg(Enter));             // alt-e -> enter
 
 
 
@@ -608,100 +593,100 @@ pub fn setup_krusty_board () {
 
 
     // setup backquote .. make normal case be Delete, caps or alt do back-tick, and shift do its tilde
-    add_combo (&k, &k.cg(Backquote),          &k.cg(ExtDelete));
-    add_combo (&k, &k.cg(Backquote).m(shift), &k.cg(Backquote).m(shift));
-    add_combo (&k, &k.cg(Backquote).m(caps),  &k.cg(Backquote));
-    add_combo (&k, &k.cg(Backquote).m(lalt),  &k.cg(Backquote));
-    //add_combo (*k, &k.cg(Backquote).m(ralt),  &k.cg(Backquote).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote),          &k.cg(ExtDelete));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(shift), &k.cg(Backquote).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(caps),  &k.cg(Backquote));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(lalt),  &k.cg(Backquote));
+    //k.cm .add_combo (&k.sk, &k.cg(Backquote).m(ralt),  &k.cg(Backquote).m(shift));
     // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
 
 
     // setup tab .. caps-as-ctrl for caps-tab switching, incl for ctrl-shift-tab .. also ralt-tab for shift-tab
     let ks = k.ks.clone();
     let cb : AF = Arc::new (move || {
-        if ks.caps.down.check() {
+        if ks.mod_keys.caps.down.check() {
             ks.in_managed_ctrl_down_state.set();
-            ks.lctrl.ensure_active();  // this enables caps-as-ctrl for caps-tab switching
+            ks.mod_keys.lctrl.ensure_active();  // this enables caps-as-ctrl for caps-tab switching
             // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
             press_release(Tab)
         }
     } );
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps), cb.clone());
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps).m(shift), wrapped_action(LShift, cb.clone()));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps), cb.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(shift), wrapped_action(LShift, cb.clone()));
     // ^^ this enables the natural ctrl-shift-tab to do backwards tablist nav
     // .. note that we do 'bare' here because caps-tab is in managed ctrl state, and we dont wana get wrapped w ctrl inactive guards here
 
     // we'll also need to put these in combos wit the managed-ctrl-state already active (as its among combo bits now)
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps).s(mngd_ctrl_dn), cb.clone());
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps).m(shift).s(mngd_ctrl_dn), wrapped_action(LShift, cb.clone()));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).s(mngd_ctrl_dn), cb.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(shift).s(mngd_ctrl_dn), wrapped_action(LShift, cb.clone()));
 
     // lets add explicit support for arrow keys during ctrl tab (default doesnt check for active/inactive guards)
-    add_bare_af_combo (&k, &k.cg(Left ).m(caps).s(mngd_ctrl_dn), base_action(Left ));
-    add_bare_af_combo (&k, &k.cg(Right).m(caps).s(mngd_ctrl_dn), base_action(Right));
-    add_bare_af_combo (&k, &k.cg(Up   ).m(caps).s(mngd_ctrl_dn), base_action(Up   ));
-    add_bare_af_combo (&k, &k.cg(Down ).m(caps).s(mngd_ctrl_dn), base_action(Down ));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Left ).m(caps).s(mngd_ctrl_dn), base_action(Left ));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Right).m(caps).s(mngd_ctrl_dn), base_action(Right));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Up   ).m(caps).s(mngd_ctrl_dn), base_action(Up   ));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Down ).m(caps).s(mngd_ctrl_dn), base_action(Down ));
 
     // and finally for ralt-as-shift support for caps-tabbing too
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps).m(ralt),                 wrapped_action(LShift, cb.clone()));
-    add_bare_af_combo (&k, &k.cg(Tab).m(caps).m(ralt).s(mngd_ctrl_dn), wrapped_action(LShift, cb.clone()));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(ralt),                 wrapped_action(LShift, cb.clone()));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(ralt).s(mngd_ctrl_dn), wrapped_action(LShift, cb.clone()));
 
 
 
 
     // setup space key .. ralt-space as enter, caps-space as ctrl-space, caps-lalt-space as alt-enter for intellij
-    add_combo (&k, &k.cg(Space).m(ralt),         &k.cg(Enter));             // ralt-space -> enter
-    add_combo (&k, &k.cg(Space).m(caps).m(lalt), &k.cg(Enter).m(lalt));     // caps-lalt-space -> alt-enter
-    add_combo (&k, &k.cg(Space).m(caps).m(ralt), &k.cg(Escape));            // caps-ralt-space -> Escape
-    //add_combo (&k, &k.cg(Space).m(caps),         &k.cg(Space).m(ctrl));   // caps-space -> ctrl-enter
+    k.cm .add_combo (&k.ks, &k.cg(Space).m(ralt),         &k.cg(Enter));             // ralt-space -> enter
+    k.cm .add_combo (&k.ks, &k.cg(Space).m(caps).m(lalt), &k.cg(Enter).m(lalt));     // caps-lalt-space -> alt-enter
+    k.cm .add_combo (&k.ks, &k.cg(Space).m(caps).m(ralt), &k.cg(Escape));            // caps-ralt-space -> Escape
+    //k.cm .add_combo (&k.ks, &k.cg(Space).m(caps),         &k.cg(Space).m(ctrl));   // caps-space -> ctrl-enter
     // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
 
 
 
     // win-m by default minimized all windows .. we just want to disable it
-    add_cnsm_bare_af_combo (&k, k.cg(M).m(lwin), no_action());
+    k.cm .add_cnsm_bare_af_combo (&k.ks, k.cg(M).m(lwin), no_action());
 
     // win-i should start irfanview
-    add_cnsm_bare_af_combo (&k, k.cg(I).m(lwin), Arc::new (|| start_irfanview()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, k.cg(I).m(lwin), Arc::new (|| start_irfanview()));
 
     // win-n should start chrome-incognito
-    add_cnsm_bare_af_combo (&k, k.cg(N).m(lwin), Arc::new (|| start_chrome_incognito()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, k.cg(N).m(lwin), Arc::new (|| start_chrome_incognito()));
 
     // we'll setup win-C (and caps-alt-C) to quickly bring up chrome Tabs-Outliner via switche Alt-F20 hotkey
-    add_combo (&k, k.cg(C).m(lwin),         &k.cg(F20).m(lctrl));      // win-c -> ctrl-F20 .. switche tabs-outliner
-    add_combo (&k, k.cg(C).m(caps).m(lalt), &k.cg(F20).m(lctrl));      // caps-lalt-c -> ctrl-F20 .. one-handed
+    k.cm .add_combo (&k.ks, k.cg(C).m(lwin),         &k.cg(F20).m(lctrl));      // win-c -> ctrl-F20 .. switche tabs-outliner
+    k.cm .add_combo (&k.ks, k.cg(C).m(caps).m(lalt), &k.cg(F20).m(lctrl));      // caps-lalt-c -> ctrl-F20 .. one-handed
 
 
     // in cur laptop, Fn-F6/F7 do brightness, but at +10 incrs .. set them to do small incrs with alt combos
-    add_cnsm_bare_af_combo (&k, &k.cg(F6).m(lalt), Arc::new (|| incr_brightness(-1)));
-    add_cnsm_bare_af_combo (&k, &k.cg(F7).m(lalt), Arc::new (|| incr_brightness(1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F6).m(lalt), Arc::new (|| incr_brightness(-1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F7).m(lalt), Arc::new (|| incr_brightness(1)));
 
     // actually, since we use win-1/2/3 as vol mute/down/up, might as well also set alt-1/2/3 for brightness zero/down/up
     // (note that numrow 1/2/3 with caps are qks* keys, so they cant be used with any caps combos as those would be silent!)
-    add_cnsm_bare_af_combo (&k, &k.cg(Numrow_1).m(lalt),           Arc::new (|| incr_brightness(-100)));
-    add_cnsm_bare_af_combo (&k, &k.cg(Numrow_2).m(lalt),           Arc::new (|| incr_brightness(-1)));
-    add_cnsm_bare_af_combo (&k, &k.cg(Numrow_3).m(lalt),           Arc::new (|| incr_brightness(1)));
-    add_cnsm_bare_af_combo (&k, &k.cg(Numrow_2).m(lalt).m(lshift), Arc::new (|| incr_brightness(-5)));
-    add_cnsm_bare_af_combo (&k, &k.cg(Numrow_3).m(lalt).m(lshift), Arc::new (|| incr_brightness(5)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),           Arc::new (|| incr_brightness(-100)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),           Arc::new (|| incr_brightness(-1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),           Arc::new (|| incr_brightness(1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt).m(lshift), Arc::new (|| incr_brightness(-5)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt).m(lshift), Arc::new (|| incr_brightness(5)));
 
     // win-2 is vol down, win-3 is vol up, win-1 can do mute
-    add_af_combo (&k, &k.cg(Numrow_1).m(lwin),           &k.cg_af(base_action(VolumeMute)));
-    add_af_combo (&k, &k.cg(Numrow_2).m(lwin),           &k.cg_af(base_action(VolumeDown)));
-    add_af_combo (&k, &k.cg(Numrow_3).m(lwin),           &k.cg_af(base_action(VolumeUp)));
-    add_af_combo (&k, &k.cg(Numrow_2).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeDown)));  // double-action
-    add_af_combo (&k, &k.cg(Numrow_3).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeUp)));    // double-action
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),           &k.cg_af(base_action(VolumeMute)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),           &k.cg_af(base_action(VolumeDown)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),           &k.cg_af(base_action(VolumeUp)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeDown)));  // double-action
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeUp)));    // double-action
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
-    add_combo (&k, &k.cg(F1),          &k.cg(F16));             // switche next
-    //add_combo (&k, &k.cg(F1).m(shift), &k.cg(F17));           // switche prev
-    add_combo (&k, &k.cg(F1).m(shift), &k.cg(F16).m(shift));    // switche prev (passthrough shift-F16 instead of F17 is more efficient)
-    add_combo (&k, &k.cg(F1).m(lalt),  &k.cg(F19).m(ctrl));     // switche no-popup next switch
-    add_combo (&k, &k.cg(F1).m(ralt),  &k.cg(F1));
-    add_combo (&k, &k.cg(F1).m(caps),  &k.cg(VolumeMute));
-    add_combo (&k, &k.cg(F1).m(lwin),  &k.cg(MediaPlayPause));
+    k.cm .add_combo (&k.ks, &k.cg(F1),          &k.cg(F16));             // switche next
+    //k.cm .add_combo (&k.ks, &k.cg(F1).m(shift), &k.cg(F17));           // switche prev
+    k.cm .add_combo (&k.ks, &k.cg(F1).m(shift), &k.cg(F16).m(shift));    // switche prev (passthrough shift-F16 instead of F17 is more efficient)
+    k.cm .add_combo (&k.ks, &k.cg(F1).m(lalt),  &k.cg(F19).m(ctrl));     // switche no-popup next switch
+    k.cm .add_combo (&k.ks, &k.cg(F1).m(ralt),  &k.cg(F1));
+    k.cm .add_combo (&k.ks, &k.cg(F1).m(caps),  &k.cg(VolumeMute));
+    k.cm .add_combo (&k.ks, &k.cg(F1).m(lwin),  &k.cg(MediaPlayPause));
     // and keeping w the theme, set caps-win-F1 (key with vol-mute printed on it) to toggle microphone mute
-    add_cnsm_bare_af_combo (&k, &k.cg(F1).m(caps).m(lwin), Arc::new (|| {mic_mute_toggle(); open_mic_cpl();}));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F1).m(caps).m(lwin), Arc::new (|| {mic_mute_toggle(); open_mic_cpl();}));
     // we'll set Alt-F2 to bring chrome tabs-outliner (via switche) to keep w the theme of Alt-F<n> keys for task switching
-    add_combo (&k, &k.cg(F2).m(lalt),  &k.cg(F20).m(ctrl));     // switche no-popup tabs-outliner switch
+    k.cm .add_combo (&k.ks, &k.cg(F2).m(lalt),  &k.cg(F20).m(ctrl));     // switche no-popup tabs-outliner switch
 
 
     // want win-f2 for next with some initial skip .. we'll use caps-win-f2 for prev, so we'll set it up for both
@@ -709,15 +694,15 @@ pub fn setup_krusty_board () {
 
     // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
     fn media_skips_action (n_skips:u32, ks:&KrS) -> AF {
-        ks.lwin.inactive_action ( ks.lalt.active_action ( ks.lctrl.active_action ( Arc::new ( move || {
+        ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action ( Arc::new ( move || {
             (0 .. n_skips) .into_iter() .for_each (|_| { press_release(VolumeUp) });
     } ) ) ) ) }
     // ^^ gives an AF with specified number of skips
 
     // it uses alt-active media-skips, so we'll need alt_inactive-action, plus guard on win-combo it is on
     let ks = k.ks.clone();
-    let media_next_action = k.ks.lwin.inactive_action ( k.ks.lalt.inactive_action ( Arc::new ( move || {
-        if !ks.caps.down.check() { press_release(MediaNextTrack) }
+    let media_next_action = k.ks.mod_keys.lwin.inactive_action ( k.ks.mod_keys.lalt.inactive_action ( Arc::new ( move || {
+        if !ks.mod_keys.caps.down.check() { press_release(MediaNextTrack) }
         else { press_release(MediaPrevTrack) }
         let ks = ks.clone();  // clone again to allow moving into spawned thread closure
         //spawn ( move || { sleep(time::Duration::from_millis(2000));  media_skips_action(3,&ks)(); } );
@@ -727,36 +712,36 @@ pub fn setup_krusty_board () {
     } ) ) );
 
     // win-f2 for next with some initial skip
-    add_cnsm_bare_af_combo (&k, &k.cg(F2).m(lwin),         media_next_action.clone());
-    add_cnsm_bare_af_combo (&k, &k.cg(F2).m(lwin).m(caps), media_next_action);
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F2).m(lwin),         media_next_action.clone());
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F2).m(lwin).m(caps), media_next_action);
 
     // win-f3 for skip forward a bit
-    add_cnsm_bare_af_combo (&k, &k.cg(F3).m(lwin), media_skips_action(1, &k.ks));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F3).m(lwin), media_skips_action(1, &k.ks));
 
 
 
     // escape is just escape, but we just want it to do press-release immediately (so switche is faster)
-    add_combo (&k, &k.cg(Escape), &k.cg(Escape));
+    k.cm .add_combo (&k.ks, &k.cg(Escape), &k.cg(Escape));
 
     // use the apps key to send shift-escape .. or caps-escape too
-    add_combo (&k, &k.cg(Apps),           &k.cg(Escape).m(shift));
-    add_combo (&k, &k.cg(Escape).m(caps), &k.cg(Escape).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Apps),           &k.cg(Escape).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Escape).m(caps), &k.cg(Escape).m(shift));
 
 
 
 
     // caps-lalt-F for full screen ..(but from bulk mapping above, caps-f should still give ctrl-f)
-    //add_combo (&k, &k.cg(F).m(caps).m(lalt), &k.cg(F11));
+    //k.cm .add_combo (&k.ks, &k.cg(F).m(caps).m(lalt), &k.cg(F11));
     // ^^ no longer available as we made F a caret mode key, and set caps-alt-F to alt-F instead
 
     // 'w' should have caps-ctrl mapping, but when w/ alt, send alt-f4 (to close all-tabs, windows etc)
-    //add_combo (&k, &k.cg(W).m(caps).m(shift), &k.cg(F4).m(alt));
+    //k.cm .add_combo (&k.ks, &k.cg(W).m(caps).m(shift), &k.cg(F4).m(alt));
     // ^^ note: initially we wanted this with caps-shift-w, but turns out (at least on my kbd, turns out caps+shift+[F1, 2, w, s, x]
     // >  dont produce any key event at the hook at all .. nothing .. its like the keyboard driver not sending those out
     // funnily enough, there's a bunch of complaints about specifically those keys for dell/hp laptops .. looks like hardware
     // >  appears to be a common kbd pcb layout issue .. heres from 2007: (https://www.joachim-breitner.de/blog/250-Shift-Caps-2)
     // sooo .. to makeup, we'll do alt-caps-w do the alt-f4 business instead
-    add_combo (&k, &k.cg(W).m(caps).m(lalt), &k.cg(F4).m(lalt));
+    k.cm .add_combo (&k.ks, &k.cg(W).m(caps).m(lalt), &k.cg(F4).m(lalt));
 
 
 
@@ -775,14 +760,14 @@ pub fn setup_krusty_board () {
 
     fn setup_l2_key (k:&Krusty, key:Key, l2k:Key, dk:Key, wafg:AFG, fafg:AFG, del_via_sel:bool) {
         // register nav actions for normal-nav, word-nav, and fast-nav modes
-        add_bare_af_combo (k, k.cg(key).m(caps),         base_action(l2k));
-        add_bare_af_combo (k, k.cg(key).m(caps).s(word), wafg(l2k));
-        add_bare_af_combo (k, k.cg(key).m(caps).s(fast), fafg(l2k));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps),         base_action(l2k));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(word), wafg(l2k));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(fast), fafg(l2k));
 
         // selection actions are via wrapping those with shift press-release
-        add_bare_af_combo (k, k.cg(key).m(caps).s(sel),         wrapped_action (LShift, base_action(l2k)));
-        add_bare_af_combo (k, k.cg(key).m(caps).s(sel).s(word), wrapped_action (LShift, wafg(l2k)));
-        add_bare_af_combo (k, k.cg(key).m(caps).s(sel).s(fast), wrapped_action (LShift, fafg(l2k)));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(sel),         wrapped_action (LShift, base_action(l2k)));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(sel).s(word), wrapped_action (LShift, wafg(l2k)));
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(sel).s(fast), wrapped_action (LShift, fafg(l2k)));
 
         fn del_sel_afg (del_key:Key, nav_af:AF) -> AF {
             Arc::new ( move || {
@@ -797,9 +782,9 @@ pub fn setup_krusty_board () {
             ( base_action(dk), ctrl_action(dk), fast_action(dk) )
         };
 
-        add_bare_af_combo (k, k.cg(key).m(caps).s(del),         dna);
-        add_bare_af_combo (k, k.cg(key).m(caps).s(del).s(word), dwa);
-        add_bare_af_combo (k, k.cg(key).m(caps).s(del).s(fast), dfa);
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del),         dna);
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(word), dwa);
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(fast), dfa);
 
         // might as well setup l3 right here too .. more details in the setup fn
         setup_l3_key (k, key, l2k);
@@ -811,33 +796,33 @@ pub fn setup_krusty_board () {
     // (note ofc that we've filled out the whole set of these for completeness even though realistically we wont use all/most of them)
     fn setup_l3_key (k:&Krusty, key:Key, l3k:Key) {
         // first the single mod-key combo eqvs .. (and since caps-ctrl is hard to press, we'll make qks1 and lalt do ctrl for these too)
-        add_combo (k, k.cg(key).m(caps).m(lalt  ),  k.cg(l3k).m(lalt  ));
-        add_combo (k, k.cg(key).m(caps).m(lshift),  k.cg(l3k).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(lctrl ),  k.cg(l3k).m(lctrl ));
-        add_combo (k, k.cg(key).m(caps).m(ralt  ),  k.cg(l3k).m(lctrl ));
-        add_combo (k, k.cg(key).m(caps).s(qks1  ),  k.cg(l3k).m(lctrl ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt  ),  k.cg(l3k).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lshift),  k.cg(l3k).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl ),  k.cg(l3k).m(lctrl ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt  ),  k.cg(l3k).m(lctrl ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1  ),  k.cg(l3k).m(lctrl ));
         // then double mod-key combos
-        add_combo (k, k.cg(key).m(caps).m(lalt ).m(lshift),  k.cg(l3k).m(lalt ).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(lctrl).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(lctrl).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt ).m(lshift),  k.cg(l3k).m(lalt ).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
         // double combos with ralt filling in for a mod-key
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
         // double combos with qks1 filling in for a mod-key
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
         // finally, meh lets do all three mod-keys together too
-        add_combo (k, k.cg(key).m(caps).m(lalt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
         // and triple combos w ralt filling in
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        add_combo (k, k.cg(key).m(caps).m(ralt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
         // and triple combos w qks1 filling in
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        add_combo (k, k.cg(key).m(caps).s(qks1).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
 
         // (note .. cap-win combos for these nav-keys are already used for window move/stretch etc)
     }
@@ -861,17 +846,17 @@ pub fn setup_krusty_board () {
     // then the caps-win combo (l4?) actions :
 
     // caps-win-U should vert-max (via shift-win-up) if not already, or else restore window from vert-max
-    add_cnsm_bare_af_combo (&k, &k.cg(U).m(caps).m(lwin), Arc::new (|| win_fgnd_toggle_vertmax()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(U).m(caps).m(lwin), Arc::new (|| win_fgnd_toggle_vertmax()));
     // caps-win-m should maximize (via win-m) if not, else restore from max
-    add_cnsm_bare_af_combo (&k, &k.cg(M).m(caps).m(lwin), Arc::new (|| win_fgnd_toggle_max()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(M).m(caps).m(lwin), Arc::new (|| win_fgnd_toggle_max()));
     // caps-win-n should minimize (via win-arrrowDown)
-    add_cnsm_bare_af_combo (&k, &k.cg(N).m(caps).m(lwin), Arc::new (|| win_fgnd_min()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(N).m(caps).m(lwin), Arc::new (|| win_fgnd_min()));
 
     fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32) {
         // we'll setup caps-win combos for regular move/stretch etc, and caps-ctrl or caps-qks1 combos for fineer control
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(caps).m(lwin).m(lctrl), Arc::new (move || wmfn (dx, dy) ));
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(caps).m(lwin).s(qks1),  Arc::new (move || wmfn (dx, dy) ));
-        add_cnsm_bare_af_combo (&k, &k.cg(key).m(caps).m(lwin),          Arc::new (move || wmfn (dx*m, dy*m) ));
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(caps).m(lwin).m(lctrl), Arc::new (move || wmfn (dx, dy) ));
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(caps).m(lwin).s(qks1),  Arc::new (move || wmfn (dx, dy) ));
+        k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(key).m(caps).m(lwin),          Arc::new (move || wmfn (dx*m, dy*m) ));
     }
     // caps-win-[j,k,i,comma] should  move window [left, right, top, bottom] respectively
     setup_win_move_key ( &k, J,     win_fgnd_move,  -1,   0, 20 );
@@ -890,9 +875,9 @@ pub fn setup_krusty_board () {
 
     // some additional caps-win combos
     // caps-win-c being used to launch winmerge diff from last two clipboard entries
-    add_cnsm_bare_af_combo (&k, &k.cg(C).m(caps).m(lwin), Arc::new (|| start_winmerge_clipboard()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(C).m(caps).m(lwin), Arc::new (|| start_winmerge_clipboard()));
     // gaah we'll just throw in iDEA diff for drag-drop diffing (just coz winmerge doesnt do dark mode)
-    //add_af_combo (&k, &k.cg(C).m(lwin), &k.cg_af (Arc::new (|| start_idea_diff() )));
+    //k.cm .add_af_combo (&k.ks, &k.cg(C).m(lwin), &k.cg_af (Arc::new (|| start_idea_diff() )));
     // ^^ cant do from here, turns out idea diff from cmd line can ONLY be opened with two files pointed, unlike empty from Idea shortcut!
 
 
@@ -905,14 +890,14 @@ pub fn setup_krusty_board () {
 
     // we'll add some nav overloading for IDES on qks2 for starters!!
     // and this one to travel along bookmarks in IDE
-    add_combo (&k, &k.cg(I    ).s(qks2), &k.cg(ExtUp  ).m(lalt).m(lctrl).m(lshift));
-    add_combo (&k, &k.cg(Comma).s(qks2), &k.cg(ExtDown).m(lalt).m(lctrl).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(I    ).s(qks2), &k.cg(ExtUp  ).m(lalt).m(lctrl).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(Comma).s(qks2), &k.cg(ExtDown).m(lalt).m(lctrl).m(lshift));
     // and to toggle a bookmark at the current caret location
-    add_combo (&k, &k.cg(U).s(qks2), &k.cg(F11).m(lctrl).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(U).s(qks2), &k.cg(F11).m(lctrl).m(lshift));
     // and to bring up the bookmarks viewer
-    add_combo (&k, &k.cg(K).s(qks2), &k.cg(F11).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(K).s(qks2), &k.cg(F11).m(lshift));
     // this toggles IDE col edit mode via Alt-Shift-C (but can be done w/o moving hands much)
-    add_combo (&k, &k.cg(C).s(qks2), &k.cg(C).m(lalt).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(C).s(qks2), &k.cg(C).m(lalt).m(lshift));
 
 
 
@@ -940,36 +925,36 @@ pub fn setup_krusty_board () {
 
     // test/debug section
     /*
-    add_combo (&k, &k.cg(F12).m(win).m(ctrl), &k.cg(F19).m(shift)); // try rctrl-win
+    k.cm .add_combo (&k.ks, &k.cg(F12).m(win).m(ctrl), &k.cg(F19).m(shift)); // try rctrl-win
 
-    add_combo (&k, &k.cg(F10).m(win).m(shift), &k.cg(F19)); // .. try rshift ..
+    k.cm .add_combo (&k.ks, &k.cg(F10).m(win).m(shift), &k.cg(F19)); // .. try rshift ..
 
-    add_combo (&k, &k.cg(Backslash).m(ctrl), &k.cg(F19));  // try rctrl
-    add_combo (&k, &k.cg(Backslash).m(caps), &k.cg(F19));
+    k.cm .add_combo (&k.ks, &k.cg(Backslash).m(ctrl), &k.cg(F19));  // try rctrl
+    k.cm .add_combo (&k.ks, &k.cg(Backslash).m(caps), &k.cg(F19));
 
-    //add_combo (&k, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(lctrl));
-    //add_combo (&k, &k.cg(Numrow_9).m(ctrl), &k.cg(F19).m(ctrl));
-    add_combo (&k, &k.cg(Numrow_8).m(ctrl), &k.cg(F19).m(shift));  // try rctrl
-    add_combo (&k, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(ctrl));
-    //add_combo (&k, &k.cg(Numrow_7).m(win),  &k.cg(F19).m(shift));
-    add_combo (&k, &k.cg(Numrow_6).m(ctrl), &k.cg(F19).m(lctrl));   // try rctrl
-    //add_combo (&k, &k.cg(Numrow_5).m(ctrl).m(win), &k.cg(F19).m(lctrl));
-    //add_combo (&k, &k.cg(Numrow_4).m(ctrl).m(win), &k.cg(F19).m(lshift));
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(lctrl));
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_9).m(ctrl), &k.cg(F19).m(ctrl));
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_8).m(ctrl), &k.cg(F19).m(shift));  // try rctrl
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(ctrl));
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(win),  &k.cg(F19).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_6).m(ctrl), &k.cg(F19).m(lctrl));   // try rctrl
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_5).m(ctrl).m(win), &k.cg(F19).m(lctrl));
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_4).m(ctrl).m(win), &k.cg(F19).m(lshift));
 
-    add_combo (&k, &k.cg(Numrow_9).m(lctrl), &k.cg(F19).m(lshift));
-    add_combo (&k, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
-    add_combo (&k, &k.cg(Numrow_5).m(lwin ), &k.cg(F19).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_9).m(lctrl), &k.cg(F19).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
+    k.cm .add_combo (&k.ks, &k.cg(Numrow_5).m(lwin ), &k.cg(F19).m(lshift));
     */
-    //add_combo (&k, &k.cg(F12).m(alt), &k.cg(F19).m(lshift));
-    //add_combo (&k, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
+    //k.cm .add_combo (&k.ks, &k.cg(F12).m(alt), &k.cg(F19).m(lshift));
+    //k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
 
 
 
 
-    // finally bind everything from action-maps !!
-    //bind_all_from_action_maps (&k);
-    bind_mode_key_actions(&k);
-    *crate::COMBO_MAPS_PROCESSOR.write().unwrap() = Some (gen_combo_maps_processor(&k));
+    // finally we can start binding key maps .. first the specialized handling for mode-trigger keys
+    k.ks.mode_states.bind_mode_keys_actions();
+    // then setup the combo-processor itself .. (note that modifier key handlers were already set up earlier)
+    *crate::COMBO_MAPS_PROCESSOR.write().unwrap() = Some (k.cm.gen_combo_maps_processor(&k));
 
 
 

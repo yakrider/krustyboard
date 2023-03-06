@@ -253,7 +253,7 @@ fn mouse_proc(code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     let ev_and_key_for_wheel_ev = |wheel:MouseWheel, delta:i32| {
         Some ( ( MouseEvent::from_wheel_ev(wheel, delta), MouseEventCbMapKey::for_wheel_fwd_state(wheel, delta >= 0) ) )
     };
-    let ev_and_key_for_pointer_ev = |x:i32, y:i32| {
+    let _ev_and_key_for_pointer_ev = |x:i32, y:i32| {
         Some ( ( MouseEvent::from_pointer_ev(x,y), MouseEventCbMapKey::for_pointer() ) )
     };
 
