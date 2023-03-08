@@ -1,27 +1,14 @@
 #![ allow (non_camel_case_types) ]
 
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
-//use once_cell::sync::Lazy;
-//use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
-
-use crate::krusty::{*, mod_keys::*, key_utils::*};
-use crate::krusty::{combo_maps::ModeState_T::*, mod_keys::ModKey::*};
-use crate::{KbdEventCallbackEntry, KbdEventCallbackFnType::*, KbdEvCbComboProcDirective::*, EventPropagationDirective::*};
+use once_cell::sync::OnceCell;
 
 
-
-
-
-
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
-/// all the supported mode-states, (whether they have triggering keys registered or not)
-pub enum ModeState_T {
-    sel, del, word, fast,
-    qks, qks1, qks2, qks3,
-    mngd_ctrl_dn, rght_ms_scrl,
-}
+use crate::{*, key_utils::*, ModeState_T::*, ModKey::*};
 
 
 pub const COMBO_STATE__MOD_KEY_BITS_N : usize = 9;
@@ -30,64 +17,10 @@ pub const COMBO_STATE__FLAG_BITS_N : usize = 2;
 // ^^ 9 mod keys from above list, 4+4=8 +2=10 for modes from above list (sel/del/word/fast, qks/qks1/qks2/qks3, rght-ms-scrl/mngd-ctrl-dn)
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits!
 
+
 pub type ComboStatesBits_ModKeys = [bool; COMBO_STATE__MOD_KEY_BITS_N];
 pub type ComboStatesBits_Modes   = [bool; COMBO_STATE__MODE_STATE_BITS_N];
 pub type ComboStatesBits_Flags   = [bool; COMBO_STATE__FLAG_BITS_N];
-
-
-
-
-# [ derive (Debug) ]
-/// ModeState representation for mode-flags (and any associated trigger keys they have)
-pub struct ModeState {
-    _private    : (),
-    pub ms_t    : ModeState_T,
-    key         : Arc <RwLock <Option<KbdKey>>>,
-    pub mk_down : Flag,
-}
-
-# [ derive (Debug, Clone) ]
-/// implements the (Arc wrapped) ModeState functionality
-pub struct MS (Arc<ModeState>);
-
-impl Deref for MS {
-    type Target = ModeState;
-    fn deref(&self) -> &ModeState { &self.0 }
-}
-
-
-
-
-
-# [ derive (Debug) ]
-/// holds all the ModeStates together, common functionality is impld here
-pub struct ModeStates {
-    _private : (),
-    // l2 mode states
-    pub sel  : MS,
-    pub del  : MS,
-    pub word : MS,
-    pub fast : MS,
-    // quick-keys mode states
-    pub qks  : MS,
-    pub qks1 : MS,
-    pub qks2 : MS,
-    pub qks3 : MS,
-    // then the computed flags
-    pub some_l2_mode_active   : Flag,
-    pub some_qks_mode_active  : Flag,
-    pub some_caps_mode_active : Flag,
-
-}
-
-# [ derive (Debug, Clone) ]
-/// implements the (Arc wrapped) ModeStates-holder functionality
-pub struct MSS (Arc<ModeStates>);
-
-impl Deref for MSS {
-    type Target = ModeStates;
-    fn deref(&self) -> &ModeStates { &self.0 }
-}
 
 
 
@@ -138,170 +71,23 @@ pub struct ComboGen_wAF<'a> {
 /// combos-map module internal type (used to build successively mod-key wrapped fallback key-presses)
 type BFK = Box <dyn Fn(Key)>;
 
-# [ derive (Clone) ]
+# [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
-pub struct CombosMap ( Arc <RwLock <HashMap <Combo, AF>>> );
+pub struct _CombosMap {
+    _private : (),
+    pub cm   : Arc <RwLock <HashMap <Combo, AF>>>,
+    cm_proc  : Arc <RwLock <Option <KbdEventCallbackEntry>>>,
+}
+# [ derive (Clone) ]
+pub struct CombosMap ( Arc <_CombosMap> );
 
 impl Deref for CombosMap {
-    type Target = RwLock <HashMap <Combo, AF>>;
+    type Target = _CombosMap;
     fn deref (&self) -> &Self::Target { &self.0 }
 }
 
 
 
-
-
-
-/// implements the (Arc wrapped) ModeState functionality
-impl MS {
-    pub fn new (ms_t: ModeState_T) -> MS { MS ( Arc::new ( ModeState {
-        _private : (),
-        ms_t,
-        key     : Arc::new(RwLock::new(None)),
-        mk_down : Flag::default()
-    } ) ) }
-
-    pub fn key (&self) -> Option<KbdKey> {
-        self.key.read().unwrap().clone()
-    }
-    pub fn register_key (&self, key:KbdKey) {
-        *self.key.write().unwrap() = Some(key);
-    }
-
-
-    /// generate mode-key flag update action for key-down on registered mode-key
-    fn gen_mode_key_down_action(&self, mss:MSS) -> AF {
-        let flag = self.mk_down.clone();
-        let mss_cba : AF = {
-            if MSS::static_l2_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_caps_mode_active.set(); } )
-            } else if MSS::static_qks_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_qks_mode_active.set(); mss.some_caps_mode_active.set(); } )
-            } else if MSS::static_caps_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_caps_mode_active.set(); } )
-            } else { Arc::new (move || { }) }
-        };
-        Arc::new (move || { flag.set(); mss_cba(); })
-    }
-    /// generate mode-key flag update action for key-up on registered mode-key
-    fn gen_mode_key_up_action(&self, mss:MSS) -> AF {
-        let flag = self.mk_down.clone();
-        let mss_cba : AF = {
-            if      MSS::static_l2_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
-            else if MSS::static_qks_modes()  .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
-            else if MSS::static_caps_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
-            else { Arc::new ( || { } ) }
-        };
-        Arc::new ( move || { flag.clear(); mss_cba() } )
-    }
-
-    /// For mode-key btns (in addition to any combo maps action) we'll want individual binding callbacks that update flags.
-    /// Note that after these binding callbacks process, they will still go through bulk processing for their default/combo actions.
-    /// (This is as opposed to default-keys/combos that are handled in bulk w/o individual callback bindings)
-    pub fn bind_mode_key_action (&self, mss:MSS) {
-        use crate::KbdEventCbMapKeyType::*;
-        let (cma_dn, cma_up) = (self.gen_mode_key_down_action(mss.clone()), self.gen_mode_key_up_action(mss.clone()));
-        if let Some(key) = self.key() {
-            key.bind ( KeyDownCallback, KbdEventCallbackEntry {
-                event_prop_directive: EventProp_Continue,
-                combo_proc_directive: ComboProc_Enable,
-                cb : KbdEvCbFn_InlineCallback {
-                    cb : Arc::new ( move |_| { cma_dn(); EventProp_Continue } )
-                },
-            } );
-            key.bind ( KeyUpCallback, KbdEventCallbackEntry {
-                event_prop_directive: EventProp_Continue,
-                combo_proc_directive: ComboProc_Enable,
-                cb : KbdEvCbFn_InlineCallback {
-                    cb : Arc::new ( move |_| { cma_up(); EventProp_Continue } )
-                },
-            } );
-    } }
-
-}
-
-
-
-
-
-/// implements the (Arc wrapped) ModeStates-holder functionality
-impl MSS {
-
-    pub fn new() -> MSS {
-        let (_sel, _del,  _word, _fast) = (MS::new(sel), MS::new(del), MS::new(word), MS::new(fast));
-        let (_qks, _qks1, _qks2, _qks3) = (MS::new(qks), MS::new(qks1), MS::new(qks2), MS::new(qks3));
-        let (some_l2, some_qks, some_caps) = (Flag::default(), Flag::default(), Flag::default() );
-
-        MSS ( Arc::new ( ModeStates {
-            _private : (),
-            sel: _sel, del:  _del,  word: _word, fast: _fast,
-            qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
-            some_l2_mode_active: some_l2, some_qks_mode_active: some_qks, some_caps_mode_active: some_caps,
-        } ) )
-    }
-
-    // we'll just define all enum subsets we need rather than trying to partly/fully iterating through ModeState_T
-    pub fn static_l2_modes () -> [ModeState_T;4] {
-        static L2_MODES : [ModeState_T;4]  = [sel, del, word, fast];
-        L2_MODES
-    }
-    pub fn static_qks_modes () -> [ModeState_T;4] {
-        static QKS_MODES : [ModeState_T;4] = [qks, qks1, qks2, qks3];
-        QKS_MODES
-    }
-    pub fn static_l2_qks_modes () -> [ModeState_T;8] {
-        // NOTE that this will be our source of ordering for the mode-states bits in combo bitmap!
-        static L2_QKS_MODES : [ModeState_T;8]  = [sel, del, word, fast, qks, qks1, qks2, qks3];
-        L2_QKS_MODES
-    }
-    pub fn static_caps_modes () -> [ModeState_T;9] {
-        // note that this also includes mngd_ctrl_dn which is a flag in KrS (i.e. not managed here)
-        static CAPS_MODES : [ModeState_T;9] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
-        CAPS_MODES
-    }
-
-
-    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &MS);8] { [
-        // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
-        // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
-        (sel, &self.sel), (del,  &self.del),  (word, &self.word), (fast, &self.fast),
-        (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3),
-    ] }
-
-    pub fn get_cur_mode_states_bitmap (&self) -> ComboStatesBits_Modes {
-        self.mode_flag_pairs() .map (|(_,ms)| ms.mk_down.check())
-    }
-    pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
-        MSS::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
-    }
-
-    pub fn refresh_qks_mode_active_flag (&self) {
-        if !self.qks.mk_down.check() && !self.qks1.mk_down.check() && !self.qks2.mk_down.check() && !self.qks3.mk_down.check() {
-            self.some_qks_mode_active.clear()
-        }
-        self.refresh_caps_mode_active_flag();
-    }
-    pub fn refresh_l2_mode_active_flag (&self) {
-        if !self.sel.mk_down.check() && !self.del.mk_down.check() && !self.word.mk_down.check() && !self.fast.mk_down.check() {
-            self.some_l2_mode_active.clear()
-        }
-        self.refresh_caps_mode_active_flag();
-    }
-    pub fn refresh_caps_mode_active_flag (&self) {
-        if !self.some_qks_mode_active.check() && !self.some_l2_mode_active.check() {
-            self.some_caps_mode_active.clear()
-        }
-    }
-    pub fn clear_flags (&self) {
-        self.mode_flag_pairs() .iter() .for_each (|(_,ms)| ms.mk_down.clear());
-        self.some_l2_mode_active.clear(); self.some_qks_mode_active.clear(); self.some_caps_mode_active.clear();
-    }
-
-    pub fn bind_mode_keys_actions (&self) {
-        self.mode_flag_pairs() .iter() .for_each (|(_,ms)| ms.bind_mode_key_action(self.clone()))
-    }
-
-}
 
 
 
@@ -444,8 +230,24 @@ impl<'a> ComboGen_wAF<'a> {
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 impl CombosMap {
 
-    pub fn new () -> CombosMap {
-        CombosMap ( Arc::new ( RwLock::new ( HashMap::new() ) ) )
+    pub fn instance () -> CombosMap {
+        static INSTANCE: OnceCell<CombosMap> = OnceCell::new();
+        INSTANCE .get_or_init (||
+            CombosMap ( Arc::new ( _CombosMap {
+                _private : (),
+                cm       : Arc::new ( RwLock::new ( HashMap::new() ) ),
+                cm_proc  : Arc::new ( RwLock::new ( None) ),
+            } ) )
+        ) .clone()
+    }
+
+    /// returns true if the combos map processor is enabled (meaning the processor has been generated from the combos map)
+    pub fn is_enabled (&self) -> bool {
+        self.cm_proc .read().unwrap() .is_some()
+    }
+    /// supplies an (Arc) copy of the generated and cached combos map based (and fallback defaults) events processor
+    pub fn get_processor (&self) -> Option<KbdEventCallbackEntry> {
+        self.cm_proc .read().unwrap() .as_ref() .map(|cb| cb.clone())
     }
 
 
@@ -464,7 +266,7 @@ impl CombosMap {
         let af = CombosMap::gen_consuming_af (&cgc.mks, cga.gen_af(), ksr);
         for c in cgc.gen_combos() {
             //println! ("{:?}, {:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.mk_state, c.mode_state, cgc.key, cgc.mks, cgc.modes, cga.key, cga.mks );
-            self .write().unwrap() .insert (c, af.clone());
+            self.cm .write().unwrap() .insert (c, af.clone());
     } }
 
     /// note that this will wrap the AF in with mod-actions for all mods either active (if specified) or inactive (if not)
@@ -472,19 +274,19 @@ impl CombosMap {
         let af = CombosMap::gen_consuming_af (&cgc.mks, cgaf.gen_af(), ksr);
         for c in cgc.gen_combos() {
             //println! ("{:?}, {:?}, {:?} {:?} -> {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cgaf.mods );
-            self .write().unwrap() .insert (c, af.clone());
+            self.cm .write().unwrap() .insert (c, af.clone());
     } }
 
     /// use this consuming bare fn to add combos if the AF supplied shouldnt be wrapped for active/inactive by mod, but just marked for consumption
     pub fn add_cnsm_bare_af_combo (&self, ksr:&KrS, cgc:&ComboGen_wKey, af:AF) {
         let af = CombosMap::gen_consuming_af (&cgc.mks, af, ksr);
         for c in cgc.gen_combos () {
-            self .write().unwrap() .insert (c, af.clone());
+            self.cm .write().unwrap() .insert (c, af.clone());
     } }
 
     /// use this bare fn to add combos if the AF supplied needs special care to avoid wrapping with mod active/inactive .. e.g ctrl/tab etc
     pub fn add_bare_af_combo (&self, _:&KrS, cgc:&ComboGen_wKey, af:AF) {
-        for c in cgc.gen_combos () { self .write().unwrap() .insert (c, af.clone()); }
+        for c in cgc.gen_combos () { self.cm .write().unwrap() .insert (c, af.clone()); }
     }
 
 
@@ -509,7 +311,7 @@ impl CombosMap {
     pub fn combo_maps_handle_kbd_event (&self, key:Key, ks:&KrS) {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
-        if let Some(cmaf) = self.read().unwrap() .get(&Combo::gen_cur_combo(key,&ks)) {
+        if let Some(cmaf) = self.cm.read().unwrap() .get(&Combo::gen_cur_combo(key,&ks)) {
             cmaf()  // found a combo matched action .. we're done!
         } else if ks.mod_keys.caps.down.check() {
             if ks.mode_states.some_caps_mode_active.check() {
@@ -529,38 +331,41 @@ impl CombosMap {
     }
 
 
-    /// generate the full combo-maps processing AF to pass into lower level events processor
-    pub fn gen_combo_maps_processor (&self, k:&Krusty) -> KbdEventCallbackEntry {
-        use crate::{KbdEventType::*, EventPropagationDirective::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+    /// generates the full combo-maps processing AF for use by lower level events processor (which sets the processor enabled)
+    pub fn enable_combos_map_events_processor(&self, k:&Krusty) {
+        use crate::{EventPropagationDirective::*, KbdEventType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
         let mut handled_keys = HashSet::new();
-        self .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
+        self.cm .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
         k .default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
         k .ks .mode_states .mode_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
 
         let (ks, cm) = (k.ks.clone(), self.clone());
         let cb = Arc::new ( move |e:KbdEvent| {
             if handled_keys.contains(&e.key) {
-                if e.event == KbdEvent_KeyDown || e.event == KbdEvent_SysKeyDown {
+                if e.ev_t == KbdEvent_KeyDown || e.ev_t == KbdEvent_SysKeyDown {
                     // all combo-handling is done on key-dn and spawned out
                     let (ks, cm) = (ks.clone(), cm.clone());
-                    spawn (move || cm.combo_maps_handle_kbd_event(e.key, &ks));
+                    thread::spawn (move || cm.combo_maps_handle_kbd_event(e.key, &ks));
                     return EventProp_Stop
-                } else if e.event == KbdEvent_KeyUp || e.event == KbdEvent_SysKeyUp {
+                } else if e.ev_t == KbdEvent_KeyUp || e.ev_t == KbdEvent_SysKeyUp {
                     // nothing to do on keyup, as anything we want to send, we send in keydn/keyup pairs at keydown itself
                     return EventProp_Stop
                 } // all else fall back down to pass-through
             }
             return EventProp_Continue
-        });
-        KbdEventCallbackEntry {
+        } );
+        let cmp = KbdEventCallbackEntry {
             event_prop_directive: EventProp_Undetermined,
             combo_proc_directive: ComboProc_Enable,  // (doesnt actually matter, as this is in combo proc itself!)
-            cb: KbdEvCbFn_InlineCallback {cb}
-        }
+            cb: KbdEvCbFn_InlineCallback(cb)
+        };
+        *self.cm_proc .write().unwrap() = Some(cmp);
     }
-
+    pub fn disable_combos_map_events_processor (&self) {
+        *self.cm_proc .write().unwrap() = None;
+    }
 
 
 }

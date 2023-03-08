@@ -1,433 +1,9 @@
-mod combo_maps;
-mod mod_keys;
 
-use std::{time, time::Instant};
-use std::thread::{sleep, spawn};
-use std::collections::{HashSet};
-use std::ops::Deref;
-use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
 
-//use derivative::Derivative;
+use std::{ time, thread, sync::Arc, };
 
-//use closure::closure;
-// ^^ gives a nice macro that eliminates clutter from having to clone everywhere
-// .. we'd use it a lot more, except IDE syntax highlighting doesnt work inside the macro .. which is waay too big a loss for the benefit!
 
-use crate::{KbdEvent, KbdKey, MouseButton, MouseWheel, utils};
-
-use crate::krusty::{mod_keys::*, combo_maps::*};
-
-
-// todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
-
-
-// we'll define some easier type aliases (CallBack, ActionFn etc) to pass around triggered actions and so on
-/// Arc/Action-Function Fn() representation that can be passed around between threads
-type AF  = Arc <dyn Fn() + Send + Sync + 'static> ;
-
-type Key = KbdKey ;
-
-
-
-
-
-# [ derive (Debug, Default, Clone) ]
-/// representation for all our flags for states mod-states, modifier-keys, mouse-btn-state etc
-pub struct Flag (Arc<AtomicBool>);
-// ^^ simple sugar that helps reduce clutter in code
-
-impl Flag {
-    pub fn check (&self) -> bool { self.0 .load (Ordering::SeqCst) }
-    pub fn set   (&self) { self.0 .store (true,  Ordering::SeqCst) }
-    pub fn clear (&self) { self.0 .store (false, Ordering::SeqCst) }
-}
-
-
-
-
-
-# [ derive (Debug) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
-/// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
-pub struct KrustyState {
-    // having this disallows direct instantiation
-    _private : (),
-
-    // used for toggling key processing .. should only listen to turn-back-on combo
-    pub in_disabled_state: Flag,
-
-    // mod-keys .. details in its declaration
-    pub mod_keys : MKS,
-
-    // mode states .. details in its declaration
-    pub mode_states : MSS,
-
-    // mouse btn states .. need to impl caps-as-ctrl, or right-mouse-scroll behavior etc
-    pub mouse_left_btn_down:  Flag,
-    pub mouse_right_btn_down: Flag,
-
-    // for caps-ctrl eqv for caps-tab or caps-wheel, we'll send ctrl press/release at the right times, and will need to track that
-    pub in_managed_ctrl_down_state: Flag,
-    // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
-    pub in_right_btn_scroll_state: Flag,
-
-    pub last_wheel_stamp: RwLock<Instant>,
-    pub is_wheel_spin_invalidated: Flag, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
-}
-
-
-# [ derive (Debug, Clone) ]
-/// Arc wrapped KrustyState for cheap cloning/sharing
-pub struct KrS (Arc <KrustyState>);
-// ^^ we'll use this wrapped type so cloning and passing around is cheap
-
-impl Deref for KrS {
-    type Target = KrustyState;
-    fn deref(&self) -> &KrustyState { &self.0 }
-}
-
-
-
-
-
-/// Representation for all full state and data fro our Krusty-Board application
-pub struct Krusty {
-    // this is mostly just a utility wrapper sugar to pass things around
-    _private : (),   // prevents direct instantiation of this struct
-    // KrS is Arc<KrustyState>, holds all state flags
-    pub ks: KrS,
-    // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
-    pub cm: CombosMap,
-    // instead of polluting combos_map, we'll hold a registry for keys to gen default bindings for
-    pub default_bind_keys : Arc <RwLock <HashSet <Key>>>,
-}
-
-
-
-
-
-/// impl for Krusty-State
-impl KrS {
-
-    pub fn new () -> KrS {
-        KrS ( Arc::new ( KrustyState {
-            _private : (),
-            in_disabled_state : Flag::default(),
-
-            mod_keys    : MKS::new(),
-            mode_states : MSS::new(),
-
-            mouse_left_btn_down  : Flag::default(),
-            mouse_right_btn_down : Flag::default(),
-
-            in_managed_ctrl_down_state : Flag::default(),
-            in_right_btn_scroll_state  : Flag::default(),
-
-            last_wheel_stamp : RwLock::new(Instant::now()),
-            is_wheel_spin_invalidated : Flag::default(),
-        } ) )
-    }
-
-    fn unstick_all (&self) {
-        self.mode_states.clear_flags();
-        self.mod_keys.unstick_all();
-
-        use MouseButton::*;
-        LeftButton.release(); RightButton.release(); MiddleButton.release();
-        X1Button.release(); X2Button.release();
-
-        [   &self.mouse_left_btn_down, &self.mouse_right_btn_down,
-            &self.in_right_btn_scroll_state, &self.in_managed_ctrl_down_state
-        ] .into_iter() .for_each (|flag| flag.clear());
-    }
-
-}
-
-
-
-
-
-/// impl for Krusty data and state struct
-impl Krusty {
-
-    // NOTE: we've decided to mostly impl things grouped by related functionality in disparate modules rather than under impl here
-    // .. mostly because doing that allows easier piecemeal imports, as well as better pub/private management
-
-    pub fn new() -> Krusty {
-
-        let ks = KrS::new();
-
-        // and we'll pair up the left/right values where applicable
-        ks.mod_keys.lctrl  .link_pair (&ks.mod_keys.rctrl);  ks.mod_keys.rctrl  .link_pair (&ks.mod_keys.lctrl);
-        ks.mod_keys.lshift .link_pair (&ks.mod_keys.rshift); ks.mod_keys.rshift .link_pair (&ks.mod_keys.lshift);
-
-        // now we can construct the Krusty struct we want
-        Krusty {
-            _private : (),
-            ks,
-            cm : CombosMap::new(),
-            default_bind_keys : Arc::new(RwLock::new (HashSet::new())),
-        }
-    }
-
-    pub fn cg    (&self, key:Key) -> ComboGen_wKey { ComboGen_wKey::new (key, &self.ks) }
-    pub fn cg_af (&self, af:AF)   -> ComboGen_wAF  { ComboGen_wAF::new  (af,  &self.ks) }
-
-    #[allow(dead_code)]
-    pub fn setup_global_disable (&self) {
-        // todo: wont be straight-forward if we want to handle this at hook receipt
-        // .. will need a global check there, as well as allowing selectively for the re-enable combo!
-    }
-
-}
-
-
-
-
-
-/// simple key-action utilities
-pub mod key_utils {
-
-    use crate::krusty::*;
-
-    pub fn press_release        (key:Key) { key.press(); key.release(); }
-    pub fn double_press_release (key:Key) { press_release(key); press_release(key); }
-
-    pub fn wrapped_press_release (wrap_key:Key, key_action:fn(Key), key:Key) {
-        wrap_key.press(); key_action(key); wrap_key.release();
-    }
-    pub fn wrapped_action (wrap_key:Key, af:AF) -> AF {
-        Arc::new ( move || { wrap_key.press(); af(); wrap_key.release(); } )
-    }
-
-    // note that these are ONLY to be used when the mod key states DONT need to be tracked (e.g. in composition fallback actions)
-    pub fn ctrl_press_release  (key:Key) { wrapped_press_release (Key::Ctrl,  press_release, key) }
-    pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, press_release, key) }
-
-    // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
-    /// wraps a given unitary function with NO input args into an Arc Fn
-    pub fn action (f:fn()) -> AF { Arc::new (move || f()) }
-
-    /// wraps a given unitary function with ONE input arg into an Arc Fn
-    pub fn action_p1<T> (f:fn(T), t:T) -> AF where T: Copy + Send + Sync + 'static { Arc::new (move || f(t)) }
-
-    pub fn no_action           () -> AF { Arc::new ( || {} ) }
-    pub fn base_action  (key:Key) -> AF { action_p1 (press_release,        key) }
-    pub fn fast_action  (key:Key) -> AF { action_p1 (double_press_release, key) }
-    pub fn ctrl_action  (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
-
-}
-
-
-
-
-
-/// setups for binding mouse btns and handling their events
-pub mod mouse_btn_setups {
-
-    use crate::krusty::{*, key_utils::*};
-    use crate::{MouseEventCallbackEntry, EventPropagationDirective::*, MouseEventCallbackFnType::*, MouseEventCbMapKeyAction::*};
-
-    // tracking left btn down state is required for ctrl-wheel (zoom) etc
-    fn handle_mouse_left_btn_down (ks:&KrS) {
-        ks.mouse_left_btn_down.set();
-        if ks.mod_keys.caps.down.check() {
-            ks.in_managed_ctrl_down_state.set();
-            ks.mod_keys.lctrl.ensure_active();   // this allows caps-as-ctrl for drag drop etc
-        }
-        MouseButton::LeftButton.press()
-    }
-    fn handle_mouse_left_btn_up (ks:&KrS) {
-        ks.mouse_left_btn_down.clear();
-        MouseButton::LeftButton.release();
-    }
-    pub fn setup_mouse_left_btn_handling (k:&Krusty) {
-        let ks = k.ks.clone();
-        MouseButton::LeftButton .bind ( BtnDownCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| handle_mouse_left_btn_down(&ks) ) }
-        } );
-        let ks = k.ks.clone();
-        MouseButton::LeftButton .bind ( BtnUpCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| handle_mouse_left_btn_up(&ks) ) }
-        } );
-        // ^^ in theory could do non-blocking bind for release, but that can occasionally expose us to timing issues as press is on block-bind
-        //      and that will be slower to send the actual press from the spawned thread (so making release slower too helps)
-    }
-
-
-
-    // tracking right-btn-down-state is required for switche scroll (via F16/F17/Ctrl-F18)
-    // note that unlike other mouse btn/wheels, the right btn is set to passthrough!
-    fn handle_mouse_right_btn_down (ks:&KrS) {
-        ks.mouse_right_btn_down.set();
-    }
-    fn handle_mouse_right_btn_up (ks:&KrS) {
-        ks.mouse_right_btn_down.clear();
-        if ks.in_right_btn_scroll_state.check() {
-            ks.in_right_btn_scroll_state.clear();
-            //k.ks.lalt.active_action(base_action(Key::F18))();
-            //k.ks.lctrl.active_action(base_action(Key::F18))();
-            //base_action(Key::F18)();
-            ctrl_press_release(Key::F18);
-        }
-    }
-    pub fn setup_mouse_right_btn_handling (k:&Krusty) {
-        let ks = k.ks.clone();
-        MouseButton::RightButton .bind ( BtnDownCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Continue,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| handle_mouse_right_btn_down(&ks) ) }
-        } );
-        let ks = k.ks.clone();
-        MouseButton::RightButton .bind ( BtnUpCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Continue,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| handle_mouse_right_btn_up(&ks) ) }
-        } );
-    }
-
-
-    // for x1/x2 btns, we want them to behave like they were middle btn too
-    // note: it turns out just doing press/release on initial press works snappier/more-reliable than default btn-holds
-    pub fn setup_mouse_x_btn_1_handling () {
-        MouseButton::X1Button .bind ( BtnDownCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| {
-                MouseButton::MiddleButton.press(); MouseButton::MiddleButton.release();
-            } ) },
-        } );
-        MouseButton::X1Button .bind ( BtnUpCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_InlineCallback { cb : Arc::new ( move |_| EventProp_Stop) }
-        } );
-    }
-
-    pub fn setup_mouse_x_btn_2_handling () {
-        MouseButton::X2Button .bind ( BtnDownCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |_| {
-                MouseButton::MiddleButton.press(); MouseButton::MiddleButton.release();
-            } ) },
-        } );
-        MouseButton::X2Button .bind ( BtnUpCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_InlineCallback { cb : Arc::new ( move |_| EventProp_Stop) }
-        } );
-    }
-
-}
-
-
-
-
-
-/// setups for mouse wheel bindings and handling their events
-pub mod mouse_wheel_setups {
-
-    use crate::krusty::{*, key_utils::*};
-    use crate::{MouseEventCallbackEntry, EventPropagationDirective::*, MouseEventCallbackFnType::*, MouseEventCbMapKeyAction::*};
-    use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
-    use crate::utils::window_utils::get_fgnd_win_class;
-
-    pub fn handle_wheel_guarded (delta:i32, ksr:&KrS) {
-        // this is mostly to make the super-fast inertial smooth-scroll wheel on my (MX3) mouse a lil more usable by spacing things out
-        // also, the invalidation setup prevents things like caps down when wheel is still unintentionally inertially spinning to trigger zooms etc
-        let last_stamp = *ksr.last_wheel_stamp.read().unwrap();
-        *ksr.last_wheel_stamp.write().unwrap() = Instant::now();
-        //let gap = ksr.last_wheel_stamp.read().unwrap().duration_since(last_stamp);
-        //println!("{:#?}", dur.as_millis());
-        const GUARD_DUR_MS: u128 = 120;  // from dur printouts above, looked like max inertial gap is 120 (min 7ms, usually <100)
-        if !ksr.is_wheel_spin_invalidated.check() {
-            handle_wheel_action(delta, ksr);
-        } else if GUARD_DUR_MS < ksr.last_wheel_stamp.read().unwrap().duration_since(last_stamp).as_millis() {
-            ksr.is_wheel_spin_invalidated.clear();
-            handle_wheel_action(delta, ksr);
-        } else {
-            // if its invalidated AND wheel-spin spacing is below guard-dur, we suppress the wheel event
-        }
-    }
-
-    pub fn handle_wheel_action (delta:i32, ksr:&KrS) {
-        let incr = delta / WHEEL_DELTA as i32;
-        if ksr.mouse_right_btn_down.check() {
-            // right-mouse-btn-wheel support for switche task switching
-            ksr.in_right_btn_scroll_state.set();
-            let key = if incr.is_positive() { Key::F17 } else { Key::F16 };
-            //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
-            //ksr.mod_keys.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll
-            press_release(key);                                 // we'd rather use direct press hotkeys for best perf
-        } else  if ksr.mod_keys.lalt.down.check() {
-            // wheel support for scrolling in windows native alt-tab task-switching screen
-            // this requires a system call to check alt-tab window, so push it out to thread?
-            // .. naah, we're always spawned out from hook thread (for blocking binds), so theres no point
-            ksr.mod_keys.lalt.consumed.set();
-            if get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
-                ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
-                handle_alt_tab_wheel(incr)
-            } else {
-                // alt-wheel for (fine delta) control, caps-alt-wheel for larger adjustments
-                let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() || ksr.mod_keys.lwin.down.check() {5} else {1};
-                incr_brightness (incr * mult)
-            }
-        } else if ksr.mod_keys.lwin.down.check() {
-            // win-wheel for (fine delta) control, caps-win-wheel for larger adjustments
-            ksr.mod_keys.lwin.consumed.set();
-            let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() {2} else {1};
-            incr_volume (incr * mult)
-        } else if ksr.mod_keys.caps.down.check() {
-            ksr.in_managed_ctrl_down_state.set();
-            //Key::LCtrl.press();
-            ksr.mod_keys.lctrl.ensure_active();
-            MouseWheel::DefaultWheel.scroll(delta); // caps-wheel as ctrl-wheel (zoom etc)
-        } else if ksr.mod_keys.some_shift_down() {
-            //handle_horiz_scroll_wheel(incr);
-            // ^^ todo:: .. (and for now, just let default pass through)
-            MouseWheel::DefaultWheel.scroll(delta);
-        } else {
-            MouseWheel::DefaultWheel.scroll(delta);
-        }
-    }
-
-    pub fn incr_volume(incr:i32) {
-        let key = if incr > 0 { Key::VolumeUp } else { Key::VolumeDown };
-        (0 .. incr.abs()) .for_each(|_| key.press());
-    }
-
-    pub fn incr_brightness (incr:i32) {
-        static INCR_STEP:i32 = 1;
-        // note again that we're always spawned out from hook thread, so slower tasks are also ok here
-        //utils::brightness_ps_wmi::incr_brightness(INCR_STEP*incr);
-        let _ = utils::brightness_utils::incr_brightness(INCR_STEP*incr);
-    }
-
-    pub fn handle_alt_tab_wheel (incr:i32) {
-        // todo potentially impl additional separate timer-spacing here, to slow this down even more than regular wheel spacing
-        // note that for these we DONT want to release Alt key .. presumably, expecting it to be physically released later
-        if incr.is_positive() { shift_press_release(Key::Tab) }
-        else { press_release(Key::Tab) }
-    }
-
-    pub fn handle_horiz_scroll_wheel (_incr:i32) {
-    }
-
-    pub fn setup_mouse_wheel_handling (k:&Krusty) {
-        let ks = k.ks.clone();
-        MouseWheel::DefaultWheel .bind ( WheelForwardCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |ev| {
-                ev .wheel_ev_data .iter() .for_each (|d| handle_wheel_guarded(d.delta, &ks) );
-            } ) },
-        } );
-        let ks = k.ks.clone();
-        MouseWheel::DefaultWheel .bind ( WheelBackwardCb, MouseEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            cb : MouseEvCbFn_SpawnedCallback { cb : Arc::new ( move |ev| {
-                ev .wheel_ev_data .iter() .for_each (|d| handle_wheel_guarded(d.delta, &ks) );
-            } ) },
-        } );
-    }
-
-}
+use crate::{*, KbdKey::*, key_utils::*, ModKey::*, ModeState_T::*};
 
 
 
@@ -436,7 +12,7 @@ pub mod mouse_wheel_setups {
 /// handling for any 'special' keys that need to be bound/handled directly (like for mouse btns) rather than via combo-maps
 pub mod special_keys_setups {
 
-    use crate::krusty::*;
+    use crate::Krusty;
 
     pub fn setup_direct_binding_keys (_k:&Krusty) {
 
@@ -459,18 +35,15 @@ pub mod special_keys_setups {
 /// setup for the entire krusty-board application, incl setting up key/btn bindings and combos
 pub fn setup_krusty_board () {
 
-    use crate::krusty::{*, key_utils::*, special_keys_setups::*, mouse_btn_setups::*, mouse_wheel_setups::*};
-
-    use crate::utils::{window_utils::*, process_utils::*};
-
-    use crate::krusty::{KbdKey::*, mod_keys::ModKey::*, combo_maps::ModeState_T::*};
-    // ^^ a little extreme, but we'll see if its tolerable
+    // lets import various windows/process/brightness util fns
+    use crate::utils::{windows_utils::*, process_utils::*, /*brightness_utils::*,*/};
+    // note .. module krusty_mouse has a minimal wrapper around brightness control, we'll use that instead
 
 
     let k = Krusty::new();
 
     // setup all the mod-keys .. (can override this with own setup if desired)
-    k.ks.mod_keys.setup_tracking(&k.ks);
+    k.ks.mod_keys.setup_tracking(&k);
 
 
     // handling for mouse left btn, mostly to allow caps-as-ctrl behavior during drag drops and clicks
@@ -478,12 +51,11 @@ pub fn setup_krusty_board () {
     // also for mouse right btn, mostly to allow switche scrolling w right-btn-wheel combo
     setup_mouse_right_btn_handling (&k);
     // also setup both Xbutton srcs to act as middle btns (used for link clicks, closing tabs etc)
-    setup_mouse_x_btn_1_handling ();
-    setup_mouse_x_btn_2_handling ();
+    setup_mouse_x_btn_1_handling (&k);
+    setup_mouse_x_btn_2_handling (&k);
 
     // setup handling for mouse wheel .. complex overloading over alt-tab, switche, volume, brightness etc !!
     setup_mouse_wheel_handling (&k);
-
 
 
 
@@ -705,9 +277,9 @@ pub fn setup_krusty_board () {
         if !ks.mod_keys.caps.down.check() { press_release(MediaNextTrack) }
         else { press_release(MediaPrevTrack) }
         let ks = ks.clone();  // clone again to allow moving into spawned thread closure
-        //spawn ( move || { sleep(time::Duration::from_millis(2000));  media_skips_action(3,&ks)(); } );
+        //thread::spawn ( move || { sleep(time::Duration::from_millis(2000));  media_skips_action(3,&ks)(); } );
         // .. note again that we're always spawned out from hook thread, so slower tasks are also ok here
-        sleep(time::Duration::from_millis(2000));
+        thread::sleep(time::Duration::from_millis(2000));
         media_skips_action(3,&ks)();
     } ) ) );
 
@@ -756,6 +328,7 @@ pub fn setup_krusty_board () {
      - in del mode, left/right do direct bksp/del, but others get select then bksp/del
      */
 
+    /// action-fn generator type (e.g. to specify for various sel/del/word/fast modes for various l2-keys)
     type AFG = fn(Key) -> AF ;
 
     fn setup_l2_key (k:&Krusty, key:Key, l2k:Key, dk:Key, wafg:AFG, fafg:AFG, del_via_sel:bool) {
@@ -791,40 +364,48 @@ pub fn setup_krusty_board () {
     }
 
 
-    // idk what layer this even is, but since we're so used to l2 ej/k nav keys, we'll set them up for various mod-combo eqvs too
+    // idk what layer this even is, but since we're so used to l2 j/k etc nav keys, we'll set them up for various mod-combo eqvs too
     // .. these are useful for various second order nav .. e.g between IDE tabs etc .. no fancy speedups etc here
     // (note ofc that we've filled out the whole set of these for completeness even though realistically we wont use all/most of them)
     fn setup_l3_key (k:&Krusty, key:Key, l3k:Key) {
-        // first the single mod-key combo eqvs .. (and since caps-ctrl is hard to press, we'll make qks1 and lalt do ctrl for these too)
+        // first the single mod-key combo eqvs .. (and since caps-ctrl/shift is hard to press, we'll make qks1-as-ctrl and lalt-as-shift)
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt  ),  k.cg(l3k).m(lalt  ));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lshift),  k.cg(l3k).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl ),  k.cg(l3k).m(lctrl ));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt  ),  k.cg(l3k).m(lctrl ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt  ),  k.cg(l3k).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1  ),  k.cg(l3k).m(lctrl ));
         // then double mod-key combos
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt ).m(lshift),  k.cg(l3k).m(lalt ).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
         // double combos with ralt filling in for a mod-key
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl ),  k.cg(l3k).m(lshift).m(lctrl ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt  ),  k.cg(l3k).m(lshift).m(lalt  ));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lshift),  k.cg(l3k).m(lshift).m(lctrl ));
         // double combos with qks1 filling in for a mod-key
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
+        // and qks and ralt filling in together
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt  ),  k.cg(l3k).m(lctrl).m(lshift));
         // finally, meh lets do all three mod-keys together too
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
         // and triple combos w ralt filling in
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lshift),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lctrl ),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl).m(lshift),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
         // and triple combos w qks1 filling in
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
         k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-
+        // and finally them filling in together too
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lalt  ),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lctrl ),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
+        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lshift),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
         // (note .. cap-win combos for these nav-keys are already used for window move/stretch etc)
+
+        // finally, might as well also add expected nav during caps-tab-switch states (note that this it needs to be bare w/o added ctrl dn/up)
+        k.cm .add_bare_af_combo (&k.ks, k.cg(key).s(mngd_ctrl_dn),  base_action(l3k));
     }
 
 
@@ -923,49 +504,36 @@ pub fn setup_krusty_board () {
 
 
 
-    // test/debug section
-    /*
-    k.cm .add_combo (&k.ks, &k.cg(F12).m(win).m(ctrl), &k.cg(F19).m(shift)); // try rctrl-win
-
-    k.cm .add_combo (&k.ks, &k.cg(F10).m(win).m(shift), &k.cg(F19)); // .. try rshift ..
-
-    k.cm .add_combo (&k.ks, &k.cg(Backslash).m(ctrl), &k.cg(F19));  // try rctrl
-    k.cm .add_combo (&k.ks, &k.cg(Backslash).m(caps), &k.cg(F19));
-
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(lctrl));
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_9).m(ctrl), &k.cg(F19).m(ctrl));
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_8).m(ctrl), &k.cg(F19).m(shift));  // try rctrl
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_0).m(ctrl), &k.cg(F19).m(ctrl));
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(win),  &k.cg(F19).m(shift));
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_6).m(ctrl), &k.cg(F19).m(lctrl));   // try rctrl
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_5).m(ctrl).m(win), &k.cg(F19).m(lctrl));
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_4).m(ctrl).m(win), &k.cg(F19).m(lshift));
-
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_9).m(lctrl), &k.cg(F19).m(lshift));
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
-    k.cm .add_combo (&k.ks, &k.cg(Numrow_5).m(lwin ), &k.cg(F19).m(lshift));
-    */
-    //k.cm .add_combo (&k.ks, &k.cg(F12).m(alt), &k.cg(F19).m(lshift));
-    //k.cm .add_combo (&k.ks, &k.cg(Numrow_7).m(lalt ), &k.cg(F19).m(lshift));
-
 
 
 
     // finally we can start binding key maps .. first the specialized handling for mode-trigger keys
-    k.ks.mode_states.bind_mode_keys_actions();
+    k.ks.mode_states.bind_mode_keys_actions(&k);
     // then setup the combo-processor itself .. (note that modifier key handlers were already set up earlier)
-    *crate::COMBO_MAPS_PROCESSOR.write().unwrap() = Some (k.cm.gen_combo_maps_processor(&k));
+    k.cm.enable_combos_map_events_processor(&k);
 
 
 
     // and we'll put any direct special key setups after all this
     // > which is for safety in case anything above accidentally included those, although ofc we dont want to rely on that!
-    setup_direct_binding_keys (&k);
+    special_keys_setups::setup_direct_binding_keys (&k);
 
 
 
-    // note: the handle_input_events to start the whole shebang should be being called somewhere in main after this setup
-    //handle_input_events();
+    // note: the handle_input_events to start the whole shebang should be being called from main, like via the start_krusty_board fn
+    //start_krusty_board();
+
+}
+
+
+
+pub fn start_krusty_board () {
+
+    // setup everything to for the krusty keyboard configuration
+    setup_krusty_board();
+
+    // then start handling inputs
+    handle_input_events();
 
 }
 
