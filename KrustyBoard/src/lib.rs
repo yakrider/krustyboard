@@ -1,6 +1,3 @@
-#![doc = include_str!("../README.md")]
-
-
 
 // slightly unconventional organization here ..
 //.. we wanted to keep the main module file inside the module dir, so we're just declaring all our modules as

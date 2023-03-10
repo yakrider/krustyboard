@@ -258,7 +258,7 @@ pub fn setup_krusty_board () {
     // note that our mechanism for wrapping mod-key-state restoring guards operates via AFs, hence setting those up (instead of fns)
 
     // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
-    fn media_skips_action (n_skips:u32, ks:&KrS) -> AF {
+    fn media_skips_action (n_skips:u32, ks:&KrustyState) -> AF {
         ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action ( Arc::new ( move || {
             (0 .. n_skips) .into_iter() .for_each (|_| { press_release(VolumeUp) });
     } ) ) ) ) }

@@ -26,7 +26,7 @@ pub enum ModeState_T {
 
 # [ derive (Debug) ]
 /// ModeState representation for mode-flags (and any associated trigger keys they have)
-pub struct ModeState {
+pub struct _ModeState {
     _private    : (),
     pub ms_t    : ModeState_T,
     key         : Arc <RwLock <Option<KbdKey>>>,
@@ -35,11 +35,11 @@ pub struct ModeState {
 
 # [ derive (Debug, Clone) ]
 /// Implements the (Arc wrapped) ModeState functionality
-pub struct MS (Arc<ModeState>);
+pub struct ModeState ( Arc <_ModeState> );
 
-impl Deref for MS {
-    type Target = ModeState;
-    fn deref(&self) -> &ModeState { &self.0 }
+impl Deref for ModeState {
+    type Target = _ModeState;
+    fn deref(&self) -> &_ModeState { &self.0 }
 }
 
 
@@ -48,18 +48,18 @@ impl Deref for MS {
 
 # [ derive (Debug) ]
 /// Holds all the ModeStates together, common functionality is impld here
-pub struct ModeStates {
+pub struct _ModeStates {
     _private : (),
     // l2 mode states
-    pub sel  : MS,
-    pub del  : MS,
-    pub word : MS,
-    pub fast : MS,
+    pub sel  : ModeState,
+    pub del  : ModeState,
+    pub word : ModeState,
+    pub fast : ModeState,
     // quick-keys mode states
-    pub qks  : MS,
-    pub qks1 : MS,
-    pub qks2 : MS,
-    pub qks3 : MS,
+    pub qks  : ModeState,
+    pub qks1 : ModeState,
+    pub qks2 : ModeState,
+    pub qks3 : ModeState,
     // then the computed flags
     pub some_l2_mode_active   : Flag,
     pub some_qks_mode_active  : Flag,
@@ -72,11 +72,11 @@ pub struct ModeStates {
 
 # [ derive (Debug, Clone) ]
 /// Implements the (Arc wrapped) ModeStates-holder functionality
-pub struct MSS (Arc<ModeStates>);
+pub struct ModeStates ( Arc <_ModeStates> );
 
-impl Deref for MSS {
-    type Target = ModeStates;
-    fn deref(&self) -> &ModeStates { &self.0 }
+impl Deref for ModeStates {
+    type Target = _ModeStates;
+    fn deref(&self) -> &_ModeStates { &self.0 }
 }
 
 
@@ -87,10 +87,10 @@ impl Deref for MSS {
 
 
 /// Implements the (Arc wrapped) ModeState functionality
-impl MS {
+impl ModeState {
 
-    pub fn new (ms_t: ModeState_T) -> MS {
-        MS ( Arc::new ( ModeState {
+    pub fn new (ms_t: ModeState_T) -> ModeState {
+        ModeState ( Arc::new ( _ModeState {
             _private : (),
             ms_t,
             key     : Arc::new(RwLock::new(None)),
@@ -109,14 +109,14 @@ impl MS {
 
 
     /// Generates mode-key flag update action for key-down on registered mode-key
-    fn gen_mode_key_down_action (&self, mss:MSS) -> AF {
+    fn gen_mode_key_down_action (&self, mss: ModeStates) -> AF {
         let flag = self.mk_down.clone();
         let mss_cba : AF = {
-            if MSS::static_l2_modes() .contains(&self.ms_t) {
+            if ModeStates::static_l2_modes() .contains(&self.ms_t) {
                 Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_caps_mode_active.set(); } )
-            } else if MSS::static_qks_modes() .contains(&self.ms_t) {
+            } else if ModeStates::static_qks_modes() .contains(&self.ms_t) {
                 Arc::new ( move || { mss.some_qks_mode_active.set(); mss.some_caps_mode_active.set(); } )
-            } else if MSS::static_caps_modes() .contains(&self.ms_t) {
+            } else if ModeStates::static_caps_modes() .contains(&self.ms_t) {
                 Arc::new ( move || { mss.some_caps_mode_active.set(); } )
             } else { Arc::new (move || { }) }
         };
@@ -124,12 +124,12 @@ impl MS {
     }
 
     /// Generates mode-key flag update action for key-up on registered mode-key
-    fn gen_mode_key_up_action (&self, mss:MSS) -> AF {
+    fn gen_mode_key_up_action (&self, mss: ModeStates) -> AF {
         let flag = self.mk_down.clone();
         let mss_cba : AF = {
-            if      MSS::static_l2_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
-            else if MSS::static_qks_modes()  .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
-            else if MSS::static_caps_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
+            if      ModeStates::static_l2_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
+            else if ModeStates::static_qks_modes()  .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
+            else if ModeStates::static_caps_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         Arc::new ( move || { flag.clear(); mss_cba() } )
@@ -168,14 +168,14 @@ impl MS {
 
 
 /// Implements the (Arc wrapped) ModeStates-holder functionality
-impl MSS {
+impl ModeStates {
 
-    pub fn new() -> MSS {
-        let (_sel, _del,  _word, _fast) = (MS::new(sel), MS::new(del), MS::new(word), MS::new(fast));
-        let (_qks, _qks1, _qks2, _qks3) = (MS::new(qks), MS::new(qks1), MS::new(qks2), MS::new(qks3));
+    pub fn new() -> ModeStates {
+        let (_sel, _del,  _word, _fast) = (ModeState::new(sel), ModeState::new(del), ModeState::new(word), ModeState::new(fast));
+        let (_qks, _qks1, _qks2, _qks3) = (ModeState::new(qks), ModeState::new(qks1), ModeState::new(qks2), ModeState::new(qks3));
         let (some_l2, some_qks, some_caps) = (Flag::default(), Flag::default(), Flag::default() );
 
-        MSS ( Arc::new ( ModeStates {
+        ModeStates ( Arc::new ( _ModeStates {
             _private : (),
             sel: _sel, del:  _del,  word: _word, fast: _fast,
             qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
@@ -205,7 +205,7 @@ impl MSS {
     }
 
 
-    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &MS);8] { [
+    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState);8] { [
         // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (sel, &self.sel), (del,  &self.del),  (word, &self.word), (fast, &self.fast),
@@ -216,7 +216,7 @@ impl MSS {
         self.mode_flag_pairs() .map (|(_,ms)| ms.mk_down.check())
     }
     pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
-        MSS::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
+        ModeStates::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
     }
 
     pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {

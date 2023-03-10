@@ -46,7 +46,7 @@ impl Flag {
 
 # [ derive (Debug) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
 /// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
-pub struct KrustyState {
+pub struct _KrustyState {
     // having this disallows direct instantiation
     _private : (),
 
@@ -54,10 +54,10 @@ pub struct KrustyState {
     pub in_disabled_state: Flag,
 
     // mod-keys .. details in its declaration
-    pub mod_keys : MKS,
+    pub mod_keys : ModKeys,
 
     // mode states .. details in its declaration
-    pub mode_states : MSS,
+    pub mode_states : ModeStates,
 
     // mouse btn states .. need to impl caps-as-ctrl, or right-mouse-scroll behavior etc
     pub mouse_left_btn_down:  Flag,
@@ -75,12 +75,12 @@ pub struct KrustyState {
 
 # [ derive (Debug, Clone) ]
 /// Arc wrapped KrustyState for cheap cloning/sharing
-pub struct KrS (Arc <KrustyState>);
+pub struct KrustyState ( Arc <_KrustyState> );
 // ^^ we'll use this wrapped type so cloning and passing around is cheap
 
-impl Deref for KrS {
-    type Target = KrustyState;
-    fn deref(&self) -> &KrustyState { &self.0 }
+impl Deref for KrustyState {
+    type Target = _KrustyState;
+    fn deref(&self) -> &_KrustyState { &self.0 }
 }
 
 
@@ -92,7 +92,7 @@ pub struct Krusty {
     // this is mostly just a utility wrapper sugar to pass things around
     _private : (),   // prevents direct instantiation of this struct
     // KrS is Arc<KrustyState>, holds all state flags
-    pub ks: KrS,
+    pub ks: KrustyState,
     // we have the kbd and mouse bindings maps for per key/btn/wheel/pointer event action bindings
     pub kbb: KbdBindings,
     pub msb: MouseBindings,
@@ -107,17 +107,17 @@ pub struct Krusty {
 
 
 /// impl for Krusty-State
-impl KrS {
+impl KrustyState {
 
-    pub fn instance () -> KrS {
-        static INSTANCE: OnceCell<KrS> = OnceCell::new();
+    pub fn instance () -> KrustyState {
+        static INSTANCE: OnceCell<KrustyState> = OnceCell::new();
         INSTANCE .get_or_init ( ||
-            KrS ( Arc::new ( KrustyState {
+            KrustyState ( Arc::new ( _KrustyState {
                 _private : (),
                 in_disabled_state : Flag::default(),
 
-                mod_keys    : MKS::new(),
-                mode_states : MSS::new(),
+                mod_keys    : ModKeys::new(),
+                mode_states : ModeStates::new(),
 
                 mouse_left_btn_down  : Flag::default(),
                 mouse_right_btn_down : Flag::default(),
@@ -157,19 +157,19 @@ impl Krusty {
     pub fn new() -> Krusty {
         Krusty {
             _private : (),
-            ks  : KrS::instance(),
+            ks  : KrustyState::instance(),
             kbb : KbdBindings::instance(),
             msb : MouseBindings::instance(),
             cm  : CombosMap::instance(),
-            default_bind_keys : Arc::new(RwLock::new (HashSet::new())),
+            default_bind_keys : Arc::new (RwLock::new (HashSet::new())),
         }
     }
 
     /// utlity function to create a new Combo-generator (key-output or combo-specification type)
-    pub fn cg    (&self, key:Key) -> ComboGen_wKey { ComboGen_wKey::new (key, &self.ks) }
+    pub fn cg (&self, key:Key) -> ComboGen_wKey { ComboGen_wKey::new (key, &self.ks) }
 
     /// utlity function to create a new Combo-generator (non-key action-function output type)
-    pub fn cg_af (&self, af:AF)   -> ComboGen_wAF  { ComboGen_wAF::new  (af,  &self.ks) }
+    pub fn cg_af (&self, af:AF) -> ComboGen_wAF { ComboGen_wAF::new (af, &self.ks) }
 
 
     #[allow(dead_code)]

@@ -29,7 +29,7 @@ pub fn setup_mouse_left_btn_handling (k:&Krusty) {
     //      and that will be slower to send the actual press from the spawned thread (so making release slower too helps)
 }
 
-fn handle_mouse_left_btn_down (ks:&KrS) {
+fn handle_mouse_left_btn_down (ks:&KrustyState) {
     ks.mouse_left_btn_down.set();
     if ks.mod_keys.caps.down.check() {
         ks.in_managed_ctrl_down_state.set();
@@ -38,7 +38,7 @@ fn handle_mouse_left_btn_down (ks:&KrS) {
     MouseButton::LeftButton.press()
 }
 
-fn handle_mouse_left_btn_up (ks:&KrS) {
+fn handle_mouse_left_btn_up (ks:&KrustyState) {
     ks.mouse_left_btn_down.clear();
     MouseButton::LeftButton.release();
 }
@@ -63,11 +63,11 @@ pub fn setup_mouse_right_btn_handling (k:&Krusty) {
     } );
 }
 
-fn handle_mouse_right_btn_down (ks:&KrS) {
+fn handle_mouse_right_btn_down (ks:&KrustyState) {
     ks.mouse_right_btn_down.set();
 }
 
-fn handle_mouse_right_btn_up (ks:&KrS) {
+fn handle_mouse_right_btn_up (ks:&KrustyState) {
     ks.mouse_right_btn_down.clear();
     if ks.in_right_btn_scroll_state.check() {
         ks.in_right_btn_scroll_state.clear();
@@ -137,7 +137,7 @@ pub fn setup_mouse_wheel_handling (k:&Krusty) {
     } );
 }
 
-pub fn handle_wheel_guarded (delta:i32, ksr:&KrS) {
+pub fn handle_wheel_guarded (delta:i32, ksr:&KrustyState) {
     // this is mostly to make the super-fast inertial smooth-scroll wheel on my (MX3) mouse a lil more usable by spacing things out
     // also, the invalidation setup prevents things like caps down when wheel is still unintentionally inertially spinning to trigger zooms etc
     let last_stamp = *ksr.last_wheel_stamp.read().unwrap();
@@ -155,7 +155,7 @@ pub fn handle_wheel_guarded (delta:i32, ksr:&KrS) {
     }
 }
 
-pub fn handle_wheel_action (delta:i32, ksr:&KrS) {
+pub fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     let incr = delta / WHEEL_DELTA as i32;
     if ksr.mouse_right_btn_down.check() {
         // right-mouse-btn-wheel support for switche task switching

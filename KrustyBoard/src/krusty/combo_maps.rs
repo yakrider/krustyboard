@@ -1,6 +1,7 @@
 #![ allow (non_camel_case_types) ]
 
 use std::collections::{HashMap, HashSet};
+use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -11,16 +12,12 @@ use once_cell::sync::OnceCell;
 use crate::{*, key_utils::*, ModeState_T::*, ModKey::*};
 
 
-pub const COMBO_STATE__MOD_KEY_BITS_N : usize = 9;
-pub const COMBO_STATE__MODE_STATE_BITS_N : usize = 8;
-pub const COMBO_STATE__FLAG_BITS_N : usize = 2;
-// ^^ 9 mod keys from above list, 4+4=8 +2=10 for modes from above list (sel/del/word/fast, qks/qks1/qks2/qks3, rght-ms-scrl/mngd-ctrl-dn)
-// note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits!
 
-
-pub type ComboStatesBits_ModKeys = [bool; COMBO_STATE__MOD_KEY_BITS_N];
-pub type ComboStatesBits_Modes   = [bool; COMBO_STATE__MODE_STATE_BITS_N];
-pub type ComboStatesBits_Flags   = [bool; COMBO_STATE__FLAG_BITS_N];
+pub type ComboStatesBits_ModKeys = [bool; 9];
+pub type ComboStatesBits_Modes   = [bool; 8];
+pub type ComboStatesBits_Flags   = [bool; 2];
+// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), 4+4=8 modes (sel/del/word/fast, qks/qks1/qks2/qks3), 2 flags (rght-ms-scrl/mngd-ctrl-dn)
+// note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
 
 
 
@@ -31,10 +28,9 @@ pub type ComboStatesBits_Flags   = [bool; COMBO_STATE__FLAG_BITS_N];
 pub struct Combo {
     _private:(),
     pub key : Key,
-    pub mk_state   : [bool; COMBO_STATE__MOD_KEY_BITS_N],
-    pub mode_state : [bool; COMBO_STATE__MODE_STATE_BITS_N],
-    pub flags_state: [bool; COMBO_STATE__FLAG_BITS_N],
-    //pub state : [bool; COMBO_STATE_N_BITS],
+    pub mk_state   : ComboStatesBits_ModKeys,
+    pub mode_state : ComboStatesBits_Modes,
+    pub flags_state: ComboStatesBits_Flags,
 }
 
 
@@ -48,9 +44,9 @@ pub struct Combo {
 # [ derive (Clone) ]
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 pub struct ComboGen_wKey<'a> {
-    ks    : &'a KrS,
+    ks    : &'a KrustyState,
     key   : Key,
-    mks   : Vec<MK>,
+    mks   : Vec<ModKey>,
     modes : Vec<ModeState_T>,
 }
 
@@ -59,8 +55,8 @@ pub struct ComboGen_wKey<'a> {
 # [ derive (Clone) ]
 /// Combo-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
 pub struct ComboGen_wAF<'a> {
-    ks  : &'a KrS,
-    mks : Vec<MK>,
+    ks  : &'a KrustyState,
+    mks : Vec<ModKey>,
     af  : AF,
 }
 
@@ -96,8 +92,8 @@ impl Deref for CombosMap {
 impl Combo {
 
     pub fn new (key:Key, mod_keys:&[ModKey], modes:&[ModeState_T]) -> Combo {
-        let mk_state    = MKS::make_combo_mod_keys_states_bitmap(mod_keys);
-        let mode_state  = MSS::make_combo_mode_states_bitmap(modes);
+        let mk_state    = ModKeys::make_combo_mod_keys_states_bitmap(mod_keys);
+        let mode_state  = ModeStates::make_combo_mode_states_bitmap(modes);
         let flags_state = Combo::make_combo_flags_states_bitmap(modes);
         Combo { _private:(), key, mk_state, mode_state, flags_state }
     }
@@ -109,7 +105,7 @@ impl Combo {
         static FLAGS_MODES : [ModeState_T;2] = [mngd_ctrl_dn, rght_ms_scrl];
         FLAGS_MODES
     }
-    fn get_cur_flags_states_bitmap (ks:&KrS) -> ComboStatesBits_Flags {
+    fn get_cur_flags_states_bitmap (ks:&KrustyState) -> ComboStatesBits_Flags {
         // note that the order of these must match the order given by the static_flag_modes fn above
         [ks.in_managed_ctrl_down_state.check(), ks.in_right_btn_scroll_state.check()]
     }
@@ -119,10 +115,10 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub fn gen_cur_combo (key:Key, ks:&KrS) -> Combo {
+    pub fn gen_cur_combo (key:Key, ks:&KrustyState) -> Combo {
         // note: this is in runtime hot-path .. (unlike the one above which is used while populating the combo-table)
         let mode_state  = {
-            if !ks.mod_keys.caps.down.check() { [false; COMBO_STATE__MODE_STATE_BITS_N] }
+            if !ks.mod_keys.caps.down.check() { [false; size_of::<ComboStatesBits_Modes>()] }
             else { ks.mode_states.get_cur_mode_states_bitmap() }
         };
         let mk_state    = ks.mod_keys.get_cur_mod_keys_states_bitmap();
@@ -137,44 +133,45 @@ impl Combo {
     }
 
 
-    fn fan_lrmk (mks:Vec<MK>, lrmk:&MK, lmk:&MK, rmk:&MK) -> Vec<Vec<MK>> {
-        // if a mod vec had this l/r mod (e.g. Alt), we'll instead gen three mod vecs having (LAlt, RAlt, LAlt && RAlt)
-        let mut mvs: Vec<Vec<MK>> = Vec::new();
-        if mks.contains(lrmk) {
-            let mut vlr = mks.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .map (|m| *m) .collect::<Vec<MK>>();
-            let (mut vl, mut vr) = (vlr.clone(), vlr.clone());
-            vl.push(*lmk); vr.push(*rmk); vlr.push(*lmk); vlr.push(*rmk);
-            mvs.push(vl); mvs.push(vr); mvs.push(vlr);
-        } else {
-            mvs.push(mks)
-        }
-        mvs
-    }
-    fn fan_lr (mks:Vec<MK>) -> Vec<Vec<MK>> {
-        // we'll expand out this mod-vec into vec-of-vec with all L/R optional mods fanned out into piles of L/R/L+R mod-vecs
-        let mut mvs : Vec<Vec<MK>> = Vec::new();
+    fn fan_lr (mks:Vec<ModKey>) -> Vec<Vec<ModKey>> {
+        // we'll expand out this mod-vec into vec-of-vec with all L/R optional mods fanned out into vec-of-vecs with L, R, or L+R versions
+        let mut mvs : Vec<Vec<ModKey>> = Vec::new();
         mvs.push(mks);      // prepare seed vec-of-vec with initial mods-vec
-        MKS::static_lr_mods_triplets() .iter() .for_each ( |(lrmk, lmk, rmk)| {
+        ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk, lmk, rmk)| {
             // expand repeatedly for each lrmk, consuming the list and replacing with expanded version (w/o cloning)
-            mvs = mvs .drain(..) .flat_map (|mv| Combo::fan_lrmk(mv, lrmk, lmk, rmk)) .collect();
+            let mut mvs_exp: Vec<Vec<ModKey>> = Vec::new();
+            mvs .drain(..) .for_each ( |mv| {
+                if mv.contains(lrmk) {
+                    // if a vec had this l/r mod (e.g. alt), we'll instead gen three mod vecs having (lalt, ralt, lalt && ralt)
+                    let mut vlr = mv.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .map (|m| *m) .collect::<Vec<ModKey>>();
+                    let (mut vl, mut vr) = (vlr.clone(), vlr.clone());
+                    vl.push(*lmk); mvs_exp.push(vl);
+                    vr.push(*rmk); mvs_exp.push(vr);
+                    vlr.push(*lmk); vlr.push(*rmk); mvs_exp.push(vlr);
+                } else {
+                    mvs_exp.push(mv)
+                }
+            } );
+            // swap in this expanded vec-of-vec for the next loop iteration (w the next lrmk)
+            mvs = mvs_exp;
         } );
         mvs
     }
 
-    pub fn gen_combos (mks:&Vec<MK>, modes:&Vec<ModeState_T>, key:Key) -> Vec<Combo> {
+    pub fn gen_combos (mks:&Vec<ModKey>, modes:&Vec<ModeState_T>, key:Key) -> Vec<Combo> {
         // we'll auto add caps to any caps based modes (for easier setup)
         let mut mks = mks.clone();
-        let is_qk = modes .iter() .any (|m| MSS::static_caps_modes().contains(m));
+        let is_qk = modes .iter() .any (|m| ModeStates::static_caps_modes().contains(m));
         if is_qk && !mks.contains(&caps) { mks.push(caps); }
         // and expand the combos for any L/R agnostic mod-keys specified
         Combo::fan_lr(mks) .iter() .map(|mv| {Combo::new (key, mv, modes)}) .collect::<Vec<Combo>>()
     }
 
-    pub fn gen_af (mks:&Vec<MK>, af:AF, ks:&KrS) -> AF {
+    pub fn gen_af (mks:&Vec<ModKey>, af:AF, ks:&KrustyState) -> AF {
         // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
-        let mc = |mk:MK| mks.contains(&mk) ;
+        let mc = |mk:ModKey| mks.contains(&mk) ;
         let mut af = af;
-        let lr_zip = MKS::static_lr_mods_triplets() .into_iter() .zip(ks.mod_keys.lrmk_smks().into_iter()) .collect::<Vec<((MK,MK,MK),&SMK)>>();
+        let lr_zip = ModKeys::static_lr_mods_triplets() .into_iter() .zip(ks.mod_keys.lrmk_smks().into_iter()) .collect::<Vec<((ModKey, ModKey, ModKey), &SyncdModKey)>>();
         lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
             af = if mc(*lrmk) || mc(*lmk) || mc(*rmk) {
                 smk.active_action(af.clone())
@@ -191,10 +188,10 @@ impl Combo {
 
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 impl<'a> ComboGen_wKey<'a> {
-    pub fn new (key:Key, ks:&KrS) -> ComboGen_wKey {
+    pub fn new (key:Key, ks:&KrustyState) -> ComboGen_wKey {
         ComboGen_wKey { ks, key, mks:Vec::new(), modes:Vec::new() }
     }
-    pub fn m (&'a mut self, mk:MK) -> &'a mut ComboGen_wKey {
+    pub fn m (&'a mut self, mk:ModKey) -> &'a mut ComboGen_wKey {
         self.mks.push(mk); self
     }
     pub fn s (&'a mut self, md: ModeState_T) -> &'a mut ComboGen_wKey {
@@ -211,10 +208,10 @@ impl<'a> ComboGen_wKey<'a> {
 
 /// Combo-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
 impl<'a> ComboGen_wAF<'a> {
-    pub fn new  (af:AF, ks:&KrS) -> ComboGen_wAF {
+    pub fn new  (af:AF, ks:&KrustyState) -> ComboGen_wAF {
         ComboGen_wAF { ks, mks:Vec::new(), af }
     }
-    pub fn m (&'a mut self, mk:MK) -> &'a mut ComboGen_wAF {
+    pub fn m (&'a mut self, mk:ModKey) -> &'a mut ComboGen_wAF {
         self.mks.push(mk); self
     }
     pub fn gen_af (&self) -> AF {
@@ -255,8 +252,8 @@ impl CombosMap {
     }
 
 
-    fn gen_consuming_af (mks:&Vec<MK>, af:AF, ks:&KrS) -> AF {
-        let mc = |mk:MK| mks.contains(&mk) ;
+    fn gen_consuming_af (mks:&Vec<ModKey>, af:AF, ks:&KrustyState) -> AF {
+        let mc = |mk:ModKey| mks.contains(&mk) ;
         let mut af = af;
         ks.mod_keys.mod_smk_pairs() .iter() .for_each ( |(mk,smk)| {
             if mc(*mk) { af = smk.keydn_consuming_action(af.clone()) }
@@ -265,7 +262,7 @@ impl CombosMap {
     }
 
     /// use this fn to register combos that will auto wrap activation/inactivation AFs around any mods in the combo
-    pub fn add_combo (&self, ksr:&KrS, cgc:&ComboGen_wKey, cga:&ComboGen_wKey) {
+    pub fn add_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, cga:&ComboGen_wKey) {
         // note that although the active/inactive will also mark mk keydn consumed, we only do that for L-keys, hence wrapping consuming AF too
         let af = CombosMap::gen_consuming_af (&cgc.mks, cga.gen_af(), ksr);
         for c in cgc.gen_combos() {
@@ -274,7 +271,7 @@ impl CombosMap {
     } }
 
     /// note that this will wrap the AF in with mod-actions for all mods either active (if specified) or inactive (if not)
-    pub fn add_af_combo (&self, ksr:&KrS, cgc:&ComboGen_wKey, cgaf:&ComboGen_wAF) {
+    pub fn add_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, cgaf:&ComboGen_wAF) {
         let af = CombosMap::gen_consuming_af (&cgc.mks, cgaf.gen_af(), ksr);
         for c in cgc.gen_combos() {
             //println! ("{:?}, {:?}, {:?} {:?} -> {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cgaf.mods );
@@ -282,14 +279,14 @@ impl CombosMap {
     } }
 
     /// use this consuming bare fn to add combos if the AF supplied shouldnt be wrapped for active/inactive by mod, but just marked for consumption
-    pub fn add_cnsm_bare_af_combo (&self, ksr:&KrS, cgc:&ComboGen_wKey, af:AF) {
+    pub fn add_cnsm_bare_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
         let af = CombosMap::gen_consuming_af (&cgc.mks, af, ksr);
         for c in cgc.gen_combos () {
             self.cm .write().unwrap() .insert (c, af.clone());
     } }
 
     /// use this bare fn to add combos if the AF supplied needs special care to avoid wrapping with mod active/inactive .. e.g ctrl/tab etc
-    pub fn add_bare_af_combo (&self, _:&KrS, cgc:&ComboGen_wKey, af:AF) {
+    pub fn add_bare_af_combo (&self, _:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
         for c in cgc.gen_combos () { self.cm .write().unwrap() .insert (c, af.clone()); }
     }
 
@@ -297,7 +294,7 @@ impl CombosMap {
     fn wrapped_bfn (wk:Key, bfn: Box <dyn Fn()>) -> Box <dyn Fn()> {
         Box::new ( move || { wk.press(); bfn(); wk.release(); } )
     }
-    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrS) {
+    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrustyState) {
         // - if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
         // - as to l2 keys (for l3 fallback), we want l2-key expected behavior with other mod key combos ..
@@ -331,7 +328,7 @@ impl CombosMap {
 
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
-    pub fn combo_maps_handle_kbd_event (&self, key:Key, ks:&KrS) {
+    pub fn combo_maps_handle_kbd_event (&self, key:Key, ks:&KrustyState) {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
         if let Some(cmaf) = self.cm.read().unwrap() .get(&Combo::gen_cur_combo(key,&ks)) {
@@ -354,6 +351,7 @@ impl CombosMap {
         use crate::{EventPropagationDirective::*, KbdEventType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
+        // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
         let mut handled_keys = HashSet::new();
         self.cm .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
         k .default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
