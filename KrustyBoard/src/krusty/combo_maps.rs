@@ -68,15 +68,14 @@ pub struct ComboGen_wAF<'a> {
 
 
 
-/// combos-map module internal type (used to build successively mod-key wrapped fallback key-presses)
-type BFK = Box <dyn Fn(Key)>;
-
 # [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct _CombosMap {
     _private : (),
-    pub cm   : Arc <RwLock <HashMap <Combo, AF>>>,
-    cm_proc  : Arc <RwLock <Option <KbdEventCallbackEntry>>>,
+    cm      : Arc <RwLock <HashMap <Combo, AF>>>,
+    l2ks    : Arc <RwLock <HashMap <Key, Key>>>,
+    cm_proc : Arc <RwLock <Option <KbdEventCallbackEntry>>>,
+    // note that ^^ none of these need to be public as we should only need to access these from within the module
 }
 # [ derive (Clone) ]
 pub struct CombosMap ( Arc <_CombosMap> );
@@ -236,6 +235,7 @@ impl CombosMap {
             CombosMap ( Arc::new ( _CombosMap {
                 _private : (),
                 cm       : Arc::new ( RwLock::new ( HashMap::new() ) ),
+                l2ks     : Arc::new ( RwLock::new ( HashMap::new() ) ),
                 cm_proc  : Arc::new ( RwLock::new ( None) ),
             } ) )
         ) .clone()
@@ -248,6 +248,10 @@ impl CombosMap {
     /// supplies an (Arc) copy of the generated and cached combos map based (and fallback defaults) events processor
     pub fn get_processor (&self) -> Option<KbdEventCallbackEntry> {
         self.cm_proc .read().unwrap() .as_ref() .map(|cb| cb.clone())
+    }
+    /// registers a key for layer-2 functionality, which is used during fallback to layer any pressed mod-keys onto the l2-key
+    pub fn register_l2_key (&self, key:Key, l2k:Key) {
+        self.l2ks .write().unwrap() .insert (key, l2k);
     }
 
 
@@ -290,20 +294,39 @@ impl CombosMap {
     }
 
 
-
-    fn wrapped_bfn (wk:Key, bfk:BFK) -> BFK {
-        Box::new ( move |key:Key| { wk.press(); bfk(key); wk.release(); } )
+    fn wrapped_bfn (wk:Key, bfn: Box <dyn Fn()>) -> Box <dyn Fn()> {
+        Box::new ( move || { wk.press(); bfn(); wk.release(); } )
     }
-    fn caps_fallback_action_fn (key:Key, ks:&KrS) {
-        // if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
-        // however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary
-        let mut bfk: BFK = Box::new(|key:Key| press_release(key));
-        // ^^ stable rust doesnt let me use existential/dyn stuff in vars to wrap progressively, so use boxes at some minimal cost
-        if ks.mod_keys.caps.down.check() || ks.mod_keys.some_ctrl_down()  { bfk = CombosMap::wrapped_bfn (Key::LCtrl, bfk) }
-        if ks.mod_keys.ralt.down.check() || ks.mod_keys.some_shift_down() { bfk = CombosMap::wrapped_bfn (Key::LShift, bfk) }
-        if ks.mod_keys.lalt.down.check() { bfk = CombosMap::wrapped_bfn (Key::LAlt, bfk) }
-        if ks.mod_keys.some_win_down()   { bfk = CombosMap::wrapped_bfn (Key::LWin, bfk) }
-        bfk(key);
+    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrS) {
+        // - if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
+        // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
+        // - as to l2 keys (for l3 fallback), we want l2-key expected behavior with other mod key combos ..
+        // in particular, since caps is used up just to trigger l2, we'll let qks1 do ctrl, (and ralt do shift) for the l2 key combos
+        // - and for the mode-keys, we need most caps combos to be silent, so we'll do fallback only when qks1 active, treating that as ctrl
+        // (note that for mode-keys, w/o caps down we can ofc do arbitrary mix of natural ctrl/alt/shift/win etc combos)
+
+        // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when the other l2/mode keys to do their l2= modes)
+        if let Some(msk) = ks.mode_states.qks1.key() { if msk==key { return } }
+
+        // if we're in some caps mode-state, but not qks1, we do nothing for fallback (i.e. only registered combos allowed)
+        let qks1_active = ks.mode_states.qks1.mk_down.check();
+        if ks.mode_states.some_caps_mode_active.check() && !qks1_active { return }
+
+        // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
+        let l2k_opt = self.l2ks.read().unwrap().get(&key).copied();
+        let fb_key = l2k_opt.unwrap_or(key);
+
+        // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
+        let qks1_ctrl = ks.mode_states.check_if_mode_key(key) || l2k_opt.is_some();
+
+        // note that stable rust doesnt let us use existential/dyn stuff in vars to wrap progressively, so use boxes at some minimal cost
+        let mut bfn: Box <dyn Fn()> = Box::new (move || press_release(fb_key));
+        if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { bfn = CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
+        // ^^ if its l2-key or mode-key (i.e qks1-ctrl), we wont ctrl wrap just from being here (unless there's actual ctrl or qks1-down)
+        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.check() { bfn = CombosMap::wrapped_bfn (Key::LShift, bfn) }
+        if ks.mod_keys.lalt.down.check() { bfn = CombosMap::wrapped_bfn (Key::LAlt, bfn) }
+        if ks.mod_keys.some_win_down()   { bfn = CombosMap::wrapped_bfn (Key::LWin, bfn) }
+        bfn();
     }
 
 
@@ -314,15 +337,10 @@ impl CombosMap {
         if let Some(cmaf) = self.cm.read().unwrap() .get(&Combo::gen_cur_combo(key,&ks)) {
             cmaf()  // found a combo matched action .. we're done!
         } else if ks.mod_keys.caps.down.check() {
-            if ks.mode_states.some_caps_mode_active.check() {
-                // when caps down, we'll suppress caps-mode-trigger keys (incl in combo w other modkeys)
-                // we'll also suppress all unregistered caps-mode combos
-            } else {
-                // .. but for other caps combos, there are extensive fallback setups
-                CombosMap::caps_fallback_action_fn (key,ks);
-            }
+            // unregistered caps-combos have extensive fallback setups
+            self.handle_caps_combo_fallback (key, ks);
         } else if ks.mod_keys.ralt.down.check() {
-            // unmapped ralt is set to shift (other mods pass through)
+            // unmapped ralt w/o caps is set to shift (other mods pass through)
             shift_press_release(key)
         } else {
             // all else works naturally via passthrough
@@ -332,7 +350,7 @@ impl CombosMap {
 
 
     /// generates the full combo-maps processing AF for use by lower level events processor (which sets the processor enabled)
-    pub fn enable_combos_map_events_processor(&self, k:&Krusty) {
+    pub fn enable_combos_map_events_processor (&self, k:&Krusty) {
         use crate::{EventPropagationDirective::*, KbdEventType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!

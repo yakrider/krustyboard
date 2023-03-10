@@ -1,5 +1,6 @@
 #![ allow (non_camel_case_types) ]
 
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
@@ -64,6 +65,9 @@ pub struct ModeStates {
     pub some_qks_mode_active  : Flag,
     pub some_caps_mode_active : Flag,
 
+    // we'll also maintain a set of our registered mode-trigger-keys for quick lookup
+    mode_keys : Arc <RwLock <HashSet <KbdKey>>>,
+
 }
 
 # [ derive (Debug, Clone) ]
@@ -98,7 +102,8 @@ impl MS {
     pub fn key (&self) -> Option<KbdKey> {
         self.key.read().unwrap().clone()
     }
-    pub fn register_key (&self, key:KbdKey) {
+    /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
+    fn register_key (&self, key:KbdKey) {
         *self.key.write().unwrap() = Some(key);
     }
 
@@ -175,6 +180,7 @@ impl MSS {
             sel: _sel, del:  _del,  word: _word, fast: _fast,
             qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
             some_l2_mode_active: some_l2, some_qks_mode_active: some_qks, some_caps_mode_active: some_caps,
+            mode_keys: Arc::new (RwLock::new (HashSet::new())),
         } ) )
     }
 
@@ -211,6 +217,17 @@ impl MSS {
     }
     pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
         MSS::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
+    }
+
+    pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {
+        self.mode_flag_pairs() .iter() .for_each ( |(mst,ms)| {
+            if *mst == ms_t {
+                ms.register_key(key);
+                self.mode_keys.write().unwrap().insert(key);
+        } } )
+    }
+    pub fn check_if_mode_key (&self, key:Key) -> bool {
+        self.mode_keys.read().unwrap().contains(&key)
     }
 
     pub fn refresh_qks_mode_active_flag (&self) {

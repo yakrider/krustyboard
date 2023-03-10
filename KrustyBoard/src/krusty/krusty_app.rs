@@ -120,41 +120,34 @@ pub fn setup_krusty_board () {
 
 
 
-    fn register_mode_key (k: &Krusty, key: Key, ms: &MS) {
+    fn register_mode_key (k:&Krusty, key:Key, ms_t:ModeState_T) {
         // first we'll do the registration, then we can try and set any auxillary combos here too
-        ms .register_key (key);
+        k.ks.mode_states .register_mode_key (key, ms_t);
 
-        //add_bare_af_combo (k, k.cg(key).m(caps).s(ms), no_action());
-        // ^^ not adequate as we'll have multi-mode and multi-modkey combos .. better to just disable it in runtime fallbacks
-
-        // however, we can add in some replacement actions here .. basically ralt w/ those can give the expected w/caps actions
-        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt),           &k.cg(key).m(lctrl));
-        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lalt),   &k.cg(key).m(lctrl).m(lalt));
-        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lshift), &k.cg(key).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, &k.cg(key).s(ms.ms_t).m(ralt).m(lwin),   &k.cg(key).m(lctrl).m(lwin));
+        // note that we want to disable mode-keys across most mod-key combos when caps down ..
+        // .. and thats painful to do via combos-maps, so we're now instead just disabling them in runtime fallbacks
+        // further, in fallback, we'll also layer base action w mod-keys for these mode-trigger-keys when qks1 down!
     }
 
     // setup keys for layer-2 caret nav sel/del/fast modes
-    // note: registering as mode key will set w/caps actions to nothing, other combos can be set as usual elsewhere
-    // .. it will also add default replacement for caps-plus-combos to be caps-ralt-plus combos, but ofc can override those too
-    register_mode_key ( &k, E, &k.ks.mode_states.sel  );
-    register_mode_key ( &k, D, &k.ks.mode_states.del  );
-    register_mode_key ( &k, F, &k.ks.mode_states.word );
-    register_mode_key ( &k, R, &k.ks.mode_states.fast );
+    // note: registering as mode key will set all w/caps actions silent in fallback, along w layering mod-key combos w qks1
+    // however, they are all in fallback only, so that behavior will be overridden by any combo registrations!
+    register_mode_key ( &k, E, sel  );
+    register_mode_key ( &k, D, del  );
+    register_mode_key ( &k, F, word );
+    register_mode_key ( &k, R, fast );
 
     // setup the key for l4 shortcuts mode, but the mechanism is same as for the caret modes
-    register_mode_key ( &k, Q,        &k.ks.mode_states.qks  );
-    register_mode_key ( &k, Numrow_1, &k.ks.mode_states.qks1 );
-    register_mode_key ( &k, Numrow_2, &k.ks.mode_states.qks2 );
-    register_mode_key ( &k, Numrow_3, &k.ks.mode_states.qks3 );
+    register_mode_key ( &k, Q,        qks  );
+    register_mode_key ( &k, Numrow_1, qks1 );
+    register_mode_key ( &k, Numrow_2, qks2 );
+    register_mode_key ( &k, Numrow_3, qks3 );
 
 
 
     // f in caret mode, so we'll remap some of the other combos to replace ctr-f etc
     k.cm .add_combo (&k.ks, &k.cg(F).m(lalt),         &k.cg(F).m(ctrl));     // alt-f to ctrl-f
-    k.cm .add_combo (&k.ks, &k.cg(F).s(word).m(ralt), &k.cg(F).m(lalt));     // caps-ralt-f to alt-f (instead of default ctrl-f)
-    k.cm .add_combo (&k.ks, &k.cg(F).s(word).m(lalt), &k.cg(F).m(lalt));     // caps-lalt-f to alt-f too, though it goes against typical mode-key usage
-    k.cm .add_combo (&k.ks, &k.cg(F).s(word).s(qks1), &k.cg(F).m(lalt));     // caps-1-f also to alt-f (at least its one handed)
+    k.cm .add_combo (&k.ks, &k.cg(F).s(word).m(lalt), &k.cg(F).m(lalt));     // caps-lalt-f to alt-f, though it goes against typical mode-key usage
 
     // e in caret mode, so we'll put our left-handed-enter on alt-e instead .. (note that there are also caps-space-* combos for *-enter)
     k.cm .add_combo (&k.ks, &k.cg(E).m(lalt),         &k.cg(Enter));             // alt-e -> enter
@@ -234,18 +227,18 @@ pub fn setup_krusty_board () {
 
     // actually, since we use win-1/2/3 as vol mute/down/up, might as well also set alt-1/2/3 for brightness zero/down/up
     // (note that numrow 1/2/3 with caps are qks* keys, so they cant be used with any caps combos as those would be silent!)
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),           Arc::new (|| incr_brightness(-100)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),           Arc::new (|| incr_brightness(-1)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),           Arc::new (|| incr_brightness(1)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt).m(lshift), Arc::new (|| incr_brightness(-5)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt).m(lshift), Arc::new (|| incr_brightness(5)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),          Arc::new (|| incr_brightness(-100)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),          Arc::new (|| incr_brightness(-1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),          Arc::new (|| incr_brightness(1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt).m(shift), Arc::new (|| incr_brightness(-5)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt).m(shift), Arc::new (|| incr_brightness(5)));
 
     // win-2 is vol down, win-3 is vol up, win-1 can do mute
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),           &k.cg_af(base_action(VolumeMute)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),           &k.cg_af(base_action(VolumeDown)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),           &k.cg_af(base_action(VolumeUp)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeDown)));  // double-action
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin).m(lshift), &k.cg_af(fast_action(VolumeUp)));    // double-action
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),          &k.cg_af(base_action(VolumeMute)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),          &k.cg_af(base_action(VolumeDown)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),          &k.cg_af(base_action(VolumeUp)));
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin).m(shift), &k.cg_af(fast_action(VolumeDown)));  // double-action
+    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin).m(shift), &k.cg_af(fast_action(VolumeUp)));    // double-action
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
     k.cm .add_combo (&k.ks, &k.cg(F1),          &k.cg(F16));             // switche next
@@ -359,54 +352,16 @@ pub fn setup_krusty_board () {
         k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(word), dwa);
         k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(fast), dfa);
 
-        // might as well setup l3 right here too .. more details in the setup fn
-        setup_l3_key (k, key, l2k);
+        // also add these to l2-key registry that gets used to enable their l2+ fallbacks in combo processor
+        //.. the fallbacks will layer extensive l2+ mod-key combos functionality on the l2keys (e.g alt/ctrl etc combos on nav arrows keys)
+        //.. in brief, w caps + l2-key, alt, ctrl, shift, and ralt-as-shift, qks1-as-ctrl will layer on the l2k-nav-key!!
+        k.cm .register_l2_key (key, l2k);
     }
 
 
     // idk what layer this even is, but since we're so used to l2 j/k etc nav keys, we'll set them up for various mod-combo eqvs too
     // .. these are useful for various second order nav .. e.g between IDE tabs etc .. no fancy speedups etc here
     // (note ofc that we've filled out the whole set of these for completeness even though realistically we wont use all/most of them)
-    fn setup_l3_key (k:&Krusty, key:Key, l3k:Key) {
-        // first the single mod-key combo eqvs .. (and since caps-ctrl/shift is hard to press, we'll make qks1-as-ctrl and lalt-as-shift)
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt  ),  k.cg(l3k).m(lalt  ));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lshift),  k.cg(l3k).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl ),  k.cg(l3k).m(lctrl ));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt  ),  k.cg(l3k).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1  ),  k.cg(l3k).m(lctrl ));
-        // then double mod-key combos
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt ).m(lshift),  k.cg(l3k).m(lalt ).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lctrl).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
-        // double combos with ralt filling in for a mod-key
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl ),  k.cg(l3k).m(lshift).m(lctrl ));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt  ),  k.cg(l3k).m(lshift).m(lalt  ));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lshift),  k.cg(l3k).m(lshift).m(lctrl ));
-        // double combos with qks1 filling in for a mod-key
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lshift),  k.cg(l3k).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl ),  k.cg(l3k).m(lctrl).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt  ),  k.cg(l3k).m(lctrl).m(lalt  ));
-        // and qks and ralt filling in together
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt  ),  k.cg(l3k).m(lctrl).m(lshift));
-        // finally, meh lets do all three mod-keys together too
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(lalt).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        // and triple combos w ralt filling in
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lshift),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lalt ).m(lctrl ),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).m(ralt).m(lctrl).m(lshift),   k.cg(l3k).m(lshift).m(lalt).m(lctrl));
-        // and triple combos w qks1 filling in
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lalt ).m(lctrl ),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(lctrl).m(lshift),   k.cg(l3k).m(lctrl).m(lalt).m(lshift));
-        // and finally them filling in together too
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lalt  ),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lctrl ),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
-        k.cm .add_combo (&k.ks, k.cg(key).m(caps).s(qks1).m(ralt).m(lshift),   k.cg(l3k).m(lctrl).m(lshift).m(lalt));
-        // (note .. cap-win combos for these nav-keys are already used for window move/stretch etc)
-
-        // finally, might as well also add expected nav during caps-tab-switch states (note that this it needs to be bare w/o added ctrl dn/up)
-        k.cm .add_bare_af_combo (&k.ks, k.cg(key).s(mngd_ctrl_dn),  base_action(l3k));
-    }
 
 
     // filling out l2/l3 actions
