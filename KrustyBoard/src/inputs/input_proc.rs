@@ -120,7 +120,8 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     // if we injected this event ourselves, we should just bail
     if kb_struct.dwExtraInfo == FAKE_EXTRA_INFO { return return_call() }
 
-    let (mut do_ev_prop, mut do_combo_proc) = (EventProp_Continue, ComboProc_Enable);
+    //let (mut do_ev_prop, mut do_combo_proc) = (EventProp_Continue, ComboProc_Enable);
+    let mut event_proc_d = KbdEvProcDirectives::default();
 
     use KbdEventType::*;
     if let Some(ev_t) = match w_param.0 as u32 {
@@ -135,12 +136,13 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
         // first route it through any per-key registered callbacks
         if let Some(cbe) = KbdBindings::instance() .read().unwrap() .get (&KbdEventCbMapKey::from_event(&event)) .as_ref() {
-            do_ev_prop = cbe.event_prop_directive;
-            do_combo_proc = cbe.combo_proc_directive;
+            //do_ev_prop = cbe.event_prop_directive;
+            //do_combo_proc = cbe.combo_proc_directive;
+            event_proc_d = cbe.event_proc_d;
             match &cbe.cb {
                 KbdEvCbFn_InlineCallback (cb)  => {
                     let epd = cb(event);
-                    if cbe.event_prop_directive == EventProp_Undetermined { do_ev_prop = epd }
+                    if event_proc_d.event_prop_d == EventProp_Undetermined { event_proc_d = epd }
                 }
                 KbdEvCbFn_SpawnedCallback (cb) => {
                     let (cb, kbe) = (cb.clone(), event.clone());    // clone as we'll need the event later again
@@ -149,16 +151,17 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         } }
 
         // now lets call the bulk defaults/combos processor if its available, and if combo_proc for this event not disabled from above
-        if do_combo_proc == ComboProc_Enable {
-            let mut epd = EventProp_Continue;
-            if let Some (cbe) = CombosMap::instance().get_processor().as_ref() {
-                if let KbdEvCbFn_InlineCallback (cb) = &cbe.cb { epd = cb(event) }
-                // ^^ only inline-processing (w/ event-prop-directive return) are supported for combo-maps processing
+        if event_proc_d.combo_proc_d == ComboProc_Enable {
+            let mut event_prop_d = EventProp_Continue;
+            if let Some (cb) = CombosMap::instance().get_processor().as_ref() {
+                event_prop_d = cb(event)
             }
-            do_ev_prop = if epd == EventProp_Stop { EventProp_Stop } else { do_ev_prop }
+            if event_prop_d == EventProp_Stop {
+                event_proc_d = KbdEvProcDirectives::new (event_prop_d, ComboProc_Disable)
+            }
     }  }
 
-    if do_ev_prop == EventProp_Stop {
+    if event_proc_d.event_prop_d == EventProp_Stop {
         return LRESULT(1);  // returning with non-zero code signals OS to block further processing on the input event
     }
 

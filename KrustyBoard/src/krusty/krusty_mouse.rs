@@ -174,13 +174,15 @@ pub fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
             handle_alt_tab_wheel(incr)
         } else {
             // alt-wheel for (fine delta) control, caps-alt-wheel for larger adjustments
-            let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() || ksr.mod_keys.lwin.down.check() {5} else {1};
+            //let mult = if ksr.mode_states.qks1.down.check() || ksr.mod_keys.caps.down.check() {5} else {1};
+            let mult = if ksr.mode_states.qks1.down.check() {5} else {1};
             incr_brightness (incr * mult)
         }
     } else if ksr.mod_keys.lwin.down.check() {
         // win-wheel for (fine delta) control, caps-win-wheel for larger adjustments
         ksr.mod_keys.lwin.consumed.set();
-        let mult = if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_shift_down() {2} else {1};
+        //let mult = if ksr.mode_states.qks1.down.check() || ksr.mod_keys.caps.down.check() {2} else {1};
+        let mult = if ksr.mode_states.qks1.down.check() {2} else {1};
         incr_volume (incr * mult)
     } else if ksr.mod_keys.caps.down.check() {
         ksr.in_managed_ctrl_down_state.set();
@@ -196,7 +198,7 @@ pub fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     }
 }
 
-pub fn incr_volume(incr:i32) {
+pub fn incr_volume (incr:i32) {
     let key = if incr > 0 { Key::VolumeUp } else { Key::VolumeDown };
     (0 .. incr.abs()) .for_each(|_| key.press());
 }

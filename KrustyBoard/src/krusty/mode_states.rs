@@ -11,6 +11,7 @@ use crate::{*, ModeState_T::*};
 
 
 
+
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
 /// All the supported mode-states, (whether they have triggering keys registered or not)
 pub enum ModeState_T {
@@ -27,10 +28,10 @@ pub enum ModeState_T {
 # [ derive (Debug) ]
 /// ModeState representation for mode-flags (and any associated trigger keys they have)
 pub struct _ModeState {
-    _private    : (),
-    pub ms_t    : ModeState_T,
-    key         : Arc <RwLock <Option<KbdKey>>>,
-    pub mk_down : Flag,
+    pub ms_t     : ModeState_T,
+        key      : Arc <RwLock <Option<KbdKey>>>,
+    pub down     : Flag,
+    pub consumed : Flag,
 }
 
 # [ derive (Debug, Clone) ]
@@ -91,26 +92,34 @@ impl ModeState {
 
     pub fn new (ms_t: ModeState_T) -> ModeState {
         ModeState ( Arc::new ( _ModeState {
-            _private : (),
             ms_t,
-            key     : Arc::new(RwLock::new(None)),
-            mk_down : Flag::default()
+            key      : Arc::new ( RwLock::new(None) ),
+            down     : Flag::default(),
+            consumed : Flag::default(),
         }
     ) ) }
 
+    /// mark the mode-key consumed by mode-action (so further inputs will be ignored until its released.. helps avoid straggling key events)
+    pub fn mode_key_consuming_action (&self, af:AF) -> AF {
+        let ms = self.clone();
+        Arc::new ( move || { ms.consumed.set(); af(); } )
+    }
 
+    /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
         self.key.read().unwrap().clone()
     }
+
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
     fn register_key (&self, key:KbdKey) {
         *self.key.write().unwrap() = Some(key);
     }
 
 
-    /// Generates mode-key flag update action for key-down on registered mode-key
-    fn gen_mode_key_down_action (&self, mss: ModeStates) -> AF {
-        let flag = self.mk_down.clone();
+    /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
+    fn bind_mode_key_down (&self, k:&Krusty) {
+        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
                 Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_caps_mode_active.set(); } )
@@ -120,19 +129,35 @@ impl ModeState {
                 Arc::new ( move || { mss.some_caps_mode_active.set(); } )
             } else { Arc::new (move || { }) }
         };
-        Arc::new (move || { flag.set(); mss_cba(); })
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+            ms.down.set(); mss_cba();
+            if ms.consumed.check() { KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable) }
+            else { KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable) }
+        } ) );
+        let event_proc_d = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Undetermined);
+        if let Some(key) = self.key() {
+            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+        }
     }
 
-    /// Generates mode-key flag update action for key-up on registered mode-key
-    fn gen_mode_key_up_action (&self, mss: ModeStates) -> AF {
-        let flag = self.mk_down.clone();
+    /// Binds mode-key-up event on registered mod-key to flag update action
+    fn bind_mode_key_up (&self, k:&Krusty) {
+        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
         let mss_cba : AF = {
             if      ModeStates::static_l2_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
             else if ModeStates::static_qks_modes()  .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
             else if ModeStates::static_caps_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
-        Arc::new ( move || { flag.clear(); mss_cba() } )
+        let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+            ms.down.clear(); ms.consumed.clear(); mss_cba();
+            event_proc_d
+        } ) );
+        if let Some(key) = self.key() {
+            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+        }
     }
 
 
@@ -140,26 +165,9 @@ impl ModeState {
     /// Note that after these binding callbacks process, they will still go through bulk processing for their default/combo actions.
     /// (This is as opposed to default-keys/combos that are handled in bulk w/o individual callback bindings)
     pub fn bind_mode_key_action (&self, k:&Krusty) {
-
-        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
-
-        let cma_dn = self.gen_mode_key_down_action (k.ks.mode_states.clone());
-        let cma_up = self.gen_mode_key_up_action (k.ks.mode_states.clone());
-
-        if let Some(key) = self.key() {
-
-            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-                event_prop_directive: EventProp_Continue,
-                combo_proc_directive: ComboProc_Enable,
-                cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { cma_dn(); EventProp_Continue } ) ),
-            } );
-
-            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyUp, KbdEventCallbackEntry {
-                event_prop_directive: EventProp_Continue,
-                combo_proc_directive: ComboProc_Enable,
-                cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { cma_up(); EventProp_Continue } ) ),
-            } );
-    }  }
+        self.bind_mode_key_down(k);
+        self.bind_mode_key_up(k);
+    }
 
 }
 
@@ -213,31 +221,38 @@ impl ModeStates {
     ] }
 
     pub fn get_cur_mode_states_bitmap (&self) -> ComboStatesBits_Modes {
-        self.mode_flag_pairs() .map (|(_,ms)| ms.mk_down.check())
+        self.mode_flag_pairs() .map (|(_,ms)| ms.down.check())
     }
     pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
         ModeStates::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
     }
 
     pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {
-        self.mode_flag_pairs() .iter() .for_each ( |(mst,ms)| {
-            if *mst == ms_t {
-                ms.register_key(key);
-                self.mode_keys.write().unwrap().insert(key);
-        } } )
+        if let Some(ms) = self.get_mode_flag(ms_t) {
+            ms.register_key(key);
+            self.mode_keys.write().unwrap().insert(key);
+        }
     }
     pub fn check_if_mode_key (&self, key:Key) -> bool {
+        // this check needs to happen at runtime, so maintaining a small hashmap to do it fast rather than iterating through flags
         self.mode_keys.read().unwrap().contains(&key)
+    }
+    pub fn get_mode_flag (&self, mst:ModeState_T) -> Option<&ModeState> {
+        self.mode_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
+    }
+    pub fn mode_key_consuming_action (&self, ms_t:ModeState_T, af:AF) -> AF {
+        if let Some(ms) = self.get_mode_flag(ms_t) { ms.mode_key_consuming_action(af) }
+        else { af }
     }
 
     pub fn refresh_qks_mode_active_flag (&self) {
-        if !self.qks.mk_down.check() && !self.qks1.mk_down.check() && !self.qks2.mk_down.check() && !self.qks3.mk_down.check() {
+        if !self.qks.down.check() && !self.qks1.down.check() && !self.qks2.down.check() && !self.qks3.down.check() {
             self.some_qks_mode_active.clear()
         }
         self.refresh_caps_mode_active_flag();
     }
     pub fn refresh_l2_mode_active_flag (&self) {
-        if !self.sel.mk_down.check() && !self.del.mk_down.check() && !self.word.mk_down.check() && !self.fast.mk_down.check() {
+        if !self.sel.down.check() && !self.del.down.check() && !self.word.down.check() && !self.fast.down.check() {
             self.some_l2_mode_active.clear()
         }
         self.refresh_caps_mode_active_flag();
@@ -248,7 +263,7 @@ impl ModeStates {
         }
     }
     pub fn clear_flags (&self) {
-        self.mode_flag_pairs() .iter() .for_each (|(_,ms)| ms.mk_down.clear());
+        self.mode_flag_pairs() .iter() .for_each (|(_,ms)| ms.down.clear());
         self.some_l2_mode_active.clear(); self.some_qks_mode_active.clear(); self.some_caps_mode_active.clear();
     }
 

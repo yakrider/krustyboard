@@ -331,18 +331,13 @@ impl CapsModKey {
         }
 
         let ks = k.ks.clone();
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            combo_proc_directive: ComboProc_Disable,
-            cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_down(&ks); EventProp_Stop } ) )
-        } );
+        let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_down(&ks); event_proc_d } ) );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
 
         let ks = k.ks.clone();
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            combo_proc_directive: ComboProc_Disable,
-            cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_up(&ks); EventProp_Stop } ) )
-        } );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_up(&ks); event_proc_d } ) );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 }
@@ -372,28 +367,27 @@ impl TrackedModKey {
 
         // we'll support TMK key-down binding in blocking and pass-through configurations
         let tmk = self.clone();
-        let (epd, cb) = if do_block {
-            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.set(); EventProp_Stop } ) );
-            (EventProp_Stop, cb)
+        let epds_blocked     = KbdEvProcDirectives::new (EventProp_Stop,         ComboProc_Disable);
+        let epds_passthrough = KbdEvProcDirectives::new (EventProp_Continue,     ComboProc_Disable);
+        let epds_checked     = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Disable);
+
+        let (event_proc_d, cb) = if do_block {
+            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.set(); epds_blocked } ) );
+            (epds_blocked, cb)
         } else {
             let cb = KbdEvCbFn_InlineCallback ( Arc::new (move |_| {
-                if tmk.down.check() { EventProp_Stop }
-                else { tmk.down.set(); EventProp_Continue }
+                if tmk.down.check() { epds_blocked }
+                else { tmk.down.set(); epds_passthrough }
             } ) );
-            (EventProp_Continue, cb)
+            (epds_checked, cb)
         };
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-            event_prop_directive:epd, combo_proc_directive:ComboProc_Disable, cb,
-        } );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {event_proc_d, cb} );
 
-        // for key-ups, we simply update flag and let them go through
-        let epd = if do_block { EventProp_Stop } else { EventProp_Continue };
-        let (tmk, epd) = (self.clone(), epd.clone());
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry {
-            event_prop_directive: epd,
-            combo_proc_directive: ComboProc_Disable,
-            cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.clear(); epd } ) ),
-        } );
+        // for key-ups, we simply update flag (and let them go through if not blocked)
+        let tmk = self.clone();
+        let event_proc_d = if do_block { epds_blocked } else { epds_passthrough };
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.clear(); event_proc_d } ) );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 }
@@ -483,19 +477,16 @@ impl SyncdModKey {
     pub fn setup_tracking (&self, k:&Krusty) {
         use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
 
-        let (ks, smk) = (k.ks.clone(), self.clone());
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            combo_proc_directive: ComboProc_Disable,
-            cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_down(&ks); EventProp_Stop } ) ),
-        } );
+        // smks always block their key-events, and if necessary generate new ones (with extended scan-codes as appropriate)
+        let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
 
         let (ks, smk) = (k.ks.clone(), self.clone());
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry {
-            event_prop_directive: EventProp_Stop,
-            combo_proc_directive: ComboProc_Disable,
-            cb : KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_up(&ks); EventProp_Stop } ) ),
-        } );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_down(&ks); event_proc_d } ) );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+
+        let (ks, smk) = (k.ks.clone(), self.clone());
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_up(&ks); event_proc_d } ) );
+        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 

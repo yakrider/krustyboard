@@ -51,8 +51,25 @@ impl KbdEventCbMapKey {
 pub enum KbdEvCbComboProcDirective {
     ComboProc_Enable,
     ComboProc_Disable,
+    ComboProc_Undetermined,
+}
+/// directives on whether to continue with combo processing or OS event propagation upon a kbd-callback
+# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+pub struct KbdEvProcDirectives {
+    pub event_prop_d : EventPropagationDirective,
+    pub combo_proc_d : KbdEvCbComboProcDirective,
 }
 
+impl KbdEvProcDirectives {
+    /// pure syntatic sugar to crate kbd-event-processin-directive slightly less verbosely
+    pub fn new (event_prop_d: EventPropagationDirective, combo_proc_d: KbdEvCbComboProcDirective) -> KbdEvProcDirectives {
+        KbdEvProcDirectives { event_prop_d, combo_proc_d, }
+    }
+    pub fn default() -> KbdEvProcDirectives {
+        use self::{EventPropagationDirective::*, KbdEvCbComboProcDirective::*};
+        KbdEvProcDirectives { event_prop_d: EventProp_Continue, combo_proc_d: ComboProc_Enable }
+    }
+}
 
 /// The bindings callback type can either be inline-execution type (must return EventPropagationDirective)
 /// or spawned out in a child thread (no return val)
@@ -61,16 +78,22 @@ pub enum KbdEventCallbackFnType {
     KbdEvCbFn_InlineCallback (KbdEvCbFn_InlineCb_T),
     KbdEvCbFn_SpawnedCallback (KbdEvCbFn_SpawnedCb_T),
 }
-pub type KbdEvCbFn_InlineCb_T = Arc <dyn Fn (KbdEvent) -> EventPropagationDirective + Send + Sync + 'static>;
+
+/// the inline cb type will have to return directives for further combo processing and OS event propagation
+pub type KbdEvCbFn_InlineCb_T  = Arc <dyn Fn (KbdEvent) -> KbdEvProcDirectives + Send + Sync + 'static>;
+
+/// the spawned cb type cant have a return val (but the cb-entry will include the further processing directives)
 pub type KbdEvCbFn_SpawnedCb_T = Arc <dyn Fn (KbdEvent) + Send + Sync + 'static>;
+
+/// the combo-proc cb will return only the event-propagation-directive
+pub type KbdEvCbFn_ComboProc_T = Arc <dyn Fn (KbdEvent) -> EventPropagationDirective + Send + Sync + 'static>;
 
 
 /// The bindings callback entry includes the appropriate callback-type and directives on whether to proceed
 /// with combo processing after it done, and whether to signal to OS for further event-propagation
 # [ derive (Clone) ]
 pub struct KbdEventCallbackEntry {
-    pub event_prop_directive : EventPropagationDirective,
-    pub combo_proc_directive : KbdEvCbComboProcDirective,
+    pub event_proc_d : KbdEvProcDirectives,
     pub cb : KbdEventCallbackFnType,
 }
 

@@ -124,6 +124,12 @@ pub fn setup_krusty_board () {
         // first we'll do the registration, then we can try and set any auxillary combos here too
         k.ks.mode_states .register_mode_key (key, ms_t);
 
+        // to avoid stragglers, we'll set the mode-keys pressed w caps to disable their repeat until release (ie. even after caps is released!)
+        k.cm .add_bare_af_combo (&k.ks, &k.cg(key).s(ms_t), no_action());  // <- works implicitly, but ideally we'd make the consumption explicit
+        //k.cm .add_bare_af_combo (&k.ks, &k.cg(key).s(ms_t),  k.ks.mode_states.mode_key_consuming_action(ms_t, no_action()));
+        // ^^ ugh, either way, it needs the state there to work, at which point it will ofc auto-wrap consumption again
+        // .. unless we decide to not do autowrapping, as its kinda pointless anyway ... meh, its ok, oh well
+
         // note that we want to disable mode-keys across most mod-key combos when caps down ..
         // .. and thats painful to do via combos-maps, so we're now instead just disabling them in runtime fallbacks
         // further, in fallback, we'll also layer base action w mod-keys for these mode-trigger-keys when qks1 down!
@@ -225,20 +231,28 @@ pub fn setup_krusty_board () {
     k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F6).m(lalt), Arc::new (|| incr_brightness(-1)));
     k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F7).m(lalt), Arc::new (|| incr_brightness(1)));
 
+    // for brightness/vol incrs (w alt or win), we'll have a helper fn that will do a 'fast-mode' when qks-1 key is held (but w/o caps!)
+    fn incr_fn_af_w_qks1_mult (ks:KrustyState, f:fn(i32), incr:i32, mult:i32) -> AF {
+        let qks1f = ks.mode_states.qks1.down.clone();
+        let af = Arc::new ( move || { f (incr * if qks1f.check() {mult} else {1}) } );
+        ks.mode_states.qks1 .mode_key_consuming_action (af)
+    }
     // actually, since we use win-1/2/3 as vol mute/down/up, might as well also set alt-1/2/3 for brightness zero/down/up
     // (note that numrow 1/2/3 with caps are qks* keys, so they cant be used with any caps combos as those would be silent!)
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),          Arc::new (|| incr_brightness(-100)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),          Arc::new (|| incr_brightness(-1)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),          Arc::new (|| incr_brightness(1)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt).m(shift), Arc::new (|| incr_brightness(-5)));
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt).m(shift), Arc::new (|| incr_brightness(5)));
+    //k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),          Arc::new (|| incr_brightness(-100)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lalt),  k.ks.mode_states.qks1.mode_key_consuming_action(no_action()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),  Arc::new (|| incr_brightness(-1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),  Arc::new (|| incr_brightness(1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lalt),  incr_fn_af_w_qks1_mult (k.ks.clone(), incr_brightness, -1, 5));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lalt),  incr_fn_af_w_qks1_mult (k.ks.clone(), incr_brightness,  1, 5));
 
     // win-2 is vol down, win-3 is vol up, win-1 can do mute
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),          &k.cg_af(base_action(VolumeMute)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),          &k.cg_af(base_action(VolumeDown)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),          &k.cg_af(base_action(VolumeUp)));
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin).m(shift), &k.cg_af(fast_action(VolumeDown)));  // double-action
-    k.cm .add_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin).m(shift), &k.cg_af(fast_action(VolumeUp)));    // double-action
+    //k.cm .add_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),          &k.cg_af(base_action(VolumeMute)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_1).m(lwin),  k.ks.mode_states.qks1.mode_key_consuming_action(no_action()));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),  Arc::new (|| incr_volume(-1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),  Arc::new (|| incr_volume(1)));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_2).m(lwin),  incr_fn_af_w_qks1_mult (k.ks.clone(), incr_volume, -1, 2));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(Numrow_3).m(lwin),  incr_fn_af_w_qks1_mult (k.ks.clone(), incr_volume,  1, 2));
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
     k.cm .add_combo (&k.ks, &k.cg(F1),          &k.cg(F16));             // switche next
