@@ -38,10 +38,10 @@ pub fn start_idea_diff() {
 }
 
 fn setup_opened_window (win_class_part_match: &str) {
-    thread::sleep(Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(2000));
     if get_fgnd_win_class().contains(win_class_part_match) {
         win_fgnd_center_if_past_screen();
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(300));
         win_fgnd_toggle_vertmax();
     }
 }

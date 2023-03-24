@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
-use std::thread;
 
 use once_cell::sync::OnceCell;
 
@@ -68,10 +67,12 @@ pub struct ComboGen_wAF<'a> {
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct _CombosMap {
     _private : (),
-    cm      : Arc <RwLock <HashMap <Combo, AF>>>,
-    l2ks    : Arc <RwLock <HashMap <Key, Key>>>,
-    cm_proc : Arc <RwLock <Option <KbdEvCbFn_ComboProc_T>>>,
-    // note that ^^ none of these need to be public as we should only need to access these from within the module
+    // the combos map itself, mapping key+mod-key+mode-state combos to actions
+    combos_map : Arc <RwLock <HashMap <Combo, AF>>>,
+    // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
+    l2_keys_map : Arc <RwLock <HashMap <Key, Key>>>,
+    // and we'll hold a registry for keys that only need default/fallback bindings
+    default_bind_keys : Arc <RwLock <HashSet <Key>>>,
 }
 # [ derive (Clone) ]
 pub struct CombosMap ( Arc <_CombosMap> );
@@ -167,15 +168,16 @@ impl Combo {
         Combo::fan_lr(mks) .iter() .map(|mv| {Combo::new (key, mv, modes)}) .collect::<Vec<Combo>>()
     }
 
-    pub fn gen_af (mks:&Vec<ModKey>, af:AF, ks:&KrustyState) -> AF {
+    fn gen_af (mks:&Vec<ModKey>, af:AF, gen_bare:bool, ks:&KrustyState) -> AF {
         // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
-        let mc = |mk:ModKey| mks.contains(&mk) ;
         let mut af = af;
         let lr_zip = ModKeys::static_lr_mods_triplets() .into_iter() .zip(ks.mod_keys.lrmk_smks().into_iter()) .collect::<Vec<((ModKey, ModKey, ModKey), &SyncdModKey)>>();
         lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
-            af = if mc(*lrmk) || mc(*lmk) || mc(*rmk) {
-                smk.active_action(af.clone())
-            } else { smk.inactive_action(af.clone()) }
+            af = if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
+                if gen_bare==true { smk.bare_action(af.clone()) } else { smk.active_action(af.clone()) }
+            } else {
+                if gen_bare==true { af.clone() } else { smk.inactive_action(af.clone()) }
+            }
         });
         af
     }
@@ -215,7 +217,10 @@ impl<'a> ComboGen_wKey<'a> {
         afc
     }
     pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, base_action(self.key), self.ks)
+        Combo::gen_af (&self.mks, base_action(self.key), false, self.ks)
+    }
+    pub fn gen_af_bare (&self) -> AF {
+        Combo::gen_af (&self.mks, base_action(self.key), true, self.ks)
     }
 }
 
@@ -229,7 +234,10 @@ impl<'a> ComboGen_wAF<'a> {
         self.mks.push(mk); self
     }
     pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, self.af.clone(), self.ks)
+        Combo::gen_af (&self.mks, self.af.clone(), false, self.ks)
+    }
+    pub fn gen_af_bare (&self) -> AF {
+        Combo::gen_af (&self.mks, self.af.clone(), true,  self.ks)
     }
 }
 
@@ -245,24 +253,20 @@ impl CombosMap {
         INSTANCE .get_or_init (||
             CombosMap ( Arc::new ( _CombosMap {
                 _private : (),
-                cm       : Arc::new ( RwLock::new ( HashMap::new() ) ),
-                l2ks     : Arc::new ( RwLock::new ( HashMap::new() ) ),
-                cm_proc  : Arc::new ( RwLock::new ( None) ),
+                combos_map  : Arc::new ( RwLock::new ( HashMap::new() ) ),
+                l2_keys_map : Arc::new ( RwLock::new ( HashMap::new() ) ),
+                default_bind_keys : Arc::new ( RwLock::new ( HashSet::new() ) ),
             } ) )
         ) .clone()
     }
 
-    /// returns true if the combos map processor is enabled (meaning the processor has been generated from the combos map)
-    pub fn is_enabled (&self) -> bool {
-        self.cm_proc .read().unwrap() .is_some()
-    }
-    /// supplies an (Arc) copy of the generated and cached combos map based (and fallback defaults) events processor
-    pub fn get_processor (&self) -> Option<KbdEvCbFn_ComboProc_T> {
-        self.cm_proc .read().unwrap() .as_ref() .map(|cb| cb.clone())
-    }
     /// registers a key for layer-2 functionality, which is used during fallback to layer any pressed mod-keys onto the l2-key
     pub fn register_l2_key (&self, key:Key, l2k:Key) {
-        self.l2ks .write().unwrap() .insert (key, l2k);
+        self.l2_keys_map.write().unwrap() .insert (key, l2k);
+    }
+    /// registers a key for default binding (without a specific combo)
+    pub fn register_default_binding_key (&self, key:Key) {
+        self.default_bind_keys .write().unwrap() .insert (key);
     }
 
 
@@ -272,7 +276,7 @@ impl CombosMap {
         let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (cga.gen_af(), ksr), ksr);
         for c in cgc.gen_combos() {
             //println! ("{:?}, {:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.mk_state, c.mode_state, cgc.key, cgc.mks, cgc.modes, cga.key, cga.mks );
-            self.cm .write().unwrap() .insert (c, af.clone());
+            self.combos_map.write().unwrap() .insert (c, af.clone());
     } }
 
     /// note that this will wrap the AF in with mod-actions for all mods either active (if specified) or inactive (if not)
@@ -280,21 +284,22 @@ impl CombosMap {
         let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (cgaf.gen_af(), ksr), ksr);
         for c in cgc.gen_combos() {
             //println! ("{:?}, {:?}, {:?} {:?} -> {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cgaf.mods );
-            self.cm .write().unwrap() .insert (c, af.clone());
+            self.combos_map.write().unwrap() .insert (c, af.clone());
     } }
 
     /// use this consuming bare fn to add combos if the AF supplied shouldnt be wrapped for active/inactive by mod, but just marked for consumption
     pub fn add_cnsm_bare_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
         let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (af, ksr), ksr);
         for c in cgc.gen_combos () {
-            self.cm .write().unwrap() .insert (c, af.clone());
+            self.combos_map.write().unwrap() .insert (c, af.clone());
     } }
 
     /// use this bare fn to add combos if the AF supplied needs special care to avoid wrapping with mod active/inactive .. e.g ctrl/tab etc
     pub fn add_bare_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
         let af = cgc.gen_mode_keydn_consuming_af (af, ksr);
-        for c in cgc.gen_combos () { self.cm .write().unwrap() .insert (c, af.clone()); }
-    }
+        for c in cgc.gen_combos () {
+            self.combos_map.write().unwrap() .insert (c, af.clone());
+    } }
 
 
     fn wrapped_bfn (wk:Key, bfn: Box <dyn Fn()>) -> Box <dyn Fn()> {
@@ -316,7 +321,7 @@ impl CombosMap {
         if ks.mode_states.some_caps_mode_active.check() && !qks1_active { return }
 
         // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
-        let l2k_opt = self.l2ks.read().unwrap().get(&key).copied();
+        let l2k_opt = self.l2_keys_map.read().unwrap().get(&key).copied();
         let fb_key = l2k_opt.unwrap_or(key);
 
         // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
@@ -334,10 +339,10 @@ impl CombosMap {
 
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
-    pub fn combo_maps_handle_kbd_event (&self, key:Key, ks:&KrustyState) {
+    pub fn combo_maps_handle_key_down (&self, key:Key, ks:&KrustyState) {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
-        if let Some(cmaf) = self.cm.read().unwrap() .get(&Combo::gen_cur_combo(key,&ks)) {
+        if let Some(cmaf) = self.combos_map.read().unwrap() .get(&Combo::gen_cur_combo(key, &ks)) {
             cmaf()  // found a combo matched action .. we're done!
         } else if ks.mod_keys.caps.down.check() {
             // unregistered caps-combos have extensive fallback setups
@@ -359,26 +364,32 @@ impl CombosMap {
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
         // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
         let mut handled_keys = HashSet::new();
-        self.cm .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
-        k .default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
+        self.combos_map .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
+        self.default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
         k .ks .mode_states .mode_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
 
+        // lets prep the AF to send into kbd-events-queue
         let (ks, cm) = (k.ks.clone(), self.clone());
+        let cm_cb = Arc::new ( move |e:KbdEvent| { cm.combo_maps_handle_key_down (e.key, &ks) } );
+
+        // then we'll build the actual combo-processor AF
+        let kbd_af_queue = k.iproc.kbd_af_queue.clone();
         let cb = Arc::new ( move |e:KbdEvent| {
             // if its not in the combo-proc handled-keys whitelist, we should just let it pass through
             if !handled_keys.contains(&e.key) { return EventProp_Continue }
-            // all combo proc is only on keydown and we'll spawn then out (when needed, we'll send both keydn/keyup pairs at keydown itself)
+            // we'll also just let injected events pass through (both kdn/kup) .. note that modifier keys deal w injected events separately
+            if e.injected { return EventProp_Continue }
+            // all combo proc is only on keydown and we'll queue them up (instead of spawning out) so they dont get out of sequence
             if e.ev_t == KbdEvent_KeyDown || e.ev_t == KbdEvent_SysKeyDown {
-                let (ks, cm) = (ks.clone(), cm.clone());
-                thread::spawn (move || cm.combo_maps_handle_kbd_event(e.key, &ks));
+                let _ = kbd_af_queue.send((cm_cb.clone(), e.clone()));
             }
             // either way, combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup)
             return EventProp_Stop
         } );
-        *self.cm_proc .write().unwrap() = Some(cb);
+        k.iproc.set_combo_processor(cb);
     }
-    pub fn disable_combos_map_events_processor (&self) {
-        *self.cm_proc .write().unwrap() = None;
+    pub fn disable_combos_map_events_processor (&self, k:&Krusty) {
+        k.iproc.clear_combo_processor()
     }
 
 

@@ -96,8 +96,8 @@ impl ModeState {
             key      : Arc::new ( RwLock::new(None) ),
             down     : Flag::default(),
             consumed : Flag::default(),
-        }
-    ) ) }
+        } ) )
+    }
 
     /// mark the mode-key consumed by mode-action (so further inputs will be ignored until its released.. helps avoid straggling key events)
     pub fn mode_key_consuming_action (&self, af:AF) -> AF {
@@ -129,6 +129,7 @@ impl ModeState {
                 Arc::new ( move || { mss.some_caps_mode_active.set(); } )
             } else { Arc::new (move || { }) }
         };
+        // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
         let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
             ms.down.set(); mss_cba();
             if ms.consumed.check() { KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable) }
@@ -136,7 +137,7 @@ impl ModeState {
         } ) );
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Undetermined);
         if let Some(key) = self.key() {
-            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+            k.iproc.kbd_bindings .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
         }
     }
 
@@ -156,7 +157,7 @@ impl ModeState {
             event_proc_d
         } ) );
         if let Some(key) = self.key() {
-            k.kbb .bind_kbd_event ( key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+            k.iproc.kbd_bindings .bind_kbd_event ( key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
         }
     }
 

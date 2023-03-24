@@ -45,17 +45,8 @@ pub fn setup_krusty_board () {
     // setup all the mod-keys .. (can override this with own setup if desired)
     k.ks.mod_keys.setup_tracking(&k);
 
-
-    // handling for mouse left btn, mostly to allow caps-as-ctrl behavior during drag drops and clicks
-    setup_mouse_left_btn_handling (&k);
-    // also for mouse right btn, mostly to allow switche scrolling w right-btn-wheel combo
-    setup_mouse_right_btn_handling (&k);
-    // also setup both Xbutton srcs to act as middle btns (used for link clicks, closing tabs etc)
-    setup_mouse_x_btn_1_handling (&k);
-    setup_mouse_x_btn_2_handling (&k);
-
-    // setup handling for mouse wheel .. complex overloading over alt-tab, switche, volume, brightness etc !!
-    setup_mouse_wheel_handling (&k);
+    // mouse setup incl lbtn/rbtn/mbtn/x1btn/x2btn and the scroll wheels
+    k.ks.mouse.setup_mouse(&k);
 
 
 
@@ -78,7 +69,7 @@ pub fn setup_krusty_board () {
     //                      MediaNextTrack, MediaPrevTrack, MediaStop, MediaPlayPause];
 
     vec![char_keys, fnum_keys, nav_keys, spcl_keys] .concat() .into_iter() .for_each ( |key| {
-        k .default_bind_keys .write().unwrap() .insert (key);
+        k.cm .register_default_binding_key (key);
     } );
     // ^^ we can ofc put combos for these later in code .. all these do is register for default binding if no combo gets mapped!
 
@@ -165,9 +156,9 @@ pub fn setup_krusty_board () {
 
     // setup backquote .. make normal case be Delete, caps or alt do back-tick, and shift do its tilde
     k.cm .add_combo (&k.ks, &k.cg(Backquote),          &k.cg(ExtDelete));
-    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(shift), &k.cg(Backquote).m(shift));
     k.cm .add_combo (&k.ks, &k.cg(Backquote).m(caps),  &k.cg(Backquote));
-    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(lalt),  &k.cg(Backquote));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(lalt),  &k.cg(Backquote).m(shift));
+    k.cm .add_combo (&k.ks, &k.cg(Backquote).m(shift), &k.cg(Backquote).m(shift));
     //k.cm .add_combo (&k.sk, &k.cg(Backquote).m(ralt),  &k.cg(Backquote).m(shift));
     // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
 
@@ -201,6 +192,21 @@ pub fn setup_krusty_board () {
     k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(ralt),                 wrapped_action(LShift, cb.clone()));
     k.cm .add_bare_af_combo (&k.ks, &k.cg(Tab).m(caps).m(ralt).s(mngd_ctrl_dn), wrapped_action(LShift, cb.clone()));
 
+    // aight, and this is prob excessive, but specifically for IntelliJ, wanted to add a quick switch from tab-switcher to searchable one
+    // (we'll do it by escaping it first (via space then ctrl rel), then invoking the searchable switcher)
+    fn gen_ide_switcher_switch_af (k:&Krusty, key:Key) -> AF {
+        let ks = k.ks.clone();
+        Arc::new ( move || {
+            if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() {
+                // space defocuses from list so we wont actually switch tabs when we release the ctrl
+                press_release(Space); ks.mod_keys.lctrl.ensure_inactive(); ks.in_managed_ctrl_down_state.clear();
+                // then do actual ctrl-e to bring up the persistent-switcher (ctrl-e is default shortcut in IDE for that)
+                ks.mod_keys.lctrl.active_on_key(E)()
+            } else { press_release(key) }
+        } )
+    }
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).s(mngd_ctrl_dn), gen_ide_switcher_switch_af(&k, Space) );
+
 
 
 
@@ -232,9 +238,9 @@ pub fn setup_krusty_board () {
     k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F7).m(lalt), Arc::new (|| incr_brightness(1)));
 
     // for brightness/vol incrs (w alt or win), we'll have a helper fn that will do a 'fast-mode' when qks-1 key is held (but w/o caps!)
-    fn incr_fn_af_w_qks1_mult (ks:KrustyState, f:fn(i32), incr:i32, mult:i32) -> AF {
+    fn incr_fn_af_w_qks1_mult (ks:KrustyState, incr_fn:fn(i32), incr:i32, mult:i32) -> AF {
         let qks1f = ks.mode_states.qks1.down.clone();
-        let af = Arc::new ( move || { f (incr * if qks1f.check() {mult} else {1}) } );
+        let af = Arc::new ( move || { incr_fn (incr * if qks1f.check() {mult} else {1}) } );
         ks.mode_states.qks1 .mode_key_consuming_action (af)
     }
     // actually, since we use win-1/2/3 as vol mute/down/up, might as well also set alt-1/2/3 for brightness zero/down/up
@@ -267,15 +273,35 @@ pub fn setup_krusty_board () {
     // we'll set Alt-F2 to bring chrome tabs-outliner (via switche) to keep w the theme of Alt-F<n> keys for task switching
     k.cm .add_combo (&k.ks, &k.cg(F2).m(lalt),  &k.cg(F20).m(ctrl));     // switche no-popup tabs-outliner switch
 
+    // we'll overload regular F2 with special IDE scala-console action if IDEA window is foreground
+    // note that doing bare-af-gen means we cant be on ctrl/shift/alt combos .. else change that to regular gen-af
+    fn gen_line_to_repl_action (k:&Krusty) -> AF {
+        let line_sel         = k.cg(Home).m(alt).m(shift).gen_af_bare();  // IDE alt-shift-home to sel line
+        let line_repl_send   = k.cg(End ).m(alt).m(shift).gen_af_bare();  // IDE alt-shift-end to send sel to repl
+        let caret_sel_start  = k.cg(ExtLeft).gen_af_bare();               // unselect the line (caret to line beginning)
+        let caret_line_start = k.cg(ExtHome).gen_af_bare();               // caret to beginning of first word in line
+        Arc::new ( move || { line_sel(); line_repl_send(); caret_sel_start(); caret_line_start() } )
+    }
+    fn gen_f2_action(k:&Krusty) -> AF {
+        let af = gen_line_to_repl_action(k);
+        Arc::new ( move || {
+            if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() { af() }
+            else { press_release(F2) }
+        } )
+    }
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(F2), gen_f2_action(&k));
+    // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
+    k.cm .add_combo (&k.ks, &k.cg(F2).m(caps), &k.cg(End).m(alt).m(shift));
 
     // want win-f2 for next with some initial skip .. we'll use caps-win-f2 for prev, so we'll set it up for both
     // note that our mechanism for wrapping mod-key-state restoring guards operates via AFs, hence setting those up (instead of fns)
 
     // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
-    fn media_skips_action (n_skips:u32, ks:&KrustyState) -> AF {
-        ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action ( Arc::new ( move || {
-            (0 .. n_skips) .into_iter() .for_each (|_| { press_release(VolumeUp) });
-    } ) ) ) ) }
+    fn media_skips_action (n_skips:u32, ks:&KrustyState, fwd_not_bkwd:bool) -> AF {
+        let action_key = if fwd_not_bkwd {VolumeUp} else {VolumeDown};
+        ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
+            Arc::new ( move || { (0 .. n_skips) .into_iter() .for_each (|_| { press_release(action_key) }) } )
+    ) ) ) }
     // ^^ gives an AF with specified number of skips
 
     // it uses alt-active media-skips, so we'll need alt_inactive-action, plus guard on win-combo it is on
@@ -287,15 +313,17 @@ pub fn setup_krusty_board () {
         //thread::spawn ( move || { sleep(time::Duration::from_millis(2000));  media_skips_action(3,&ks)(); } );
         // .. note again that we're always spawned out from hook thread, so slower tasks are also ok here
         thread::sleep(time::Duration::from_millis(2000));
-        media_skips_action(3,&ks)();
+        media_skips_action(3,&ks,true)();
     } ) ) );
 
     // win-f2 for next with some initial skip
     k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F2).m(lwin),         media_next_action.clone());
     k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F2).m(lwin).m(caps), media_next_action);
 
-    // win-f3 for skip forward a bit
-    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F3).m(lwin), media_skips_action(1, &k.ks));
+    // win-f3 for skip forward a bit (w/ caps for rewind)
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F3).m(lwin),          media_skips_action(1, &k.ks, true));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F3).m(lwin).m(caps),  media_skips_action(2, &k.ks, false));
+    k.cm .add_cnsm_bare_af_combo (&k.ks, &k.cg(F3).m(lwin).m(shift), media_skips_action(2, &k.ks, false));
 
 
 
@@ -366,6 +394,7 @@ pub fn setup_krusty_board () {
         k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(word), dwa);
         k.cm .add_bare_af_combo (&k.ks, k.cg(key).m(caps).s(del).s(fast), dfa);
 
+
         // also add these to l2-key registry that gets used to enable their l2+ fallbacks in combo processor
         //.. the fallbacks will layer extensive l2+ mod-key combos functionality on the l2keys (e.g alt/ctrl etc combos on nav arrows keys)
         //.. in brief, w caps + l2-key, alt, ctrl, shift, and ralt-as-shift, qks1-as-ctrl will layer on the l2k-nav-key!!
@@ -388,7 +417,37 @@ pub fn setup_krusty_board () {
     setup_l2_key ( &k,  U,     ExtPgUp,   Backspace,   base_action,   base_action,   true  );
     setup_l2_key ( &k,  M,     ExtPgDn,   ExtDelete,   base_action,   base_action,   true  );
 
+    // and finally to round out the l2 keys, we'll add some non-nav word actions on Space key in (sel/del/word)-modes
+    // (word selection action is a composite of move-to-word-end then select-to-word-beginning)
+    let wsa = Arc::new ( || {
+        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); LCtrl.release();
+    } );
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).s(sel ),          wsa.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).s(word),          wsa.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).s(sel ).s(word),  wsa);
 
+    // (word del action is a composite of move-to-word-end then del-to-word-beginning)
+    let wda = Arc::new ( || {
+        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); LCtrl.release();
+        press_release(Backspace);
+    } );
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).s(del),  wda);
+
+    // (line sel/del actions are composite of move-to-line-end then sel/del-to-line-start)
+    let lsa = Arc::new ( || { press_release(ExtEnd); shift_press_release(ExtHome); } );
+    let lda = Arc::new ( || { press_release(ExtEnd); shift_press_release(ExtHome); press_release(Backspace); } );
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).m(lalt).s(sel ),          lsa.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).m(lalt).s(word),          lsa.clone());
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).m(lalt).s(sel ).s(word),  lsa);
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(Space).m(caps).m(lalt).s(del),           lda);
+
+    // we can further add cut/copy/paste actions on the sel mode (caps-e-x/c/v)
+    fn gen_wxcv_af (key:Key) -> AF { Arc::new ( move || {
+        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); press_release(key); LCtrl.release();
+    } ) }
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(X).m(caps).s(sel ),  gen_wxcv_af(X));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(C).m(caps).s(sel ),  gen_wxcv_af(C));
+    k.cm .add_bare_af_combo (&k.ks, &k.cg(V).m(caps).s(sel ),  gen_wxcv_af(V));
 
 
 
@@ -502,7 +561,7 @@ pub fn start_krusty_board () {
     setup_krusty_board();
 
     // then start handling inputs
-    handle_input_events();
+    InputProcessor::instance().begin_input_processing();
 
 }
 

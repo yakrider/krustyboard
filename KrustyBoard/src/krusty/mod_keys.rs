@@ -298,11 +298,12 @@ impl CapsModKey {
         if !ks.mod_keys.caps.down.check() {
             // capslock can come as repeats like other mod keys .. this was a fresh one
             self.down.set();
-            ks.is_wheel_spin_invalidated.set();
+            ks.mouse.vwheel.spin_invalidated.set();
             // lets notify the synced tracked mod keys, so they can invalidate/release themselves
             ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_down());
         }
-        if ks.mouse_left_btn_down.check() && !ks.in_managed_ctrl_down_state.check() {
+        if ks.mouse.lbtn.down.check() && !ks.in_managed_ctrl_down_state.check() {
+            // caps w mouse lbtn down, should be managed ctrl down (for ctrl-click, drag-drop etc)
             ks.in_managed_ctrl_down_state.set();
             ks.mod_keys.lctrl.ensure_active();
         }
@@ -310,10 +311,10 @@ impl CapsModKey {
 
     fn handle_key_up (&self, ks:&KrustyState) {
         ks.mod_keys.caps.down.clear();
-        ks.is_wheel_spin_invalidated.set();
+        ks.mouse.vwheel.spin_invalidated.set();
         if ks.in_managed_ctrl_down_state.check() {
             ks.in_managed_ctrl_down_state.clear();
-            if !ks.mod_keys.lctrl.down.check() { ks.mod_keys.lctrl.ensure_inactive() }
+            if !ks.mod_keys.some_ctrl_down() { ks.mod_keys.lctrl.ensure_inactive() }
         }
         // the following isnt strictly necessary, but useful in case some keyup falls through
         ks.mode_states.clear_flags();
@@ -333,11 +334,11 @@ impl CapsModKey {
         let ks = k.ks.clone();
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
         let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_down(&ks); event_proc_d } ) );
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
 
         let ks = k.ks.clone();
         let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_up(&ks); event_proc_d } ) );
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 }
@@ -372,22 +373,31 @@ impl TrackedModKey {
         let epds_checked     = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Disable);
 
         let (event_proc_d, cb) = if do_block {
-            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.set(); epds_blocked } ) );
+            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| {
+                if !e.injected { tmk.down.set() }
+                epds_blocked
+            } ) );
             (epds_blocked, cb)
         } else {
-            let cb = KbdEvCbFn_InlineCallback ( Arc::new (move |_| {
+            let cb = KbdEvCbFn_InlineCallback ( Arc::new (move |e| {
                 if tmk.down.check() { epds_blocked }
-                else { tmk.down.set(); epds_passthrough }
+                else {
+                    if !e.injected { tmk.down.set() }
+                    epds_passthrough
+                }
             } ) );
             (epds_checked, cb)
         };
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {event_proc_d, cb} );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry {event_proc_d, cb} );
 
         // for key-ups, we simply update flag (and let them go through if not blocked)
         let tmk = self.clone();
         let event_proc_d = if do_block { epds_blocked } else { epds_passthrough };
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { tmk.down.clear(); event_proc_d } ) );
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| {
+            if !e.injected { tmk.down.clear() }
+            event_proc_d
+        } ) );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 }
@@ -432,31 +442,31 @@ impl SyncdModKey {
     //  .. as well as restoring them when either caps/alt gets released etc
     // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
-    pub fn handle_key_down (&self, ks:&KrustyState) {
+    pub fn handle_key_down (&self, ks:&KrustyState, e:KbdEvent) {
         if ks.mod_keys.caps.down.check() {
             // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
-            self.down.set();
+            if !e.injected { self.down.set() }
             self.consumed.clear();
         } else {
             if self.down.check() {
                 // caps isnt down, but alt was, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
             } else {
                 // caps isnt down, and alt wasnt down, so record states and let it through
-                self.down.set();
+                if !e.injected { self.down.set() }
                 self.active.set();
                 self.consumed.clear();
-                ks.is_wheel_spin_invalidated.set();
+                ks.mouse.vwheel.spin_invalidated.set();
                 let key = self.key;
                 thread::spawn (move || key.press());
         } }
     }
 
-    fn handle_key_up (&self, ks:&KrustyState) {
+    fn handle_key_up (&self, ks:&KrustyState, e:KbdEvent) {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        self.down.clear();
-        ks.is_wheel_spin_invalidated.set();
+        if !e.injected { self.down.clear() }
+        ks.mouse.vwheel.spin_invalidated.set();
         if !self.active.check() || ks.mod_keys.caps.down.check() {
             // if inactive or caps-down we just suppress this keyup
         } else {
@@ -481,12 +491,12 @@ impl SyncdModKey {
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
 
         let (ks, smk) = (k.ks.clone(), self.clone());
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_down(&ks); event_proc_d } ) );
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| { smk.handle_key_down(&ks, e); event_proc_d } ) );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
 
         let (ks, smk) = (k.ks.clone(), self.clone());
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { smk.handle_key_up(&ks); event_proc_d } ) );
-        k.kbb .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| { smk.handle_key_up(&ks, e); event_proc_d } ) );
+        k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
 
@@ -577,6 +587,15 @@ impl SyncdModKey {
         Arc::new ( move || { smk.consumed.set(); af(); } )
     }
 
+
+    /// Use this to wrap activation action blindly (whether its already active or not) and without masking on release.
+    /// ... Should be useful only in cases we explicitly dont expect any contention and want to avoid masking
+    pub fn bare_action (&self, af:AF) -> AF {
+        let k = self.key;
+        Arc::new ( move || {
+            k.press(); af(); k.release()
+        })
+    }
 
     /// Use this to wrap actions when we want the mod-key to be ACTIVE in the combo .. can use for both self-mod-key combos or unrelated combos.
     /// .. e.g. if setting up alt-X to send alt-win-y, we'd set lalt-mapping on Key::X as k.alt.active_action(k.win.active_on_key(Key::Y))

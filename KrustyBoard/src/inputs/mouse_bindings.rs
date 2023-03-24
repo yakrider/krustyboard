@@ -46,9 +46,9 @@ impl MouseEventCbMapKey {
     pub fn from_event (mouse_event: &MouseEvent) -> MouseEventCbMapKey {
         use {MouseEvent::*, MouseEventCbMapKeySrc::*};
         match mouse_event {
-            move_event  {..}               => MouseEventCbMapKey { ev_src: pointer, ev_action: MouseMoveCb },
-            btn_event   {src_btn, ev_t}    => MouseEventCbMapKey { ev_src: btn(*src_btn), ev_action: BtnEventCb(*ev_t) },
-            wheel_event {src_wheel, delta} => {
+            move_event  {..}                   => MouseEventCbMapKey { ev_src: pointer, ev_action: MouseMoveCb },
+            btn_event   {src_btn, ev_t, ..}    => MouseEventCbMapKey { ev_src: btn(*src_btn), ev_action: BtnEventCb(*ev_t) },
+            wheel_event {src_wheel, delta, ..} => {
                 let wh_ev_t = if *delta > 0 { WheelForward } else { WheelBackward };
                 MouseEventCbMapKey { ev_src: wheel(*src_wheel), ev_action: WheelEventCb(wh_ev_t) }
             }
@@ -62,11 +62,12 @@ impl MouseEventCbMapKey {
 /// or spawned out in a child thread (no return val)
 # [ derive (Clone) ]
 pub enum MouseEventCallbackFnType {
-    MouseEvCbFn_InlineCallback  (MouseEvCbFn_InlineCb_T),
-    MouseEvCbFn_SpawnedCallback (MouseEvCbFn_SpawnedCb_T),
+    MouseEvCbFn_InlineCallback  (MouseEvCbFn_InThreadCb_T),
+    MouseEvCbFn_SpawnedCallback (MouseEvCbFn_OffThreadCb_T),
+    MouseEvCbFn_QueuedCallback  (MouseEvCbFn_OffThreadCb_T),
 }
-pub type MouseEvCbFn_InlineCb_T  = Arc <dyn Fn (MouseEvent) -> EventPropagationDirective + Send + Sync + 'static>;
-pub type MouseEvCbFn_SpawnedCb_T = Arc <dyn Fn (MouseEvent) + Send + Sync + 'static>;
+pub type MouseEvCbFn_InThreadCb_T  = Arc <dyn Fn (MouseEvent) -> EventPropagationDirective + Send + Sync + 'static>;
+pub type MouseEvCbFn_OffThreadCb_T = Arc <dyn Fn (MouseEvent) + Send + Sync + 'static>;
 
 
 

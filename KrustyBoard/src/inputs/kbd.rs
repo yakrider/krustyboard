@@ -39,10 +39,11 @@ pub enum KbdEventType {
 /// The KbdEvent includes the OS provided scan-code and virtual-key-code as well as the KbdKey representation and KbdEventType
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct KbdEvent {
-    pub ev_t    : KbdEventType,
-    pub key     : KbdKey,
-    pub vk_code : u32,
-    pub sc_code : u32,
+    pub ev_t     : KbdEventType,
+    pub key      : KbdKey,
+    pub vk_code  : u32,
+    pub sc_code  : u32,
+    pub injected : bool,
 }
 
 

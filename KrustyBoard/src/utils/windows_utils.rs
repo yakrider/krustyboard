@@ -1,12 +1,11 @@
-
-
 #[allow(unused_imports)]
 
 use windows::{
-    Win32::Foundation::{HWND, LPARAM, RECT, WPARAM},
+    core::PSTR,
+    Win32::Foundation::{HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle},
     Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetSystemMetrics, GetWindowRect, HTCAPTION, HTTOP, MoveWindow, ShowWindow,
-        SendMessageW, PostMessageW, GetClassNameW, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK,
+        SendMessageW, PostMessageW, GetClassNameW, GetWindowThreadProcessId, SM_CXSCREEN, SM_CYSCREEN, SW_NORMAL, WM_NCLBUTTONDBLCLK,
         HTMAXBUTTON, HTZOOM, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, WM_APPCOMMAND, WM_NCLBUTTONUP, WM_SYSCOMMAND
     },
     Win32::System::SystemServices::{
@@ -14,6 +13,10 @@ use windows::{
         APPCOMMAND_VOLUME_MUTE, APPCOMMAND_VOLUME_UP, APPCOMMAND_VOLUME_DOWN,
         APPCOMMAND_MICROPHONE_VOLUME_MUTE, APPCOMMAND_MIC_ON_OFF_TOGGLE,  APPCOMMAND_MICROPHONE_VOLUME_UP, APPCOMMAND_MICROPHONE_VOLUME_DOWN,
     },
+    Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION
+    },
+    Win32::System::ProcessStatus::{ K32GetProcessImageFileNameA },
 };
 
 
@@ -97,13 +100,24 @@ pub fn win_fgnd_min () { unsafe {
 
 pub fn get_fgnd_win_class () -> String { unsafe {
     let mut lpstr: [u16; 120] = [0; 120];
-    let len = GetClassNameW(GetForegroundWindow(), &mut lpstr);
+    let len = GetClassNameW (GetForegroundWindow(), &mut lpstr);
     String::from_utf16_lossy(&lpstr[..(len as _)])
 } }
 
 
+pub fn get_fgnd_win_exe () -> Option<String> { unsafe {
+    let mut pid = 0u32;
+    let _ = GetWindowThreadProcessId (GetForegroundWindow(), Some(&mut pid));
+    let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid);
+    let mut lpstr: [u8; 256] = [0; 256];
+    let mut lpdwsize = 256u32;
+    if handle.is_err() { return None }
+    let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
+    handle.iter().for_each ( |h| { CloseHandle(*h); } );
+    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten()
+} }
+
 // todo
-pub fn get_fgnd_win_exe () -> String { "".to_string() }
 pub fn get_fgnd_win_title () -> String { "".to_string() }
 
 

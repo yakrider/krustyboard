@@ -1,12 +1,10 @@
 
 use std::{
     time::Instant,
-    collections::HashSet,
     ops::Deref,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicBool, Ordering}
-}  };
+    sync::{Arc, RwLock},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use once_cell::sync::OnceCell;
 
@@ -41,6 +39,41 @@ impl Flag {
 }
 
 
+# [ derive (Debug, Clone) ]
+pub struct TimeStamp (Arc<RwLock<Instant>>);
+
+impl TimeStamp {
+    pub fn new() -> TimeStamp {
+        TimeStamp ( Arc::new ( RwLock::new ( Instant::now() ) ) )
+    }
+    pub fn default() -> TimeStamp {
+        TimeStamp::new()
+    }
+    pub fn capture (&self) -> Instant {
+        let stamp = Instant::now();
+        *self.0.write().unwrap() = stamp;
+        stamp
+    }
+    pub fn get (&self) -> Instant {
+        *self.0.read().unwrap()
+    }
+}
+
+
+# [ derive (Debug, Clone) ]
+pub struct EventStamp (Arc<RwLock<u32>>);
+
+impl EventStamp {
+    pub fn new() -> EventStamp {
+        EventStamp ( Arc::new ( RwLock::new(0) ) )
+    }
+    pub fn default() -> EventStamp {
+        EventStamp::new()
+    }
+    pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
+    pub fn get (&self) -> u32 { *self.0.read().unwrap() }
+}
+
 
 
 
@@ -53,23 +86,20 @@ pub struct _KrustyState {
     // used for toggling key processing .. should only listen to turn-back-on combo
     pub in_disabled_state: Flag,
 
-    // mod-keys .. details in its declaration
+    // mod-keys .. manages the modifier-keys, their flags, and their action-wrapping
     pub mod_keys : ModKeys,
 
-    // mode states .. details in its declaration
+    // mode states .. manages the flagged caps-mode states, their trigger keys etc
     pub mode_states : ModeStates,
 
-    // mouse btn states .. need to impl caps-as-ctrl, or right-mouse-scroll behavior etc
-    pub mouse_left_btn_down:  Flag,
-    pub mouse_right_btn_down: Flag,
+    // mouse .. manages the mouse btns, wheels, wheel-spin invalidations etc
+    pub mouse : Mouse,
 
     // for caps-ctrl eqv for caps-tab or caps-wheel, we'll send ctrl press/release at the right times, and will need to track that
     pub in_managed_ctrl_down_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
     pub in_right_btn_scroll_state: Flag,
 
-    pub last_wheel_stamp: RwLock<Instant>,
-    pub is_wheel_spin_invalidated: Flag, // invalidated by e.g. mid-spin mod press, or spin stop (spacing > 120ms)
 }
 
 
@@ -91,15 +121,12 @@ impl Deref for KrustyState {
 pub struct Krusty {
     // this is mostly just a utility wrapper sugar to pass things around
     _private : (),   // prevents direct instantiation of this struct
-    // KrS is Arc<KrustyState>, holds all state flags
-    pub ks: KrustyState,
-    // we have the kbd and mouse bindings maps for per key/btn/wheel/pointer event action bindings
-    pub kbb: KbdBindings,
-    pub msb: MouseBindings,
+    // ks is Arc<KrustyState>, holds all state flags
+    pub ks : KrustyState,
     // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
-    pub cm: CombosMap,
-    // instead of polluting combos_map, we'll hold a registry for keys to gen default bindings for
-    pub default_bind_keys : Arc <RwLock <HashSet <Key>>>,
+    pub cm : CombosMap,
+    // we have the InputProcessor itself, which will hold the kbd/mouse bindings, combo-processing-af, the side-thread-queues
+    pub iproc : InputProcessor,
 }
 
 
@@ -119,14 +146,10 @@ impl KrustyState {
                 mod_keys    : ModKeys::new(),
                 mode_states : ModeStates::new(),
 
-                mouse_left_btn_down  : Flag::default(),
-                mouse_right_btn_down : Flag::default(),
+                mouse : Mouse::new(),
 
                 in_managed_ctrl_down_state : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
-
-                last_wheel_stamp : RwLock::new(Instant::now()),
-                is_wheel_spin_invalidated : Flag::default(),
             } ) )
         ) .clone()
     }
@@ -139,7 +162,7 @@ impl KrustyState {
         LeftButton.release(); RightButton.release(); MiddleButton.release();
         X1Button.release(); X2Button.release();
 
-        [   &self.mouse_left_btn_down, &self.mouse_right_btn_down,
+        [   &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
             &self.in_right_btn_scroll_state, &self.in_managed_ctrl_down_state
         ] .into_iter() .for_each (|flag| flag.clear());
     }
@@ -157,11 +180,9 @@ impl Krusty {
     pub fn new() -> Krusty {
         Krusty {
             _private : (),
-            ks  : KrustyState::instance(),
-            kbb : KbdBindings::instance(),
-            msb : MouseBindings::instance(),
-            cm  : CombosMap::instance(),
-            default_bind_keys : Arc::new (RwLock::new (HashSet::new())),
+            ks    : KrustyState::instance(),
+            cm    : CombosMap::instance(),
+            iproc : InputProcessor::instance(),
         }
     }
 
@@ -191,6 +212,8 @@ pub mod key_utils {
     use std::sync::Arc;
     use crate::*;
 
+    pub fn press                (key:Key) { key.press(); }
+    pub fn release              (key:Key) { key.release(); }
     pub fn press_release        (key:Key) { key.press(); key.release(); }
     pub fn double_press_release (key:Key) { press_release(key); press_release(key); }
 

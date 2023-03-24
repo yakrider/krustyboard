@@ -66,9 +66,27 @@ pub enum MouseWheelEvent_T {
 /// Mouse event can be a btn-event, wheel-event, or pointer-move (with their associated data)
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MouseEvent {
-    btn_event   { src_btn:MouseButton, ev_t:MouseBtnEvent_T },
-    wheel_event { src_wheel:MouseWheel, delta:i32 },
-    move_event  { x_pos:i32, y_pos:i32 },
+    btn_event   { src_btn:MouseButton, ev_t:MouseBtnEvent_T, stamp:u32, injected:bool },
+    wheel_event { src_wheel:MouseWheel, delta:i32, stamp:u32, injected:bool },
+    move_event  { x_pos:i32, y_pos:i32, stamp:u32, injected:bool },
+}
+impl MouseEvent {
+    pub fn get_stamp(&self) -> u32 {
+        use MouseEvent::*;
+        match self {
+            btn_event   {stamp, ..} => *stamp,
+            wheel_event {stamp, ..} => *stamp,
+            move_event  {stamp, ..} => *stamp,
+        }
+    }
+    pub fn check_injected (&self) -> bool {
+        use MouseEvent::*;
+        match self {
+            btn_event   {injected, ..} => *injected,
+            wheel_event {injected, ..} => *injected,
+            move_event  {injected, ..} => *injected,
+        }
+    }
 }
 
 
@@ -84,26 +102,34 @@ impl MouseButton {
 
     /// Presses a given `MouseButton`. Note: this will leave the button in the down position.
     /// One must then call release to complete a typical btn-down/btn-up sequence.
-    pub fn press(self) {
+    fn _press (self, x:i32, y:i32, abs:bool) {
         use MouseButton::*;
-        match self {
-            LeftButton   => send_mouse_input (MOUSEEVENTF_LEFTDOWN,   0, 0, 0),
-            RightButton  => send_mouse_input (MOUSEEVENTF_RIGHTDOWN,  0, 0, 0),
-            MiddleButton => send_mouse_input (MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0),
-            _ => {}
-        }
+        let mut ev_flag = match self {
+            LeftButton   => MOUSEEVENTF_LEFTDOWN,
+            RightButton  => MOUSEEVENTF_RIGHTDOWN,
+            MiddleButton => MOUSEEVENTF_MIDDLEDOWN,
+            _ => MOUSE_EVENT_FLAGS(0),
+        };
+        if abs { ev_flag = ev_flag | MOUSEEVENTF_ABSOLUTE }
+        send_mouse_input (ev_flag, 0, x, y)
     }
+    pub fn press (self) { self._press (0, 0, false) }
+    pub fn press_at (self, x:i32, y:i32) { self._press (x, y, true) }
 
     /// Releases a given `MouseButton`. This will leave the button in the up position.
-    pub fn release(self) {
+    fn _release (self, x:i32, y:i32, abs:bool) {
         use MouseButton::*;
-        match self {
-            LeftButton   => send_mouse_input (MOUSEEVENTF_LEFTUP,   0, 0, 0),
-            RightButton  => send_mouse_input (MOUSEEVENTF_RIGHTUP,  0, 0, 0),
-            MiddleButton => send_mouse_input (MOUSEEVENTF_MIDDLEUP, 0, 0, 0),
-            _ => {}
-        }
+        let mut ev_flag = match self {
+            LeftButton   => MOUSEEVENTF_LEFTUP,
+            RightButton  => MOUSEEVENTF_RIGHTUP,
+            MiddleButton => MOUSEEVENTF_MIDDLEUP,
+            _ => MOUSE_EVENT_FLAGS(0),
+        };
+        if abs { ev_flag = ev_flag | MOUSEEVENTF_ABSOLUTE }
+        send_mouse_input (ev_flag, 0, x, y)
     }
+    pub fn release (self) { self._release (0, 0, false) }
+    pub fn release_at (self, x:i32, y:i32) { self._release (x, y, true) }
 
 }
 

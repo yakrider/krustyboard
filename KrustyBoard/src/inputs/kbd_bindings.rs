@@ -75,15 +75,16 @@ impl KbdEvProcDirectives {
 /// or spawned out in a child thread (no return val)
 # [ derive (Clone) ]
 pub enum KbdEventCallbackFnType {
-    KbdEvCbFn_InlineCallback (KbdEvCbFn_InlineCb_T),
-    KbdEvCbFn_SpawnedCallback (KbdEvCbFn_SpawnedCb_T),
+    KbdEvCbFn_InlineCallback  (KbdEvCbFn_InThreadCb_T),
+    KbdEvCbFn_SpawnedCallback (KbdEvCbFn_OffThreadCb_T),
+    KbdEvCbFn_QueuedCallback  (KbdEvCbFn_OffThreadCb_T),
 }
 
 /// the inline cb type will have to return directives for further combo processing and OS event propagation
-pub type KbdEvCbFn_InlineCb_T  = Arc <dyn Fn (KbdEvent) -> KbdEvProcDirectives + Send + Sync + 'static>;
+pub type KbdEvCbFn_InThreadCb_T = Arc <dyn Fn (KbdEvent) -> KbdEvProcDirectives + Send + Sync + 'static>;
 
 /// the spawned cb type cant have a return val (but the cb-entry will include the further processing directives)
-pub type KbdEvCbFn_SpawnedCb_T = Arc <dyn Fn (KbdEvent) + Send + Sync + 'static>;
+pub type KbdEvCbFn_OffThreadCb_T = Arc <dyn Fn (KbdEvent) + Send + Sync + 'static>;
 
 /// the combo-proc cb will return only the event-propagation-directive
 pub type KbdEvCbFn_ComboProc_T = Arc <dyn Fn (KbdEvent) -> EventPropagationDirective + Send + Sync + 'static>;
