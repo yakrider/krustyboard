@@ -117,7 +117,7 @@ pub fn get_fgnd_win_exe () -> Option<String> { unsafe {
     PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten()
 } }
 
-// todo
+// todo: fill out fgnd_get_title
 pub fn get_fgnd_win_title () -> String { "".to_string() }
 
 
@@ -131,7 +131,7 @@ pub fn mic_mute_toggle () { unsafe {
 
 #[test]
 pub fn test () {
-    // todo: remove
+    // todo: gotta cleanup these quick test portions
     crate::utils::open_mic_cpl();
     //mic_mute_toggle();
     //let _ = std::process::Command::new("rundll32.exe").arg("user32.dll,MessageBeep").spawn();

@@ -56,13 +56,6 @@ pub enum MouseBtnEvent_T {
     DblClick,
 }
 
-/// For the mouse-wheel, event types can be wheel-forward, or wheel-backward
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum MouseWheelEvent_T {
-    WheelForward,
-    WheelBackward,
-}
-
 /// Mouse event can be a btn-event, wheel-event, or pointer-move (with their associated data)
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MouseEvent {

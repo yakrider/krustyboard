@@ -64,7 +64,7 @@ pub struct _ModeStates {
     // then the computed flags
     pub some_l2_mode_active   : Flag,
     pub some_qks_mode_active  : Flag,
-    pub some_caps_mode_active : Flag,
+    pub some_combo_mode_active: Flag,
 
     // we'll also maintain a set of our registered mode-trigger-keys for quick lookup
     mode_keys : Arc <RwLock <HashSet <KbdKey>>>,
@@ -122,11 +122,11 @@ impl ModeState {
         let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_caps_mode_active.set(); } )
+                Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_combo_mode_active.set(); } )
             } else if ModeStates::static_qks_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_qks_mode_active.set(); mss.some_caps_mode_active.set(); } )
-            } else if ModeStates::static_caps_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_caps_mode_active.set(); } )
+                Arc::new ( move || { mss.some_qks_mode_active.set(); mss.some_combo_mode_active.set(); } )
+            } else if ModeStates::static_combo_modes() .contains(&self.ms_t) {
+                Arc::new ( move || { mss.some_combo_mode_active.set(); } )
             } else { Arc::new (move || { }) }
         };
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
@@ -146,9 +146,9 @@ impl ModeState {
         use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
         let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
         let mss_cba : AF = {
-            if      ModeStates::static_l2_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
-            else if ModeStates::static_qks_modes()  .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
-            else if ModeStates::static_caps_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
+            if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
+            else if ModeStates::static_qks_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
+            else if ModeStates::static_combo_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
@@ -182,13 +182,13 @@ impl ModeStates {
     pub fn new() -> ModeStates {
         let (_sel, _del,  _word, _fast) = (ModeState::new(sel), ModeState::new(del), ModeState::new(word), ModeState::new(fast));
         let (_qks, _qks1, _qks2, _qks3) = (ModeState::new(qks), ModeState::new(qks1), ModeState::new(qks2), ModeState::new(qks3));
-        let (some_l2, some_qks, some_caps) = (Flag::default(), Flag::default(), Flag::default() );
+        let (some_l2, some_qks, some_cmk) = (Flag::default(), Flag::default(), Flag::default() );
 
         ModeStates ( Arc::new ( _ModeStates {
             _private : (),
             sel: _sel, del:  _del,  word: _word, fast: _fast,
             qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
-            some_l2_mode_active: some_l2, some_qks_mode_active: some_qks, some_caps_mode_active: some_caps,
+            some_l2_mode_active: some_l2, some_qks_mode_active: some_qks, some_combo_mode_active: some_cmk,
             mode_keys: Arc::new (RwLock::new (HashSet::new())),
         } ) )
     }
@@ -207,10 +207,10 @@ impl ModeStates {
         static L2_QKS_MODES : [ModeState_T;8]  = [sel, del, word, fast, qks, qks1, qks2, qks3];
         L2_QKS_MODES
     }
-    pub fn static_caps_modes () -> [ModeState_T;9] {
+    pub fn static_combo_modes() -> [ModeState_T;9] {
         // note that this also includes mngd_ctrl_dn which is a flag in KrS (i.e. not managed here)
-        static CAPS_MODES : [ModeState_T;9] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
-        CAPS_MODES
+        static COMBO_MODES: [ModeState_T;9] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
+        COMBO_MODES
     }
 
 
@@ -241,6 +241,9 @@ impl ModeStates {
     pub fn get_mode_flag (&self, mst:ModeState_T) -> Option<&ModeState> {
         self.mode_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
     }
+    pub fn get_mode_t (&self, key:Key) -> Option<ModeState_T> {
+        self.mode_flag_pairs() .iter() .find (|(_, ms)| ms.key.read().unwrap().filter(|&k| k==key).is_some()) .map (|(ms_t,_)| *ms_t)
+    }
     pub fn mode_key_consuming_action (&self, ms_t:ModeState_T, af:AF) -> AF {
         if let Some(ms) = self.get_mode_flag(ms_t) { ms.mode_key_consuming_action(af) }
         else { af }
@@ -260,12 +263,12 @@ impl ModeStates {
     }
     pub fn refresh_caps_mode_active_flag (&self) {
         if !self.some_qks_mode_active.check() && !self.some_l2_mode_active.check() {
-            self.some_caps_mode_active.clear()
+            self.some_combo_mode_active.clear()
         }
     }
     pub fn clear_flags (&self) {
         self.mode_flag_pairs() .iter() .for_each (|(_,ms)| ms.down.clear());
-        self.some_l2_mode_active.clear(); self.some_qks_mode_active.clear(); self.some_caps_mode_active.clear();
+        self.some_l2_mode_active.clear(); self.some_qks_mode_active.clear(); self.some_combo_mode_active.clear();
     }
 
     pub fn bind_mode_keys_actions (&self, k:&Krusty) {

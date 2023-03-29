@@ -186,11 +186,17 @@ impl Krusty {
         }
     }
 
-    /// utlity function to create a new Combo-generator (key-output or combo-specification type)
-    pub fn cg (&self, key:Key) -> ComboGen_wKey { ComboGen_wKey::new (key, &self.ks) }
+    /// Utlity function to create a new Combo-generator (for combo-specification) <br>
+    /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
+    pub fn cg (&self, key:Key) -> ComboGen { ComboGen::new (key, &self.ks) }
 
-    /// utlity function to create a new Combo-generator (non-key action-function output type)
-    pub fn cg_af (&self, af:AF) -> ComboGen_wAF { ComboGen_wAF::new (af, &self.ks) }
+    /// Utility function to create a new Combo-Action generator (key-action output type) <br>
+    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
+    pub fn ag (&self, key:Key) -> ActionGen_wKey { ActionGen_wKey::new (key, &self.ks) }
+
+    /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
+    /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
+    pub fn ag_af (&self, af:AF) -> ActionGen_wAF { ActionGen_wAF::new (af, &self.ks) }
 
 
     #[allow(dead_code)]

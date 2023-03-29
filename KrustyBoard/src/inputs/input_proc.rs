@@ -5,7 +5,7 @@ use std::{
     ptr::null_mut,
     thread,
     sync::{Arc, RwLock},
-    sync::atomic::{Ordering, AtomicPtr},
+    sync::atomic::{Ordering, AtomicPtr, AtomicU32},
     sync::mpsc::{sync_channel, SyncSender},
     os::raw::c_int,
     ops::Deref,
@@ -233,6 +233,14 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 fn HIWORD(l: u32) -> u16 { ((l >> 16) & 0xffff) as u16 }
 
 
+static LAST_STAMP: AtomicU32 = AtomicU32::new(0);
+#[allow(dead_code)]
+fn print_mouse_ev (ev:MouseEvent) {
+    let last_s = LAST_STAMP.swap(ev.get_stamp(), Ordering::Relaxed);
+    let gap_dur = ev.get_stamp() - last_s;
+    thread::spawn(move || println!("{:?}, {:?}", ev, gap_dur));
+}
+
 /// mouse lower-level-hook processor
 pub unsafe extern "system"
 fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
@@ -284,7 +292,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         //WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,
     } {
-        //{ let ec = event.clone(); thread::spawn(move || println!("{:?}", ec)); }
+        //print_mouse_ev(event);
 
         let mut do_ev_prop = EventProp_Continue;
 
@@ -300,7 +308,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
                     thread::spawn (move || cb(event));
                 }
                 MouseEvCbFn_QueuedCallback (cb) => {
-                    let _ = iproc.mouse_af_queue.send((cb.clone(), event.clone()));
+                    let _ = iproc.mouse_af_queue.send((cb.clone(), event));
                 }
             }
         } else {

@@ -1,14 +1,14 @@
 #![ allow (non_camel_case_types) ]
 
 use std::collections::{HashMap, HashSet};
-use std::mem::size_of;
+use std::borrow::Borrow;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use once_cell::sync::OnceCell;
 
 
-use crate::{*, key_utils::*, ModeState_T::*, ModKey::*};
+use crate::{*, key_utils::*, ModeState_T::*};
 
 
 
@@ -36,27 +36,44 @@ pub struct Combo {
 
 
 
-// CG_K and CG_AF comprise the Combo-Generation fluent api structs, with Key or with supplied AF
-// .. once populated it can be used for generation of either a combo or a (possibly guarded) action
+// The following generators comprise the Combo and Action Generation fluent api structs, with Key or with supplied AF
+// .. once populated they can be used for generation of either a combo or a (possibly guarded) action
 
 # [ allow (non_camel_case_types) ]
 # [ derive (Clone) ]
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
-pub struct ComboGen_wKey<'a> {
+pub struct ComboGen<'a> {
     ks    : &'a KrustyState,
-    key   : Key,
-    mks   : Vec<ModKey>,
-    modes : Vec<ModeState_T>,
-}
+    key   : Key,                // combo-trigger key
+    mks   : Vec<ModKey>,        // modifier keys that should be down to trigger this combo
+    modes : Vec<ModeState_T>,   // mode-states that should match for this combo to trigger
+    // the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
+    mod_key_no_consume  : bool,
+    // the mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released
+    mode_kdn_no_consume : bool,
 
+}
 
 # [ allow (non_camel_case_types) ]
 # [ derive (Clone) ]
-/// Combo-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
-pub struct ComboGen_wAF<'a> {
+/// Combo-Action-Generator for a combo targeting a key-action (e.g. mapping a combo to another key)
+pub struct ActionGen_wKey<'a> {
+    ks    : &'a KrustyState,
+    key   : Key,            // key on which the output combo-action will be built
+    mks   : Vec<ModKey>,    // modifier-keys to send out with this combo-action
+    // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
+    wrap_mod_key_guard : bool,
+}
+
+# [ allow (non_camel_case_types) ]
+# [ derive (Clone) ]
+/// Combo-Action-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
+pub struct ActionGen_wAF<'a> {
     ks  : &'a KrustyState,
-    mks : Vec<ModKey>,
-    af  : AF,
+    mks : Vec<ModKey>,      // modifier-keys to wrap the specified action-function for this combo-action
+    af  : AF,               // the action-function to build this combo-output-action with
+    // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
+    wrap_mod_key_guard : bool,
 }
 
 
@@ -81,7 +98,6 @@ impl Deref for CombosMap {
     type Target = _CombosMap;
     fn deref (&self) -> &Self::Target { &self.0 }
 }
-
 
 
 
@@ -117,17 +133,13 @@ impl Combo {
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
     pub fn gen_cur_combo (key:Key, ks:&KrustyState) -> Combo {
-        // note: this is in runtime hot-path .. (unlike the one above which is used while populating the combo-table)
-        let mode_state  = {
-            if !ks.mod_keys.caps.down.check() { [false; size_of::<ComboStatesBits_Modes>()] }
-            else { ks.mode_states.get_cur_mode_states_bitmap() }
-        };
+        // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
+        let mode_state  = ks.mode_states.get_cur_mode_states_bitmap();
         let mk_state    = ks.mod_keys.get_cur_mod_keys_states_bitmap();
         let flags_state = Combo::get_cur_flags_states_bitmap(ks);
         // NOTE that we're not including mouse btn down keys in states bitmap
         // .. this way, we can use them freely with other states .. else we'd need whole set of combos to support when mouse btn down
         // .. (which might not be a bad idea if we decide we do want to restrict down to specific combos to enable when mouse btns held!)
-        // todo: circle back here
 
         //println! ("{:?}", Combo { _private:(), key, mk_state, mode_state, flags_state });
         Combo { _private:(), key, mk_state, mode_state, flags_state }
@@ -159,24 +171,27 @@ impl Combo {
         mvs
     }
 
-    pub fn gen_combos (mks:&Vec<ModKey>, modes:&Vec<ModeState_T>, key:Key) -> Vec<Combo> {
-        // we'll auto add caps to any caps based modes (for easier setup)
-        let mut mks = mks.clone();
-        let is_qk = modes .iter() .any (|m| ModeStates::static_caps_modes().contains(m));
-        if is_qk && !mks.contains(&caps) { mks.push(caps); }
-        // and expand the combos for any L/R agnostic mod-keys specified
-        Combo::fan_lr(mks) .iter() .map(|mv| {Combo::new (key, mv, modes)}) .collect::<Vec<Combo>>()
+    fn gen_combos (mks:&Vec<ModKey>, modes:&Vec<ModeState_T>, key:Key, ks:&KrustyState) -> Vec<Combo> {
+        // we'll auto add any mode-key's state to its own combos
+        // (note however, that since this is way downstream, these additions wont have consumption guards ..)
+        // (.. which actually is what we want, as that lets us avoid consumption for mode-trigger-keys by not explicitly incl their modes)
+        let mut modes = modes.clone();
+        if let Some(ms_t) = ks.mode_states.get_mode_t(key) {
+            if !modes.contains(&ms_t) { modes.push(ms_t) }
+        }
+        // we want to expand the combos for any L/R agnostic mod-keys specified
+        Combo::fan_lr(mks.clone()) .iter() .map(|mv| {Combo::new (key, mv, modes.borrow())}) .collect::<Vec<Combo>>()
     }
 
-    fn gen_af (mks:&Vec<ModKey>, af:AF, gen_bare:bool, ks:&KrustyState) -> AF {
+    fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState) -> AF {
         // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         let mut af = af;
         let lr_zip = ModKeys::static_lr_mods_triplets() .into_iter() .zip(ks.mod_keys.lrmk_smks().into_iter()) .collect::<Vec<((ModKey, ModKey, ModKey), &SyncdModKey)>>();
         lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
             af = if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
-                if gen_bare==true { smk.bare_action(af.clone()) } else { smk.active_action(af.clone()) }
+                if wrap_mod_key_guard { smk.active_action(af.clone()) } else { smk.bare_action(af.clone()) }
             } else {
-                if gen_bare==true { af.clone() } else { smk.inactive_action(af.clone()) }
+                if wrap_mod_key_guard { smk.inactive_action(af.clone()) } else { af.clone() }
             }
         });
         af
@@ -189,57 +204,91 @@ impl Combo {
 
 
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
-impl<'a> ComboGen_wKey<'a> {
-    pub fn new (key:Key, ks:&KrustyState) -> ComboGen_wKey {
-        ComboGen_wKey { ks, key, mks:Vec::new(), modes:Vec::new() }
+impl<'a> ComboGen<'a> {
+    pub fn new (key:Key, ks:&KrustyState) -> ComboGen {
+        ComboGen { ks, key, mks:Vec::new(), modes:Vec::new(), mod_key_no_consume:false, mode_kdn_no_consume:false }
     }
-    pub fn m (&'a mut self, mk:ModKey) -> &'a mut ComboGen_wKey {
+    /// Add a modifier key to the combo
+    pub fn m (mut self, mk:ModKey) -> ComboGen<'a> {
         self.mks.push(mk); self
     }
-    pub fn s (&'a mut self, md: ModeState_T) -> &'a mut ComboGen_wKey {
+    /// Add a mode-state to the combo
+    pub fn s (mut self, md: ModeState_T) -> ComboGen<'a> {
         self.modes.push(md); self
     }
+    /// Disable consuming mod-key key-downs for this combo. <br>
+    /// (The default is to consume (i.e. do masking when releasing modkey) any modkey kdn on registered combos)
+    pub fn mk_nc (mut self) -> ComboGen<'a> {
+        self.mod_key_no_consume = true; self
+    }
+    /// Disable consuming mode-trigger-key key-downs for this combo. <br>
+    /// (The default is to consume (i.e. disable further key-events until released) any mode-trigger-key kdn on registered combos)
+    pub fn msk_nc (mut self) -> ComboGen<'a> {
+        self.mode_kdn_no_consume = true; self
+    }
+
+    fn kdn_consume_wrap (&self, af:AF) -> AF {
+        let mut afc = af;
+        if !self.mod_key_no_consume {
+            self.ks.mod_keys.mod_smk_pairs() .iter() .for_each ( |(mk, smk)| {
+                if self.mks.contains(mk) { afc = smk.keydn_consuming_action (afc.clone()) }
+            });
+        }
+        if !self.mode_kdn_no_consume {
+            self.ks.mode_states.mode_flag_pairs() .iter() .for_each ( |(ms_t, ms)| {
+                if self.modes.contains(ms_t) { afc = ms.mode_key_consuming_action (afc.clone()); }
+            } );
+        }
+        afc
+    }
+    /// Generate one or more combos from this ComboGen w/ key-dwn consuming behavior as specified during construction
     pub fn gen_combos (&self) -> Vec<Combo> {
-        Combo::gen_combos (&self.mks, &self.modes, self.key)
+        Combo::gen_combos (&self.mks, &self.modes, self.key, self.ks)
     }
-    fn gen_mod_keydn_consuming_af (&self, af:AF, ks:&KrustyState) -> AF {
-        let mut afc = af;
-        ks.mod_keys.mod_smk_pairs() .iter() .for_each ( |(mk, smk)| {
-            if self.mks.contains(mk) { afc = smk.keydn_consuming_action (afc.clone()) }
-        });
-        afc
+}
+
+
+/// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
+impl<'a> ActionGen_wKey<'a> {
+    pub fn new (key:Key, ks:&KrustyState) -> ActionGen_wKey {
+        ActionGen_wKey { ks, key, mks:Vec::new(), wrap_mod_key_guard:true }
     }
-    pub fn gen_mode_keydn_consuming_af (&self, af:AF, ks:&KrustyState) -> AF {
-        let mut afc = af;
-        ks.mode_states.mode_flag_pairs() .iter() .for_each ( |(ms_t, ms)| {
-            if self.modes.contains(ms_t) { afc = ms.mode_key_consuming_action (afc.clone()); }
-        } );
-        afc
+    /// Add a modifier key to the combo
+    pub fn m (mut self, mk:ModKey) -> ActionGen_wKey<'a> {
+        self.mks.push(mk); self
     }
+    /// Disable wrapping with mod-key guard actions. <br>
+    /// (The default for ActionGen_wKey is enabled)
+    pub fn mkg_nw (mut self) -> ActionGen_wKey<'a> {
+        self.wrap_mod_key_guard = false; self
+    }
+    /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
     pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, base_action(self.key), false, self.ks)
-    }
-    pub fn gen_af_bare (&self) -> AF {
-        Combo::gen_af (&self.mks, base_action(self.key), true, self.ks)
+        Combo::gen_af (&self.mks, base_action(self.key), self.wrap_mod_key_guard, self.ks)
     }
 }
 
 
 /// Combo-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
-impl<'a> ComboGen_wAF<'a> {
-    pub fn new  (af:AF, ks:&KrustyState) -> ComboGen_wAF {
-        ComboGen_wAF { ks, mks:Vec::new(), af }
+impl<'a> ActionGen_wAF<'a> {
+    pub fn new  (af:AF, ks:&KrustyState) -> ActionGen_wAF {
+        ActionGen_wAF { ks, mks:Vec::new(), af, wrap_mod_key_guard:false }
     }
-    pub fn m (&'a mut self, mk:ModKey) -> &'a mut ComboGen_wAF {
+    pub fn m (mut self, mk:ModKey) -> ActionGen_wAF<'a> {
         self.mks.push(mk); self
     }
-    pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, self.af.clone(), false, self.ks)
+    /// Enable wrapping with mod-key guard actions <br>
+    /// (The default for ActionGen_wAF is disabled)
+    pub fn mkg_w (mut self) -> ActionGen_wAF<'a> {
+        self.wrap_mod_key_guard = true; self
     }
-    pub fn gen_af_bare (&self) -> AF {
-        Combo::gen_af (&self.mks, self.af.clone(), true,  self.ks)
+    /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
+    pub fn gen_af (&self) -> AF {
+        Combo::gen_af (&self.mks, self.af.clone(), self.wrap_mod_key_guard, self.ks)
     }
 }
+
+
 
 
 
@@ -270,36 +319,22 @@ impl CombosMap {
     }
 
 
-    /// use this fn to register combos that will auto wrap activation/inactivation AFs around any mods in the combo
-    pub fn add_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, cga:&ComboGen_wKey) {
-        // note that although the active/inactive will also mark mk keydn consumed, we only do that for L-keys, hence wrapping consuming AF too
-        let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (cga.gen_af(), ksr), ksr);
-        for c in cgc.gen_combos() {
-            //println! ("{:?}, {:?}, {:?}, {:?}, {:?} -> {:?} {:?}", c.mk_state, c.mode_state, cgc.key, cgc.mks, cgc.modes, cga.key, cga.mks );
+    /// use this fn to register combos that will output other keys/combos
+    pub fn add_combo (&self, cg:ComboGen, ag:ActionGen_wKey) {
+        let af = cg.kdn_consume_wrap (ag.gen_af());
+        for c in cg.gen_combos() {
+            //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> k:{:?} mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.key, ag.mks );
             self.combos_map.write().unwrap() .insert (c, af.clone());
     } }
 
-    /// note that this will wrap the AF in with mod-actions for all mods either active (if specified) or inactive (if not)
-    pub fn add_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, cgaf:&ComboGen_wAF) {
-        let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (cgaf.gen_af(), ksr), ksr);
-        for c in cgc.gen_combos() {
-            //println! ("{:?}, {:?}, {:?} {:?} -> {:?}", c.state, cgc.key, cgc.mods, cgc.modes, cgaf.mods );
+    /// use this fn to register combos that will trigger the supplied action
+    pub fn add_combo_af (&self, cg:ComboGen, ag:ActionGen_wAF) {
+        let af = cg.kdn_consume_wrap (ag.gen_af());
+        for c in cg.gen_combos() {
+            //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> AF, mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.mks );
             self.combos_map.write().unwrap() .insert (c, af.clone());
     } }
 
-    /// use this consuming bare fn to add combos if the AF supplied shouldnt be wrapped for active/inactive by mod, but just marked for consumption
-    pub fn add_cnsm_bare_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
-        let af = cgc.gen_mod_keydn_consuming_af ( cgc.gen_mode_keydn_consuming_af (af, ksr), ksr);
-        for c in cgc.gen_combos () {
-            self.combos_map.write().unwrap() .insert (c, af.clone());
-    } }
-
-    /// use this bare fn to add combos if the AF supplied needs special care to avoid wrapping with mod active/inactive .. e.g ctrl/tab etc
-    pub fn add_bare_af_combo (&self, ksr:&KrustyState, cgc:&ComboGen_wKey, af:AF) {
-        let af = cgc.gen_mode_keydn_consuming_af (af, ksr);
-        for c in cgc.gen_combos () {
-            self.combos_map.write().unwrap() .insert (c, af.clone());
-    } }
 
 
     fn wrapped_bfn (wk:Key, bfn: Box <dyn Fn()>) -> Box <dyn Fn()> {
@@ -313,12 +348,12 @@ impl CombosMap {
         // - and for the mode-keys, we need most caps combos to be silent, so we'll do fallback only when qks1 active, treating that as ctrl
         // (note that for mode-keys, w/o caps down we can ofc do arbitrary mix of natural ctrl/alt/shift/win etc combos)
 
-        // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when the other l2/mode keys to do their l2= modes)
+        // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when we want other l2/mode keys to do their l2-eqv modes)
         if let Some(msk) = ks.mode_states.qks1.key() { if msk==key { return } }
 
         // if we're in some caps mode-state, but not qks1, we do nothing for fallback (i.e. only registered combos allowed)
         let qks1_active = ks.mode_states.qks1.down.check();
-        if ks.mode_states.some_caps_mode_active.check() && !qks1_active { return }
+        if ks.mode_states.some_combo_mode_active.check() && !qks1_active { return }
 
         // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
         let l2k_opt = self.l2_keys_map.read().unwrap().get(&key).copied();

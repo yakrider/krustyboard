@@ -316,8 +316,6 @@ impl CapsModKey {
             ks.in_managed_ctrl_down_state.clear();
             if !ks.mod_keys.some_ctrl_down() { ks.mod_keys.lctrl.ensure_inactive() }
         }
-        // the following isnt strictly necessary, but useful in case some keyup falls through
-        ks.mode_states.clear_flags();
         // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
         ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_release());
     }

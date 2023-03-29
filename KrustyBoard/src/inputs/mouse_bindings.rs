@@ -10,7 +10,7 @@ use std::{
 
 use once_cell::sync::OnceCell;
 
-use crate::{*, MouseEventCbMapKeyAction::*, MouseWheelEvent_T::*};
+use crate::{*, MouseEventCbMapKeyAction::*};
 
 
 /// Mouse-Events callback bindings map type: the map-key has event-src and-event type, the map-value is the callback entry
@@ -36,8 +36,8 @@ pub struct MouseEventCbMapKey {
 /// The bindings map mouse-event-action can be btn-down/up/dblClick, wheel-fwd/backward, or pointer-move
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MouseEventCbMapKeyAction {
-    BtnEventCb   (MouseBtnEvent_T),
-    WheelEventCb (MouseWheelEvent_T),
+    BtnEventCb (MouseBtnEvent_T),
+    WheelEventCb,
     MouseMoveCb,
 }
 
@@ -46,12 +46,9 @@ impl MouseEventCbMapKey {
     pub fn from_event (mouse_event: &MouseEvent) -> MouseEventCbMapKey {
         use {MouseEvent::*, MouseEventCbMapKeySrc::*};
         match mouse_event {
-            move_event  {..}                   => MouseEventCbMapKey { ev_src: pointer, ev_action: MouseMoveCb },
-            btn_event   {src_btn, ev_t, ..}    => MouseEventCbMapKey { ev_src: btn(*src_btn), ev_action: BtnEventCb(*ev_t) },
-            wheel_event {src_wheel, delta, ..} => {
-                let wh_ev_t = if *delta > 0 { WheelForward } else { WheelBackward };
-                MouseEventCbMapKey { ev_src: wheel(*src_wheel), ev_action: WheelEventCb(wh_ev_t) }
-            }
+            move_event  {..}                 => MouseEventCbMapKey { ev_src: pointer,           ev_action: MouseMoveCb },
+            btn_event   {src_btn, ev_t, ..}  => MouseEventCbMapKey { ev_src: btn(*src_btn),     ev_action: BtnEventCb(*ev_t) },
+            wheel_event {src_wheel, ..}      => MouseEventCbMapKey { ev_src: wheel(*src_wheel), ev_action: WheelEventCb },
     }  }
 }
 
@@ -104,8 +101,8 @@ impl MouseBindings {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::btn(btn), ev_action: btn_action };
         self .write().unwrap() .insert (cb_map_key, cb_entry);
     }
-    pub fn bind_wheel_event (&self, wheel:MouseWheel, wheel_action: MouseEventCbMapKeyAction, cb_entry: MouseEventCallbackEntry) {
-        let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::wheel(wheel), ev_action: wheel_action };
+    pub fn bind_wheel_event (&self, wheel:MouseWheel, cb_entry: MouseEventCallbackEntry) {
+        let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::wheel(wheel), ev_action: WheelEventCb };
         self .write().unwrap() .insert (cb_map_key, cb_entry);
     }
     pub fn bind_pointer_event (&self, cb_entry: MouseEventCallbackEntry) {

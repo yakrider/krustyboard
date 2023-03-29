@@ -262,16 +262,9 @@ pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
 
 /// sets up mouse wheel with various overloaded modes incl brightness, volume, tab-switching, caps-as-ctrl etc
 pub fn setup_mouse_wheel_handling (k:&Krusty) {
-    use crate::{MouseEvent::*, MouseWheel::*, MouseWheelEvent_T::*};
+    use crate::{MouseEvent::*, MouseWheel::*};
     let ks = k.ks.clone();
-    k.iproc.mouse_bindings .bind_wheel_event ( DefaultWheel, WheelEventCb(WheelForward), MouseEventCallbackEntry {
-        event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
-            if let wheel_event {delta, ..} = ev { handle_wheel_guarded (delta, &ks) }
-        } ) ),
-    } );
-    let ks = k.ks.clone();
-    k.iproc.mouse_bindings .bind_wheel_event( DefaultWheel, WheelEventCb(WheelBackward), MouseEventCallbackEntry {
+    k.iproc.mouse_bindings .bind_wheel_event ( DefaultWheel, MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
         cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
             if let wheel_event {delta, ..} = ev { handle_wheel_guarded (delta, &ks) }
