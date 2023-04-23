@@ -11,7 +11,7 @@ static APP_RUNNER_LOC : &str = r#"C:\cygwin64\bin\run.exe"#;
 static CHROME_LOC     : &str = r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#;
 static IRFAN_VIEW_LOC : &str = r#"C:\Program Files\IrfanView\i_view64.exe"#;
 static WINMERGE_LOC   : &str = r#"C:\Program Files\WinMerge\WinMergeU.exe"#;
-static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2021.1.1\bin\idea64.exe"#;
+static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2022.3.3\bin\idea64.exe"#;
 
 
 pub fn start_chrome() {

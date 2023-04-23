@@ -33,9 +33,15 @@ pub struct Flag (Arc<AtomicBool>);
 // ^^ simple sugar that helps reduce clutter in code
 
 impl Flag {
-    pub fn check (&self) -> bool { self.0 .load (Ordering::SeqCst) }
+    pub fn new (state:bool) -> Flag { Flag ( Arc::new ( AtomicBool::new(state) ) ) }
+
     pub fn set   (&self) { self.0 .store (true,  Ordering::SeqCst) }
     pub fn clear (&self) { self.0 .store (false, Ordering::SeqCst) }
+    pub fn store (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
+
+    pub fn check    (&self) -> bool { self.0 .load (Ordering::SeqCst) }
+    pub fn is_set   (&self) -> bool { true  == self.0 .load (Ordering::SeqCst) }
+    pub fn is_clear (&self) -> bool { false == self.0 .load (Ordering::SeqCst) }
 }
 
 
@@ -95,8 +101,10 @@ pub struct _KrustyState {
     // mouse .. manages the mouse btns, wheels, wheel-spin invalidations etc
     pub mouse : Mouse,
 
-    // for caps-ctrl eqv for caps-tab or caps-wheel, we'll send ctrl press/release at the right times, and will need to track that
+    // for caps-ctrl eqv for caps-tab, caps-wheel, ctrl-move etc, we'll send ctrl press/rel at the right times, and will need to track that
     pub in_managed_ctrl_down_state: Flag,
+    // and since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
+    pub in_ctrl_tab_scroll_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
     pub in_right_btn_scroll_state: Flag,
 
@@ -149,6 +157,7 @@ impl KrustyState {
                 mouse : Mouse::new(),
 
                 in_managed_ctrl_down_state : Flag::default(),
+                in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
             } ) )
         ) .clone()
@@ -162,8 +171,8 @@ impl KrustyState {
         LeftButton.release(); RightButton.release(); MiddleButton.release();
         X1Button.release(); X2Button.release();
 
-        [   &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-            &self.in_right_btn_scroll_state, &self.in_managed_ctrl_down_state
+        [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
+           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
     }
 

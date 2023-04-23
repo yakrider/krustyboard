@@ -22,6 +22,7 @@ use crate::{
     *, MouseButton::*, MouseWheel::*, EventPropagationDirective::*,
     KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*, MouseEventCallbackFnType::*,
 };
+use crate::utils::win_set_thread_dpi_aware;
 
 
 // this is used for identifying the fake keypresses we insert, so we don't process them in an infinite loop
@@ -76,8 +77,8 @@ impl InputProcessor {
             let (kbd_queue_sender,   kbd_queue_receiver)   = sync_channel::<(KbdEvCbFn_OffThreadCb_T, KbdEvent)>(20);
             let (mouse_queue_sender, mouse_queue_receiver) = sync_channel::<(MouseEvCbFn_OffThreadCb_T, MouseEvent)>(100);
             // lets get them going too
-            thread::spawn (move || { while let Ok((af,ev)) = kbd_queue_receiver.recv()   { af(ev) } });
-            thread::spawn (move || { while let Ok((af,ev)) = mouse_queue_receiver.recv() { af(ev) } });
+            thread::spawn (move || { win_set_thread_dpi_aware(); while let Ok((af,ev)) = kbd_queue_receiver.recv()   { af(ev) } });
+            thread::spawn (move || { win_set_thread_dpi_aware(); while let Ok((af,ev)) = mouse_queue_receiver.recv() { af(ev) } });
             // the processor will hold the senders to these queues for everyone to clone/use
             InputProcessor ( Arc::new ( _InputProcessor {
                 kbd_hook   : AtomicPtr::default(),
@@ -133,6 +134,8 @@ impl InputProcessor {
         if !self.mouse_bindings.read().unwrap().is_empty() {
             self.set_mouse_hook();
         };
+        // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
+        win_set_thread_dpi_aware();
         // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
         //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop
         // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)
@@ -289,7 +292,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         WM_MOUSEWHEEL  => Some ( wheel_event { src_wheel: DefaultWheel,    delta: HIWORD(mh_struct.mouseData) as i16 as i32, stamp, injected } ),
         WM_MOUSEHWHEEL => Some ( wheel_event { src_wheel: HorizontalWheel, delta: HIWORD(mh_struct.mouseData) as i16 as i32, stamp, injected } ),
 
-        //WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
+        WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y, stamp, injected } ),
         _ => None,
     } {
         //print_mouse_ev(event);

@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+use std::mem;
 #[allow(unused_imports)]
 
 use windows::{
@@ -18,7 +20,27 @@ use windows::{
     },
     Win32::System::ProcessStatus::{ K32GetProcessImageFileNameA },
 };
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{HINSTANCE, POINT};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_SYSTEM_AWARE, SetThreadDpiAwarenessContext};
+use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, GetWindowTextW, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, LoadCursorW, PhysicalToLogicalPoint, SetCursor, SetWindowPos, SPI_GETWORKAREA, SWP_NOMOVE, SWP_NOSIZE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WS_EX_TOPMOST};
 
+
+pub fn win_set_thread_dpi_aware() { unsafe {
+    SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+} }
+
+pub fn win_get_window_rect (hwnd:HWND) -> RECT { unsafe {
+    let mut rect = RECT::default();
+    GetWindowRect (hwnd, &mut rect as *mut RECT);
+    rect
+} }
+pub fn win_get_window_frame (hwnd:HWND) -> RECT { unsafe {
+    let mut rect = RECT::default();
+    DwmGetWindowAttribute (hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
+    rect
+} }
 
 pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
     let hwnd = GetForegroundWindow();
@@ -27,10 +49,29 @@ pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
     (hwnd, rect)
 } }
 
+pub fn win_get_work_area () -> RECT { unsafe {
+    let mut rect = RECT::default();
+    let _ = SystemParametersInfoW (SPI_GETWORKAREA, 0, Some (&mut rect as *mut RECT as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS::default());
+    rect
+} }
 
-pub fn win_fgnd_move (dx:i32, dy:i32) { unsafe {
+pub fn dpi_conv_point (hwnd:HWND, p:POINT) -> POINT { unsafe {
+    let mut p = POINT { x: p.x, y: p.y };
+    PhysicalToLogicalPoint (hwnd, &mut p);
+    p
+} }
+
+pub fn set_cursor (cursor_style:PCWSTR) { unsafe {
+    SetCursor (LoadCursorW (HINSTANCE::default(), cursor_style).unwrap());
+} }
+
+pub fn win_fgnd_move_rel (dx:i32, dy:i32) { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
     MoveWindow (hwnd, r.left + dx, r.top + dy, r.right-r.left, r.bottom-r.top, true);
+} }
+pub fn win_move_to (hwnd:HWND, x:i32, y:i32, width:i32, height:i32, do_repaint:bool) { unsafe {
+    MoveWindow (hwnd, x, y, width, height, do_repaint);
+
 } }
 
 
@@ -55,6 +96,19 @@ pub fn win_fgnd_center_if_past_screen () { unsafe {
     }
 } }
 
+fn win_fgnd_change_always_on_top (z_val:HWND) { unsafe {
+    //let (hwnd, r) = win_get_fgnd_rect();
+    //SetWindowPos (hwnd, z_val, r.top, r.left, r.right-r.left, r.bottom-r.top, SWP_SHOWWINDOW);
+    SetWindowPos (GetForegroundWindow(), z_val, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE);
+} }
+pub fn win_fgnd_set_always_on_top ()   { win_fgnd_change_always_on_top (HWND_TOPMOST) }
+pub fn win_fgnd_unset_always_on_top () { win_fgnd_change_always_on_top (HWND_NOTOPMOST) }
+
+pub fn win_fgnd_toggle_always_on_top () { unsafe {
+    let z_tog_val = if GetWindowLongW (GetForegroundWindow(), GWL_EXSTYLE) & (WS_EX_TOPMOST.0 as i32) == 0 { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    win_fgnd_change_always_on_top (z_tog_val)
+} }
+
 
 pub fn win_fgnd_toggle_vertmax () { unsafe {
     // works by sending doubleclick at top of window (which also works manually)
@@ -76,7 +130,7 @@ pub fn win_fgnd_toggle_max () {
 }
 
 fn win_fgnd_toggle_max_guess () { unsafe {
-    let (scr_w, scr_h) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+    let (scr_w, scr_h) = win_get_screen_metrics();
     let (hwnd, r) = win_get_fgnd_rect();
     // complication here is where and how thick the taskbar might me ..
     // we'll try and get at guesswork by requiring at least two sides and either width/height to be maxed?
@@ -91,12 +145,24 @@ fn win_fgnd_toggle_max_guess () { unsafe {
     }
 } }
 
+pub fn win_get_screen_metrics () -> (i32, i32) { unsafe {
+    (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+} }
 
 pub fn win_fgnd_min () { unsafe {
     let hwnd = GetForegroundWindow();
     PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
 } }
 
+
+
+
+pub fn get_fgnd_win_title () -> String { unsafe {
+    const MAX_LEN : usize = 512;
+    let mut lpstr : [u16; MAX_LEN] = [0; MAX_LEN];
+    let copied_len = GetWindowTextW (GetForegroundWindow(), &mut lpstr);
+    String::from_utf16_lossy (&lpstr[..(copied_len as _)])
+} }
 
 pub fn get_fgnd_win_class () -> String { unsafe {
     let mut lpstr: [u16; 120] = [0; 120];
@@ -117,8 +183,6 @@ pub fn get_fgnd_win_exe () -> Option<String> { unsafe {
     PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten()
 } }
 
-// todo: fill out fgnd_get_title
-pub fn get_fgnd_win_title () -> String { "".to_string() }
 
 
 pub fn mic_mute_toggle () { unsafe {

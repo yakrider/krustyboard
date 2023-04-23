@@ -14,8 +14,8 @@ use crate::{*, key_utils::*, ModeState_T::*};
 
 pub type ComboStatesBits_ModKeys = [bool; 9];
 pub type ComboStatesBits_Modes   = [bool; 8];
-pub type ComboStatesBits_Flags   = [bool; 2];
-// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), 4+4=8 modes (sel/del/word/fast, qks/qks1/qks2/qks3), 2 flags (rght-ms-scrl/mngd-ctrl-dn)
+pub type ComboStatesBits_Flags   = [bool; 3];
+// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), 4+4=8 modes (sel/del/word/fast, qks/qks1/qks2/qks3), 3 flags (mngd-ctrl-dn/ctrl-tab-scrl/rght-ms-scrl)
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
 
 
@@ -117,14 +117,14 @@ impl Combo {
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    pub fn static_flags_modes () -> [ModeState_T;2] {
+    pub fn static_flags_modes () -> [ModeState_T;3] {
         // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
-        static FLAGS_MODES : [ModeState_T;2] = [mngd_ctrl_dn, rght_ms_scrl];
+        static FLAGS_MODES : [ModeState_T;3] = [mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl];
         FLAGS_MODES
     }
     fn get_cur_flags_states_bitmap (ks:&KrustyState) -> ComboStatesBits_Flags {
         // note that the order of these must match the order given by the static_flag_modes fn above
-        [ks.in_managed_ctrl_down_state.check(), ks.in_right_btn_scroll_state.check()]
+        [ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set(), ks.in_right_btn_scroll_state.is_set()]
     }
     fn make_combo_flags_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Flags {
         Combo::static_flags_modes() .map (|ms| modes.contains(&ms))

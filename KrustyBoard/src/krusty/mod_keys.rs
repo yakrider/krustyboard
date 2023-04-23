@@ -1,3 +1,6 @@
+#![ allow (non_snake_case) ]
+
+
 use std::mem::size_of;
 use std::time;
 use std::thread;
@@ -232,6 +235,10 @@ impl ModKeys {
         ModKeys::static_combo_bits_mod_keys() .map (|mk| mod_keys.contains(&mk))
     }
 
+    // mouse btns notify here in case we need to do cleanup/markings for win move/resize setups
+    //pub fn process_mbtn_down (&self, mbtn:MouseButton) { self.lwin.consumed.set(); }
+    //pub fn process_mbtn_up   (&self, mbtn:MouseButton) { }
+
     pub fn some_shift_down (&self) -> bool { self.lshift.down.check() || self.rshift.down.check() }
     pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.check()  || self.rctrl.down.check() }
     pub fn some_alt_down   (&self) -> bool { self.lalt.down.check() } // ralt is disabled for all purposes
@@ -248,6 +255,22 @@ impl ModKeys {
         if self.caps.key.is_toggled() { key_utils::press_release(self.caps.key) }
         self.caps.down.clear();
     }
+
+    pub fn proc_notice__caps_down (&self) {
+        self.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_down());
+    }
+    pub fn proc_notice__caps_up (&self) {
+        self.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_up());
+    }
+
+    pub fn proc_notice__mouse_btn_down (&self, _mbtn:MouseButton) {
+        self.lwin.consumed.set();  // doesnt matter, we can set it for any mouse btn
+    }
+    pub fn proc_notice__mouse_btn_up (&self, _mbtn:MouseButton) {
+        // nothing to do for btn-up
+    }
+
+
 
     pub fn setup_tracking (&self, k:&Krusty) {
         // setup capslock, we'll completely disable it other than for krusty use
@@ -298,11 +321,11 @@ impl CapsModKey {
         if !ks.mod_keys.caps.down.check() {
             // capslock can come as repeats like other mod keys .. this was a fresh one
             self.down.set();
-            ks.mouse.vwheel.spin_invalidated.set();
             // lets notify the synced tracked mod keys, so they can invalidate/release themselves
-            ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_down());
+            ks.mod_keys.proc_notice__caps_down();
+            ks.mouse.proc_notice__modkey_down (None, &ks);
         }
-        if ks.mouse.lbtn.down.check() && !ks.in_managed_ctrl_down_state.check() {
+        if ks.mouse.lbtn.down.check() && !ks.mod_keys.lwin.down.check() && !ks.in_managed_ctrl_down_state.is_set() {
             // caps w mouse lbtn down, should be managed ctrl down (for ctrl-click, drag-drop etc)
             ks.in_managed_ctrl_down_state.set();
             ks.mod_keys.lctrl.ensure_active();
@@ -311,13 +334,17 @@ impl CapsModKey {
 
     fn handle_key_up (&self, ks:&KrustyState) {
         ks.mod_keys.caps.down.clear();
-        ks.mouse.vwheel.spin_invalidated.set();
-        if ks.in_managed_ctrl_down_state.check() {
+        ks.mouse.proc_notice__modkey_up(None, &ks);
+        if ks.in_managed_ctrl_down_state.is_set() {
             ks.in_managed_ctrl_down_state.clear();
             if !ks.mod_keys.some_ctrl_down() { ks.mod_keys.lctrl.ensure_inactive() }
         }
+        if ks.in_ctrl_tab_scroll_state.is_set() {
+            // we do this separately from managed-ctrl-down, as this should work even just w ctrl and no caps
+            if !ks.mod_keys.some_ctrl_down() { ks.in_ctrl_tab_scroll_state.clear() }
+        }
         // lets also notify the alt/win tracked mod keys so they can re-enable themselves if applicable
-        ks.mod_keys.mod_smk_pairs() .iter() .for_each (|(_,smk)| smk.process_caps_release());
+        ks.mod_keys.proc_notice__caps_up();
     }
 
 
@@ -443,20 +470,23 @@ impl SyncdModKey {
     pub fn handle_key_down (&self, ks:&KrustyState, e:KbdEvent) {
         if ks.mod_keys.caps.down.check() {
             // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
-            if !e.injected { self.down.set() }
             self.consumed.clear();
+            if !self.down.check() { ks.mouse.proc_notice__modkey_down (Some(&self), &ks) }
+            if !e.injected { self.down.set() }
         } else {
             if self.down.check() {
-                // caps isnt down, but alt was, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
+                // caps isnt down, but we were, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
             } else {
                 // caps isnt down, and alt wasnt down, so record states and let it through
                 if !e.injected { self.down.set() }
                 self.active.set();
                 self.consumed.clear();
-                ks.mouse.vwheel.spin_invalidated.set();
+                ks.mouse.proc_notice__modkey_down (Some(&self), &ks);
+                // notice that we're only doing this if not a repeat
                 let key = self.key;
                 thread::spawn (move || key.press());
         } }
+        if ks.mouse.lbtn.down.check() || ks.mouse.rbtn.down.check() { self.consumed.set() }
     }
 
     fn handle_key_up (&self, ks:&KrustyState, e:KbdEvent) {
@@ -464,7 +494,8 @@ impl SyncdModKey {
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
         if !e.injected { self.down.clear() }
-        ks.mouse.vwheel.spin_invalidated.set();
+        ks.mouse.proc_notice__modkey_up (Some(&self), &ks);
+        if self.key == Key::LCtrl || self.key == Key::RCtrl { ks.in_ctrl_tab_scroll_state.clear() }
         if !self.active.check() || ks.mod_keys.caps.down.check() {
             // if inactive or caps-down we just suppress this keyup
         } else {
@@ -499,7 +530,7 @@ impl SyncdModKey {
 
 
 
-    pub fn process_caps_down (&self) {
+    pub fn proc_notice__caps_down(&self) {
         // we will immediately invalidate and clear any down mod-key found upon caps activation!
         // note that internally tracked physical is_down will continue to be down
         // note also that each of paired mod-keys will get their own notification too
@@ -509,7 +540,7 @@ impl SyncdModKey {
             thread::spawn ( move || smk.release_w_masking() ); // this will update flags too
         }
     }
-    pub fn process_caps_release (&self) {
+    pub fn proc_notice__caps_up (&self) {
         // since we deactivate mod-keys on caps press, check to see if we want to reactivate them
         // note: we'll setup a delay for activation to allow for some sloppy combo releases etc
         // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
