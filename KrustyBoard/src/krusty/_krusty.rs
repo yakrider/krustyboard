@@ -254,6 +254,7 @@ pub mod key_utils {
     pub fn base_action  (key:Key) -> AF { action_p1 (press_release,        key) }
     pub fn fast_action  (key:Key) -> AF { action_p1 (double_press_release, key) }
     pub fn ctrl_action  (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
+    pub fn shift_action (key:Key) -> AF { action_p1 (shift_press_release,  key) }
 
 }
 

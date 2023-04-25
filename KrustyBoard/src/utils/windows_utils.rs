@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::mem;
+use std::mem::size_of;
 #[allow(unused_imports)]
 
 use windows::{
@@ -22,14 +23,36 @@ use windows::{
 };
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, POINT};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_SYSTEM_AWARE, SetThreadDpiAwarenessContext};
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, GetWindowTextW, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, LoadCursorW, PhysicalToLogicalPoint, SetCursor, SetWindowPos, SPI_GETWORKAREA, SWP_NOMOVE, SWP_NOSIZE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WS_EX_TOPMOST};
+use windows::Win32::UI::WindowsAndMessaging::{GA_ROOTOWNER, GetAncestor, GetWindowLongW, GetWindowTextW, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, IsWindowVisible, LoadCursorW, PhysicalToLogicalPoint, SetCursor, SetForegroundWindow, SetWindowPos, SPI_GETWORKAREA, SWP_NOMOVE, SWP_NOSIZE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST};
 
 
 pub fn win_set_thread_dpi_aware() { unsafe {
     SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
 } }
+
+
+pub fn check_window_visible (hwnd:HWND) -> bool { unsafe {
+    IsWindowVisible (hwnd) .as_bool()
+} }
+
+pub fn check_window_cloaked (hwnd:HWND) -> bool { unsafe {
+    let mut cloaked_state: isize = 0;
+    let out_ptr = &mut cloaked_state as *mut isize as *mut c_void;
+    let _ = DwmGetWindowAttribute (hwnd, DWMWA_CLOAKED, out_ptr, size_of::<isize>() as u32);
+    cloaked_state != 0
+} }
+
+pub fn check_if_tool_window (hwnd:HWND) -> bool { unsafe {
+    GetWindowLongW (hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 as i32 != 0
+} }
+
+pub fn check_window_has_owner (hwnd:HWND) -> bool { unsafe {
+    GetAncestor (hwnd, GA_ROOTOWNER) != hwnd
+} }
+
+
 
 pub fn win_get_window_rect (hwnd:HWND) -> RECT { unsafe {
     let mut rect = RECT::default();
@@ -38,7 +61,7 @@ pub fn win_get_window_rect (hwnd:HWND) -> RECT { unsafe {
 } }
 pub fn win_get_window_frame (hwnd:HWND) -> RECT { unsafe {
     let mut rect = RECT::default();
-    DwmGetWindowAttribute (hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
+    let _ = DwmGetWindowAttribute (hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
     rect
 } }
 
@@ -47,6 +70,9 @@ pub fn win_get_fgnd_rect () -> (HWND, RECT) { unsafe {
     let mut rect = RECT::default();
     GetWindowRect (hwnd, &mut rect as *mut RECT);
     (hwnd, rect)
+} }
+pub fn win_set_fgnd (hwnd:HWND) { unsafe {
+    SetForegroundWindow (hwnd);
 } }
 
 pub fn win_get_work_area () -> RECT { unsafe {
@@ -69,8 +95,8 @@ pub fn win_fgnd_move_rel (dx:i32, dy:i32) { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
     MoveWindow (hwnd, r.left + dx, r.top + dy, r.right-r.left, r.bottom-r.top, true);
 } }
-pub fn win_move_to (hwnd:HWND, x:i32, y:i32, width:i32, height:i32, do_repaint:bool) { unsafe {
-    MoveWindow (hwnd, x, y, width, height, do_repaint);
+pub fn win_move_to (hwnd:HWND, x:i32, y:i32, width:i32, height:i32) { unsafe {
+    MoveWindow (hwnd, x, y, width, height, true);    // the bool param at end flags whether to repaint or not
 
 } }
 
@@ -213,9 +239,5 @@ pub fn test () {
 
     //super::brightness::incr_brightness(1);
     //enum_windows_test();
-
-    //unsafe {
-        //
-    //}
 
 }

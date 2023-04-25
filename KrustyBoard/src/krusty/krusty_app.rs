@@ -237,15 +237,22 @@ pub fn setup_krusty_board () {
         let ks = k.ks.clone();
         Arc::new ( move || {
             if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() {
-                ks.mod_keys.lctrl.ensure_inactive(); ks.in_managed_ctrl_down_state.clear(); ks.in_ctrl_tab_scroll_state.clear();
                 // space defocuses from list so we wont actually switch tabs when we release the ctrl
                 press_release(Space);
+                // now release the ctrl so the transient-switcher popup goes away
+                ks.mod_keys.lctrl.ensure_inactive();
+                ks.in_managed_ctrl_down_state.clear(); ks.in_ctrl_tab_scroll_state.clear();
                 // then do actual ctrl-e to bring up the persistent-switcher (ctrl-e is default shortcut in IDE for that)
-                ks.mod_keys.lctrl.active_on_key(E)()
+                // we'll want to give a tiny delay so IDE has time to process focus changes appropriately .. just spawning is enough for that
+                let ks = ks.clone();
+                thread::spawn ( move || {
+                    thread::sleep (time::Duration::from_millis(10));
+                    ks.mod_keys.lctrl.active_on_key(E)()
+                } );
             } else { press_release(key) }
         } )
     }
-    k.cm .add_combo_af ( k.cg(Space).m(caps).s(mngd_ctrl_dn),  k.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
+    k.cm .add_combo_af ( k.cg(Space).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
 
 
 
@@ -593,6 +600,7 @@ pub fn setup_krusty_board () {
             let mut n_trials = 10;  // how many times do we want to keep finding and escaping matching windows
             while {
                 let hwnd = FindWindowW (&HSTRING::from("SunAwtDialog"), PCWSTR::null());
+                // ^^ Note that if the found window does not close on escape, that same fgnd window might keep being retried ignoring others
                 if hwnd.0 != 0 {
                     SetForegroundWindow(hwnd);
                     let mut n_wait = 10;  // how many times to wait <t>ms for the set fgnd to work
@@ -601,21 +609,18 @@ pub fn setup_krusty_board () {
                         n_wait -= 1;
                         hwnd != GetForegroundWindow() && n_wait > 0
                     } { }
-                    if n_wait > 0 {  //print!("{:?}", '*');
-                        ks.mod_keys.lalt.inactive_action(fast_action(Escape))();
+                    //if n_wait > 0 {  //print!("{:?}", '*');
+                        ks.mod_keys.lalt.inactive_action(base_action(Escape))();
+                        ks.mod_keys.lalt.inactive_action(shift_action(Escape))();
                         thread::sleep(time::Duration::from_millis(50));
-                    }  //println!();
+                    //}   println!();
                 }
                 n_trials -= 1;
-                hwnd.0 != 0  && n_trials > 0    // the while condition
-                // todo ^^ (not safe if there are other apps matching windows that dont close on Esc!)
-                // todo: prob need to move away from findWindow (as it might keep giving a non-closing window while there are others)
-                // .. and to account for possibility of non-closing windows w/o trying forever !
+                hwnd.0 != 0  && n_trials > 0
             } { }
         } );
     } }
     let ks = k.ks.clone();
-    //let lalt_0_af = Arc::new (move || ide_float_tools_clear(&ks));
     k.cm .add_combo_af ( k.cg(Numrow_0).m(lalt), k.ag_af (Arc::new (move || ide_float_tools_clear(&ks))) );
 
 

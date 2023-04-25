@@ -21,6 +21,7 @@ brightness = "0.5.0"
 async-trait = "0.1.50"
 futures = "0.3.16"
 rand = "0.8.5"
+grouping_by = "0.2.2"
 
 
 [target.'cfg(windows)'.dependencies.windows]

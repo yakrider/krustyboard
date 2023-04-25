@@ -6,17 +6,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use windows::Win32::Foundation::{HWND, POINT, RECT};
-use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, SetForegroundWindow, WHEEL_DELTA, WindowFromPoint
-};
-
 use crate::{
     *, key_utils::*, utils::*, EventPropagationDirective::*,
     MouseEventCallbackFnType::*, MouseEventCbMapKeyAction::*,
 };
-use crate::KbdKey::{ExtLeft, ExtRight};
-use rand::Rng;
 
 
 # [ derive (Debug) ]
@@ -86,9 +79,6 @@ impl MouseWheelState {
     }
 }
 
-# [ derive (Debug, Default, Copy, Clone) ]
-pub struct PreDragDat { hwnd:HWND, rect:RECT, frame:RECT, pointer:POINT,  }
-
 # [ derive (Debug) ]
 pub struct _Mouse {
     _private  : (),
@@ -102,7 +92,7 @@ pub struct _Mouse {
     pub vwheel : MouseWheelState,
     //pub hwheel : MouseWheelState,
 
-    pub pre_drag_dat : Arc < RwLock <PreDragDat>>,
+    pub pre_drag_dat : Arc <RwLock <PreDragDat>>,
 }
 
 # [ derive (Debug, Clone) ]
@@ -149,15 +139,9 @@ impl Mouse {
 
     }
 
-    pub fn capture_pre_drag_dat (&self) { unsafe {
-        win_set_thread_dpi_aware();
-        let (x,y) = MousePointer::pos();
-        let hwnd = WindowFromPoint (POINT {x, y});
-        let hwnd = GetAncestor (hwnd, GA_ROOT);
-        let rect = win_get_window_rect (hwnd);
-        let frame = win_get_window_frame (hwnd);
-        *self.pre_drag_dat.write().unwrap() = PreDragDat { hwnd, rect, frame, pointer: POINT {x, y} };
-    } }
+    pub fn capture_pre_drag_dat (&self) {
+        *self.pre_drag_dat.write().unwrap() = capture_pre_drag_dat();   //println!("{:#?}",(&self.pre_drag_dat.read().unwrap()));
+    }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
     pub fn proc_notice__modkey_down (&self, mk:Option<&SyncdModKey>, ks:&KrustyState) {
@@ -206,11 +190,12 @@ pub fn setup_mouse_left_btn_handling (k:&Krusty) {
 
 fn handle_mouse_left_btn_down (ks:&KrustyState) {
     ks.mouse.lbtn.down.set();
-    ks.mouse.capture_pre_drag_dat();
+    //ks.mouse.capture_pre_drag_dat();   // to avoid unnecessary processing, we'll only do this when win down
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.lbtn.btn);
     if ks.mod_keys.lwin.down.check() {
         // window move/resize modes
-        unsafe { SetForegroundWindow (ks.mouse.pre_drag_dat.read().unwrap().hwnd) };
+        ks.mouse.capture_pre_drag_dat();
+        win_set_fgnd (ks.mouse.pre_drag_dat.read().unwrap().hwnd);
         if ks.mod_keys.caps.down.check() {
             // window drag-to-resize mode
         } else {
@@ -268,7 +253,7 @@ pub fn setup_mouse_right_btn_handling (k:&Krusty) {
 
 fn handle_mouse_right_btn_down (ks:&KrustyState) {
     ks.mouse.rbtn.down.set();
-    ks.mouse.capture_pre_drag_dat();
+    //ks.mouse.capture_pre_drag_dat(); // we dont enable drag/resize on right btn anymore
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.rbtn.btn);
     if ks.mod_keys.lwin.down.check() {
         //ks.mouse.rbtn.consumed.set();
@@ -324,7 +309,7 @@ pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
     // note that we cant make X1/X2 btns act truly like mbtn as they dont seem to send dn/up events on press/rel ..
     // .. instead they send nothing on btn-dn and send dn/up at btn-rel .. (or nothing if held too long!)
     let ks = k.ks.clone();
-    let (back,fwd) = (k.ag(ExtLeft).m(ModKey::alt).gen_af(), k.ag(ExtRight).m(ModKey::alt).gen_af());
+    let (back,fwd) = (k.ag(Key::ExtLeft).m(ModKey::alt).gen_af(), k.ag(Key::ExtRight).m(ModKey::alt).gen_af());
     k.iproc.mouse_bindings .bind_btn_event ( mbs.btn, BtnEventCb(BtnDown), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
         cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| {
@@ -376,6 +361,7 @@ fn handle_wheel_guarded (delta:i32, ksr:&KrustyState) {
 }
 
 fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
+    use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
     let incr = delta / WHEEL_DELTA as i32;
     if ksr.mouse.rbtn.down.check() {
         // right-mouse-btn-wheel support for switche task switching
@@ -388,7 +374,7 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         // wheel support for scrolling in windows native alt-tab task-switching screen
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
-        if utils::get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
+        if get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
             ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
             handle_alt_tab_wheel(incr)
         } else {
@@ -415,7 +401,7 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         // could set up delayed trigger here to clear managed-ctrl-down-state, but meh, just let it be till caps-up
     } else if ksr.mod_keys.some_shift_down() {
         //handle_horiz_scroll_wheel(incr);
-        // ^^ todo:: .. (and for now, just let default pass through)
+        // ^^ todo:: .. (for now, just let default pass through for shift scrolls)
         MouseWheel::DefaultWheel.scroll(delta);
     } else {
         MouseWheel::DefaultWheel.scroll(delta);
@@ -453,13 +439,14 @@ fn handle_horiz_scroll_wheel (_incr:i32) {
 
 
 
+
 pub fn setup_mouse_move_handling (k:&Krusty) {
     use crate::{MouseEvent::*};
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_pointer_event ( MouseEventCallbackEntry {
         event_prop_directive: EventProp_Continue,
         cb: MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
-            if ks.mod_keys.lwin.down.check() && ks.mouse.lbtn.down.check() { //&& ks.mouse.pre_drag_dat.read().unwrap().is_some() {
+            if ks.mod_keys.lwin.down.check() && ks.mouse.lbtn.down.check() {
                 ks.mod_keys.lwin.consumed.set();
                 if let move_event { x_pos, y_pos, .. } = ev {
                     handle_pointer_move (x_pos, y_pos, &ks)
@@ -468,16 +455,10 @@ pub fn setup_mouse_move_handling (k:&Krusty) {
     } );
 }
 
-# [ derive (Debug, Default, Clone) ]
-pub struct WinRect { x:i32, y:i32, width:i32, height:i32 }
-
 fn handle_pointer_move (x:i32, y:i32, ks:&KrustyState) {
     // NOTE that mouse move is inline pass-through before these handler calls get queued
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
-
-    //win_set_thread_dpi_aware();    // no need, we do that right while initing the events-queue thread itself
-
-    // for now, we'll send it to drag directly, later if we do more we can add state checks
+    // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
     if ks.mouse.lbtn.down.check() && ks.mouse.lbtn.consumed.is_clear(){
         if ks.mod_keys.caps.down.check() {
             handle_pointer_window_resize_spaced (x, y, &ks)
@@ -486,73 +467,3 @@ fn handle_pointer_move (x:i32, y:i32, ks:&KrustyState) {
         }
     }
 }
-
-
-fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
-    // we'll have saved mouse loc on win-lclick, so we can reference that on where/how to move the window
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap().clone();
-    let dest =  WinRect {
-        x      : pdd.rect.left + (x - pdd.pointer.x),
-        y      : pdd.rect.top  + (y - pdd.pointer.y),
-        width  : pdd.rect.right  - pdd.rect.left,
-        height : pdd.rect.bottom - pdd.rect.top,
-    };
-    let dr = snap_to_edge_rect_delta (&dest, &calc_window_padding(&pdd.rect, &pdd.frame));
-    // we want to keep width/height same so we'll snap to left (and top) in preference to right (and bottom) if both of are available
-    let dlr = if dr.left != 0 {dr.left} else {dr.right };
-    let dtb = if dr.top  != 0 {dr.top } else {dr.bottom};
-    win_move_to ( pdd.hwnd, dest.x + dlr, dest.y + dtb, dest.width, dest.height, true );
-}
-fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:&KrustyState) {
-    if rand::thread_rng().gen_range(0..10) < 8 {  handle_pointer_window_drag (x,y,ks) }
-}
-
-
-fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
-    let point = POINT {x,y};
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap().clone();
-    let dp = POINT { x: point.x - pdd.pointer.x, y: point.y - pdd.pointer.y };
-    let dest = WinRect {
-        x      : pdd.rect.left,
-        y      : pdd.rect.top,
-        width  : pdd.rect.right  - pdd.rect.left + dp.x,
-        height : pdd.rect.bottom - pdd.rect.top  + dp.y,
-    };
-    let dr = snap_to_edge_rect_delta (&dest, &calc_window_padding(&pdd.rect, &pdd.frame));
-    win_move_to ( pdd.hwnd, dest.x, dest.y, dest.width + dr.right, dest.height + dr.bottom, true );
-}
-fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
-    if rand::thread_rng().gen_range(0..10) < 2 {  handle_pointer_window_resize (x,y,ks) }
-}
-
-
-pub fn handle_pointer_action_cancel (ks:&KrustyState) {
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap().clone();
-    win_move_to (pdd.hwnd, pdd.rect.left, pdd.rect.top, pdd.rect.right - pdd.rect.left, pdd.rect.bottom - pdd.rect.top, true);
-}
-
-
-
-fn snap_to_edge_rect_delta (wr:&WinRect, pad:&RECT) -> RECT {
-    static SNAP_THRESH : i32 = 30;     // threshold to activate snap to edges  .. todo: prob should make this configurable .. prob dpi aware too
-    // we'll calc delta to snap for each window edge (similar to how the pad rect is specified)
-    let wa = win_get_work_area();
-    let mut dr = RECT::default();
-    if let v = wr.x + pad.left - wa.left                    { if v.abs() < SNAP_THRESH { dr.left   = -v } }
-    if let v = wr.y + pad.top  - wa.top                     { if v.abs() < SNAP_THRESH { dr.top    = -v } }
-    if let v = wa.right  - (wr.x + wr.width  - pad.right )  { if v.abs() < SNAP_THRESH { dr.right  =  v } }
-    if let v = wa.bottom - (wr.y + wr.height - pad.bottom)  { if v.abs() < SNAP_THRESH { dr.bottom =  v } }
-    //println!("{:?}",(wa, wr, &dr));
-    dr
-}
-
-fn calc_window_padding (rect:&RECT, frame:&RECT) -> RECT {
-    RECT {  // rect includes padding of the 'drop shadow' around the frame
-        left   : ( rect.left   -  frame.left   ).abs(),
-        top    : ( rect.top    -  frame.top    ).abs(),
-        right  : ( rect.right  -  frame.right  ).abs(),
-        bottom : ( rect.bottom -  frame.bottom ).abs(),
-    }
-}
-
-// todo consider whether reasonable to try and add snapping to adjacent window borders too!

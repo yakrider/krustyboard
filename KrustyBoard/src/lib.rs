@@ -51,6 +51,7 @@ pub mod krusty {
     pub mod mode_states;
     pub mod combo_maps;
     pub mod krusty_mouse;
+    pub mod krusty_snaps;
     pub mod krusty_app;
 
     // and our (selective or wholesale) sub-module re-exports
@@ -58,6 +59,7 @@ pub mod krusty {
     pub use self::mode_states::*;
     pub use self::combo_maps::*;
     pub use self::krusty_mouse::*;
+    pub use self::krusty_snaps::*;
     pub use self::krusty_app::*;
 
 }
