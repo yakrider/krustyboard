@@ -101,6 +101,9 @@ pub struct _KrustyState {
     // mouse .. manages the mouse btns, wheels, wheel-spin invalidations etc
     pub mouse : Mouse,
 
+    // win-groups .. maanges the three supported window-grouping functionalty
+    pub win_groups : WinGroups,
+
     // for caps-ctrl eqv for caps-tab, caps-wheel, ctrl-move etc, we'll send ctrl press/rel at the right times, and will need to track that
     pub in_managed_ctrl_down_state: Flag,
     // and since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
@@ -153,8 +156,8 @@ impl KrustyState {
 
                 mod_keys    : ModKeys::new(),
                 mode_states : ModeStates::new(),
-
-                mouse : Mouse::new(),
+                mouse       : Mouse::new(),
+                win_groups  : WinGroups::new(),
 
                 in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
@@ -176,6 +179,18 @@ impl KrustyState {
         ] .into_iter() .for_each (|flag| flag.clear());
     }
 
+    /// Utlity function to create a new Combo-generator (for combo-specification) <br>
+    /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
+    pub fn cg (&self, key:Key) -> ComboGen { ComboGen::new (key, &self) }
+
+    /// Utility function to create a new Combo-Action generator (key-action output type) <br>
+    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
+    pub fn ag (&self, key:Key) -> ActionGen_wKey { ActionGen_wKey::new (key, &self) }
+
+    /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
+    /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
+    pub fn ag_af (&self, af:AF) -> ActionGen_wAF { ActionGen_wAF::new (af, &self) }
+
 }
 
 
@@ -194,18 +209,6 @@ impl Krusty {
             iproc : InputProcessor::instance(),
         }
     }
-
-    /// Utlity function to create a new Combo-generator (for combo-specification) <br>
-    /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
-    pub fn cg (&self, key:Key) -> ComboGen { ComboGen::new (key, &self.ks) }
-
-    /// Utility function to create a new Combo-Action generator (key-action output type) <br>
-    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
-    pub fn ag (&self, key:Key) -> ActionGen_wKey { ActionGen_wKey::new (key, &self.ks) }
-
-    /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
-    /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
-    pub fn ag_af (&self, af:AF) -> ActionGen_wAF { ActionGen_wAF::new (af, &self.ks) }
 
 
     #[allow(dead_code)]

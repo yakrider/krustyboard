@@ -129,6 +129,7 @@ impl Mouse {
         setup_mouse_right_btn_handling (k);
 
         // also setup both Xbutton srcs to act as middle btns (used for link clicks, closing tabs etc)
+        setup_middle_btn_eqv_handling (&self.mbtn,  k);
         setup_middle_btn_eqv_handling (&self.x1btn, k);
         setup_middle_btn_eqv_handling (&self.x2btn, k);
 
@@ -139,8 +140,13 @@ impl Mouse {
 
     }
 
-    pub fn capture_pre_drag_dat (&self) {
-        *self.pre_drag_dat.write().unwrap() = capture_pre_drag_dat();   //println!("{:#?}",(&self.pre_drag_dat.read().unwrap()));
+    pub fn capture_pre_drag_dat (&self, ks:&KrustyState) {
+        let ks = ks.clone();
+        //thread::spawn ( move || {
+            *ks.mouse.pre_drag_dat.write().unwrap() = capture_pre_drag_dat(&ks);
+        //} );
+        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
+        // .. but also that doing so seems to allow 'slippage' between where moving pointer was clicked and pdd captured
     }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
@@ -149,14 +155,14 @@ impl Mouse {
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk.is_none() ||  mk.filter(|mk| mk.key == Key::LWin).is_some() ) {
             // we'll want to capture/refresh pre-drag-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            self.capture_pre_drag_dat();
+            self.capture_pre_drag_dat(ks);
         }
     }
     pub fn proc_notice__modkey_up (&self, mk:Option<&SyncdModKey>, ks:&KrustyState) {
         self.vwheel.spin_invalidated.set();
         if mk.is_none() && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
             // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
-            self.capture_pre_drag_dat();
+            self.capture_pre_drag_dat(ks);
         }
     }
 
@@ -189,20 +195,26 @@ pub fn setup_mouse_left_btn_handling (k:&Krusty) {
 }
 
 fn handle_mouse_left_btn_down (ks:&KrustyState) {
+    use ModeState_T::*;
     ks.mouse.lbtn.down.set();
     //ks.mouse.capture_pre_drag_dat();   // to avoid unnecessary processing, we'll only do this when win down
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.lbtn.btn);
-    if ks.mod_keys.lwin.down.check() {
-        // window move/resize modes
-        ks.mouse.capture_pre_drag_dat();
+    if ks.mod_keys.lwin.down.is_set() {
+        // for all three modes (drag, resize, grp-drag), we need to capture dat,
+        ks.mouse.capture_pre_drag_dat(ks);
         win_set_fgnd (ks.mouse.pre_drag_dat.read().unwrap().hwnd);
-        if ks.mod_keys.caps.down.check() {
-            // window drag-to-resize mode
-        } else {
-            // this is window drag-to-move mode
-            //set_cursor(IDC_SIZEALL); // nope, only seems to work for apps own created windows!
+        // and for grp we have additional grp-add overload on the click
+        if ks.mod_keys.caps.down.is_set() {
+            // win-groups mode .. caps-lwin-qks<?> + lbtn click on window is add that window to the corresponding group
+            if ks.mode_states.qks1.down.is_set() {
+                ks.win_groups.add_to_group ( qks1.try_into().unwrap(), win_get_hwnd_from_pointer() )
+            } else if ks.mode_states.qks2.down.is_set() {
+                ks.win_groups.add_to_group ( qks2.try_into().unwrap(), win_get_hwnd_from_pointer() )
+            } else if ks.mode_states.qks3.down.is_set() {
+                ks.win_groups.add_to_group ( qks3.try_into().unwrap(), win_get_hwnd_from_pointer() )
+            }
         }
-    } else if ks.mod_keys.caps.down.check() {
+    } else if ks.mod_keys.caps.down.is_set() {
         ks.in_managed_ctrl_down_state.set();
         ks.mod_keys.lctrl.ensure_active();   // this allows caps-as-ctrl for drag drop etc
         ks.mouse.lbtn.active.set();
@@ -252,11 +264,17 @@ pub fn setup_mouse_right_btn_handling (k:&Krusty) {
 }
 
 fn handle_mouse_right_btn_down (ks:&KrustyState) {
+    use ModeState_T::*;
     ks.mouse.rbtn.down.set();
     //ks.mouse.capture_pre_drag_dat(); // we dont enable drag/resize on right btn anymore
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.rbtn.btn);
-    if ks.mod_keys.lwin.down.check() {
-        //ks.mouse.rbtn.consumed.set();
+    if ks.mod_keys.lwin.down.is_set() {
+        if ks.mod_keys.caps.down.is_set() {
+            // win-groups mode .. caps-lwin-qks<?> + lbtn click on window is add that window to the corresponding group
+            if ks.mode_states.qks1.down.is_set() { ks.win_groups.remove_from_group (qks1.try_into().unwrap(), win_get_hwnd_from_pointer()) }
+            if ks.mode_states.qks2.down.is_set() { ks.win_groups.remove_from_group (qks2.try_into().unwrap(), win_get_hwnd_from_pointer()) }
+            if ks.mode_states.qks3.down.is_set() { ks.win_groups.remove_from_group (qks3.try_into().unwrap(), win_get_hwnd_from_pointer()) }
+        }
     } else {
         ks.mouse.rbtn.active.set();
         MouseButton::RightButton.press();
@@ -289,15 +307,15 @@ fn handle_right_btn_scroll_end (ks:&KrustyState) {
 
     // and looks like for such a manual-move strategy to work, there HAS to be a delay before we move the pointer back
     // (also, this works for almost all applications EXCEPT for windows-explorer .. MS ofc has to be special .. meh)
-    let (x,y) = MousePointer::pos();
+    let point = MousePointer::pos();
     MousePointer::move_abs (0xFFFF, 0xFFFF);
     MouseButton::RightButton.release();
     // some delay to actually have the release processed while pointer is still away
     thread::spawn ( move || {
-        thread::sleep(time::Duration::from_millis(5));
+        thread::sleep(time::Duration::from_millis(50));
         // note that reducing this delay or even removing it will mostly work (as the event handling can happen before spawned thread comes up)..
         // .. however, for times when there's load etc and the event handling is also pushed out, we'll want at least some delay
-        MousePointer::move_abs(x,y);
+        MousePointer::move_abs (point.x, point.y);
     } );
 
 }
@@ -305,25 +323,43 @@ fn handle_right_btn_scroll_end (ks:&KrustyState) {
 
 /// x1/x2 btns can be set up to behave like they were middle btn
 pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
-    use crate::{MouseButton::*, MouseBtnEvent_T::*};
+    use crate::MouseBtnEvent_T::*;
     // note that we cant make X1/X2 btns act truly like mbtn as they dont seem to send dn/up events on press/rel ..
     // .. instead they send nothing on btn-dn and send dn/up at btn-rel .. (or nothing if held too long!)
     let ks = k.ks.clone();
-    let (back,fwd) = (k.ag(Key::ExtLeft).m(ModKey::alt).gen_af(), k.ag(Key::ExtRight).m(ModKey::alt).gen_af());
     k.iproc.mouse_bindings .bind_btn_event ( mbs.btn, BtnEventCb(BtnDown), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| {
-            if ks.mod_keys.lshift.down.check() { back() }
-            else if ks.mod_keys.lctrl.down.check() { fwd() }
-            else { MiddleButton.press(); }
-        } ) ),
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| { handle_mouse_middle_btn_down(&ks) } ) ),
     } );
-
+    let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_btn_event ( mbs.btn, BtnEventCb(BtnUp), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| { MiddleButton.release(); } ) )
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| { handle_mouse_middle_btn_up(&ks) } ) )
     } );
 
+}
+
+fn handle_mouse_middle_btn_down (ks:&KrustyState) {
+    if ks.mod_keys.lshift.down.is_set() {
+        // lshift-mbtn to go backwards in IDE cursor location
+        ks.ag (Key::ExtLeft ) .m(ModKey::alt) .gen_af()();
+    } else if ks.mod_keys.lctrl.down.is_set() {
+        // lctrl-mbtn to go forwards in IDE cursor location
+        ks.ag (Key::ExtRight) .m(ModKey::alt) .gen_af()();
+    } else if ks.mod_keys.lwin.down.is_set() {
+        // win-mbtn to close the mouse-pointed window
+        ks.mod_keys.lwin.consumed.set();
+        win_close (win_get_hwnd_from_pointer());
+    } else {
+        ks.mouse.mbtn.active.set();
+        MouseButton::MiddleButton.press();
+    }
+}
+fn handle_mouse_middle_btn_up (ks:&KrustyState) {
+    if ks.mouse.mbtn.active.is_set() {
+        ks.mouse.mbtn.active.clear();
+        MouseButton::MiddleButton.release();
+    }
 }
 
 
@@ -460,7 +496,7 @@ fn handle_pointer_move (x:i32, y:i32, ks:&KrustyState) {
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
     if ks.mouse.lbtn.down.check() && ks.mouse.lbtn.consumed.is_clear(){
-        if ks.mod_keys.caps.down.check() {
+        if ks.mod_keys.caps.down.check() && ks.mode_states.qks1.down.is_clear() {
             handle_pointer_window_resize_spaced (x, y, &ks)
         } else {
             handle_pointer_window_drag_spaced (x, y, &ks)

@@ -3,15 +3,18 @@
 #![allow(non_camel_case_types)]
 
 
-use std::{
-    mem::{size_of, MaybeUninit},
-    os::raw::c_int,
-};
-use windows::Win32::{
-    UI::Input::KeyboardAndMouse::*,
-    UI::WindowsAndMessaging::*,
-};
+use std::mem;
+use std::os::raw::c_int;
+
 use strum_macros::EnumIter;
+
+use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, INPUT, INPUT_0, MOUSEINPUT, SendInput, MOUSE_EVENT_FLAGS, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE,
+    MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL,
+};
 
 use crate::*;
 
@@ -169,26 +172,25 @@ impl MouseWheel {
 
 impl MousePointer {
 
-    pub fn pos() -> (i32, i32) {
+    pub fn pos() -> POINT {
         unsafe {
-            let mut point = MaybeUninit::uninit();
-            GetCursorPos(point.as_mut_ptr());
-            let point = point.assume_init();
-            (point.x, point.y)
+            let mut point = POINT::default();
+            GetCursorPos (&mut point);
+            point
         }
     }
 
     /// Moves the mouse relative to its current position by a given amount of pixels.
-    pub fn move_rel(dx: i32, dy: i32) {
-        let (x, y) = Self::pos();
-        Self::move_abs(x + dx, y + dy);
+    pub fn move_rel (dx: i32, dy: i32) {
+        let p = Self::pos();
+        Self::move_abs (p.x + dx, p.y + dy);
     }
 
     /// Moves the mouse to a given position based on absolute coordinates. The top left
     /// corner of the screen is (0, 0).
-    pub fn move_abs(x: i32, y: i32) {
+    pub fn move_abs (x: i32, y: i32) {
         unsafe {
-            SetCursorPos(x, y);
+            SetCursorPos (x, y);
         }
     }
 
@@ -214,7 +216,7 @@ fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
     } ];
 
     unsafe {
-        SendInput (&mut inputs, size_of::<INPUT>() as c_int)
+        SendInput (&mut inputs, mem::size_of::<INPUT>() as c_int)
     };
 
 }

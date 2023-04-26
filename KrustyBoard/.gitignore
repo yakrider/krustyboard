@@ -8,7 +8,7 @@
 */Cargo.lock
 
 # watched triggers
-.trigger
+*.trigger
 
 # JetBrains IDE
 .idea/

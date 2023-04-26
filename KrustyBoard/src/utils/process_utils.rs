@@ -37,16 +37,24 @@ pub fn start_idea_diff() {
     let _ = Command::new(APP_RUNNER_LOC).arg(IDEA_LOC).arg("diff").spawn();
 }
 
-fn setup_opened_window (win_class_part_match: &str) {
-    thread::sleep(Duration::from_millis(2000));
-    if get_fgnd_win_class().contains(win_class_part_match) {
-        win_fgnd_center_if_past_screen();
-        thread::sleep(Duration::from_millis(300));
-        win_fgnd_toggle_vertmax();
-    }
-}
-
 pub fn open_mic_cpl () {
     let _ = Command::new("rundll32.exe").arg("shell32.dll,Control_RunDLL").arg("mmsys.cpl,,1").spawn();
+}
+
+fn setup_opened_window (win_class_part_match_str: &str) {
+    let match_str = win_class_part_match_str.to_string();
+    thread::spawn ( move || {
+        fn attempt_setup (cls_str: &String) -> bool {
+            if get_fgnd_win_class().contains(cls_str) {
+                win_fgnd_center_if_past_screen();
+                thread::sleep(Duration::from_millis(300));
+                win_fgnd_toggle_vertmax();
+                true
+            } else { false }
+        }
+        thread::sleep(Duration::from_millis(500 )); if attempt_setup(&match_str) == true { return }
+        thread::sleep(Duration::from_millis(1000)); if attempt_setup(&match_str) == true { return }
+        thread::sleep(Duration::from_millis(2000)); if attempt_setup(&match_str) == true { return }
+    } );
 }
 
