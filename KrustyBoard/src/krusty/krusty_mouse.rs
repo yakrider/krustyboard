@@ -14,12 +14,12 @@ use crate::{
 
 # [ derive (Debug) ]
 pub struct _MouseBtnState {
-    pub btn : MouseButton,
-    pub down : Flag,
-    pub active : Flag,
+    pub btn      : MouseButton,
+    pub down     : Flag,
+    pub active   : Flag,
     pub consumed : Flag,
-    //pub kdn_stamp : EventStamp,
-    //pub kup_stamp : EventStamp,
+    pub stamp    : EventStamp,
+    pub dbl_tap  : Flag,
 }
 
 # [ derive (Debug, Clone) ]
@@ -30,6 +30,10 @@ impl Deref for MouseBtnState {
     fn deref(&self) -> &_MouseBtnState { &self.0 }
 }
 
+// since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
+/// Debounced-Arc/Action-Function Fn(MouseEvent) representation that can be passed around to debounce wrapper
+pub type DBAF  = Arc <dyn Fn(MouseEvent) + Send + Sync + 'static> ;
+
 impl MouseBtnState {
     pub fn new (btn:MouseButton) -> MouseBtnState {
         MouseBtnState ( Arc::new ( _MouseBtnState {
@@ -37,8 +41,8 @@ impl MouseBtnState {
             down     : Flag::default(),
             active   : Flag::default(),
             consumed : Flag::default(),
-            //kdn_stamp: EventStamp::new(),
-            //kup_stamp: EventStamp::new(),
+            stamp    : EventStamp::default(),
+            dbl_tap  : Flag::default(),
         } ) )
     }
 
@@ -47,8 +51,8 @@ impl MouseBtnState {
     // .. so for now, we'll only leave these stubs here are reminder ..
     // - further, on expt it looks like the resolution on the event-stamp is NOT reliable for debounce .. as often the stamps seem to get
     // .. pushed out and bunched when PC busy (as if they were pulled from an events queue higher up in the stack later and only then get stamped)
-    pub fn debounced_kdn (&self, af:&AF, _:MouseEvent) { af() }
-    pub fn debounced_kup (&self, af:&AF, _:MouseEvent) { af() }
+    pub fn debounced_kdn (&self, af:&DBAF, ev:MouseEvent) { af(ev) }
+    pub fn debounced_kup (&self, af:&DBAF, ev:MouseEvent) { af(ev) }
 
 }
 
@@ -142,11 +146,10 @@ impl Mouse {
 
     pub fn capture_pre_drag_dat (&self, ks:&KrustyState) {
         let ks = ks.clone();
-        //thread::spawn ( move || {
-            *ks.mouse.pre_drag_dat.write().unwrap() = capture_pre_drag_dat(&ks);
-        //} );
+        //thread::spawn ( move || {     // .. nuh uh
         // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
-        // .. but also that doing so seems to allow 'slippage' between where moving pointer was clicked and pdd captured
+        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
+        *ks.mouse.pre_drag_dat.write().unwrap() = capture_pre_drag_dat(&ks);
     }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
@@ -176,15 +179,17 @@ impl Mouse {
 /// sets up mouse left btn for msotly pass-through eqv w tracking, but allowing caps-as-ctrl behavior for the mouse
 pub fn setup_mouse_left_btn_handling (k:&Krusty) {
     use crate::{MouseButton::*, MouseBtnEvent_T::*};
+
     let (ks, mbtn) = (k.ks.clone(), k.ks.mouse.lbtn.clone());
-    let af:AF = Arc::new ( move || handle_mouse_left_btn_down(&ks) );
-    let dbaf = Arc::new ( move |ev:MouseEvent| mbtn.debounced_kdn(&af, ev) );
+    let af:DBAF = Arc::new ( move |ev:MouseEvent| handle_mouse_left_btn_down(&ks,ev) );
+    let dbaf = Arc::new ( move |ev:MouseEvent| mbtn.debounced_kdn(&af,ev) );
     k.iproc.mouse_bindings .bind_btn_event ( LeftButton, BtnEventCb(BtnDown), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
         cb : MouseEvCbFn_QueuedCallback(dbaf),
     } );
+
     let (ks, mbtn) = (k.ks.clone(), k.ks.mouse.lbtn.clone());
-    let af:AF = Arc::new ( move || handle_mouse_left_btn_up(&ks) );
+    let af:DBAF = Arc::new ( move |ev:MouseEvent| handle_mouse_left_btn_up(&ks,ev) );
     let dbaf = Arc::new ( move |ev:MouseEvent| mbtn.debounced_kup(&af,ev) );
     k.iproc.mouse_bindings .bind_btn_event ( LeftButton, BtnEventCb(BtnUp), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
@@ -194,9 +199,10 @@ pub fn setup_mouse_left_btn_handling (k:&Krusty) {
     //  .. even when its not actually doing much (and otherwise couldve been allowed to pass through)
 }
 
-fn handle_mouse_left_btn_down (ks:&KrustyState) {
+fn handle_mouse_left_btn_down (ks:&KrustyState, ev:MouseEvent) {
     use ModeState_T::*;
     ks.mouse.lbtn.down.set();
+    update_stamp_mouse_dbl_click (ev.get_stamp(), &ks.mouse.lbtn.stamp, &ks.mouse.lbtn.dbl_tap);
     //ks.mouse.capture_pre_drag_dat();   // to avoid unnecessary processing, we'll only do this when win down
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.lbtn.btn);
     if ks.mod_keys.lwin.down.is_set() {
@@ -213,6 +219,8 @@ fn handle_mouse_left_btn_down (ks:&KrustyState) {
             } else if ks.mode_states.qks3.down.is_set() {
                 ks.win_groups.add_to_group ( qks3.try_into().unwrap(), win_get_hwnd_from_pointer() )
             }
+        } else if ks.mouse.lbtn.dbl_tap.is_set() {
+            win_toggle_maximize (ks.mouse.pre_drag_dat.read().unwrap().hwnd);
         }
     } else if ks.mod_keys.caps.down.is_set() {
         ks.in_managed_ctrl_down_state.set();
@@ -225,8 +233,8 @@ fn handle_mouse_left_btn_down (ks:&KrustyState) {
     }
 }
 
-fn handle_mouse_left_btn_up (ks:&KrustyState) {
-    ks.mouse.lbtn.down.clear(); ks.mouse.lbtn.consumed.clear();
+fn handle_mouse_left_btn_up (ks:&KrustyState, _ev:MouseEvent) {
+    ks.mouse.lbtn.down.clear(); ks.mouse.lbtn.consumed.clear(); ks.mouse.lbtn.dbl_tap.clear();
     ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.lbtn.btn);
 
     if ks.mouse.lbtn.active.is_clear(){
@@ -251,21 +259,24 @@ fn handle_mouse_left_btn_up (ks:&KrustyState) {
 // note that unlike other mouse btn/wheels, the right btn is set to passthrough!
 pub fn setup_mouse_right_btn_handling (k:&Krusty) {
     use crate::{MouseButton::*, MouseBtnEvent_T::*};
+
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_btn_event ( RightButton, BtnEventCb(BtnDown), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| handle_mouse_right_btn_down(&ks) ) )
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| handle_mouse_right_btn_down(&ks,ev) ) )
     } );
+
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_btn_event ( RightButton, BtnEventCb(BtnUp), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| handle_mouse_right_btn_up(&ks) ) )
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| handle_mouse_right_btn_up(&ks,ev) ) )
     } );
 }
 
-fn handle_mouse_right_btn_down (ks:&KrustyState) {
+fn handle_mouse_right_btn_down (ks:&KrustyState, ev:MouseEvent) {
     use ModeState_T::*;
     ks.mouse.rbtn.down.set();
+    update_stamp_mouse_dbl_click (ev.get_stamp(), &ks.mouse.rbtn.stamp, &ks.mouse.rbtn.dbl_tap);
     //ks.mouse.capture_pre_drag_dat(); // we dont enable drag/resize on right btn anymore
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.rbtn.btn);
     if ks.mod_keys.lwin.down.is_set() {
@@ -281,26 +292,27 @@ fn handle_mouse_right_btn_down (ks:&KrustyState) {
     }
 }
 
-fn handle_mouse_right_btn_up (ks:&KrustyState) {
-    ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.consumed.clear();
+fn handle_mouse_right_btn_up (ks:&KrustyState, _ev:MouseEvent) {
+    ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
     ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.rbtn.btn);
 
     if ks.in_right_btn_scroll_state.check() {
         ks.in_right_btn_scroll_state.clear();
-        handle_right_btn_scroll_end(ks);        // will send a rbtn release itself!
+        // Ctrl-F18 is the exit hotkey for switche if we were doing right-btn-scroll
+        ks.mod_keys.lctrl.active_on_key(Key::F18)();
+        mouse_rbtn_release_masked();
     } else  if ks.mouse.rbtn.active.is_clear() {
-        //set_cursor(IDC_ARROW);       // does not work on non-owned windows
+        // if it is inactive we didnt send a report out, so nothing to release
+    } else  if ks.mouse.rbtn.consumed.is_set() {
+        ks.mouse.rbtn.consumed.clear();
+        mouse_rbtn_release_masked();
     } else {
-        //if ks.mouse.rbtn.consumed.is_set() { /* masking doesnt really work for rbtn */ }
         ks.mouse.rbtn.active.clear();
         MouseButton::RightButton.release();
     }
 }
 
-fn handle_right_btn_scroll_end (ks:&KrustyState) {
-    // Ctrl-F18 is the exit hotkey for switche if we were doing right-btn-scroll
-    ks.mod_keys.lctrl.active_on_key(Key::F18)();
-
+fn mouse_rbtn_release_masked () {
     // now we have to release the rbtn, but to avoid triggering the context menu, we'll release it at corner of screen
     //MouseButton::RightButton.release_at (0xFFFF, 0xFFFF);
     // ^^ ugh this doesnt seem to actually do that .. so we'll manually move there, release, then restore
@@ -315,9 +327,9 @@ fn handle_right_btn_scroll_end (ks:&KrustyState) {
         thread::sleep(time::Duration::from_millis(50));
         // note that reducing this delay or even removing it will mostly work (as the event handling can happen before spawned thread comes up)..
         // .. however, for times when there's load etc and the event handling is also pushed out, we'll want at least some delay
+        win_set_thread_dpi_aware();
         MousePointer::move_abs (point.x, point.y);
     } );
-
 }
 
 
@@ -326,20 +338,22 @@ pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
     use crate::MouseBtnEvent_T::*;
     // note that we cant make X1/X2 btns act truly like mbtn as they dont seem to send dn/up events on press/rel ..
     // .. instead they send nothing on btn-dn and send dn/up at btn-rel .. (or nothing if held too long!)
-    let ks = k.ks.clone();
+    let ks = k.ks.clone(); let mbsc = mbs.clone();
     k.iproc.mouse_bindings .bind_btn_event ( mbs.btn, BtnEventCb(BtnDown), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| { handle_mouse_middle_btn_down(&ks) } ) ),
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| { handle_mouse_middle_btn_down(&ks,ev,&mbsc) } ) ),
     } );
-    let ks = k.ks.clone();
+    let ks = k.ks.clone(); let mbsc = mbs.clone();
     k.iproc.mouse_bindings .bind_btn_event ( mbs.btn, BtnEventCb(BtnUp), MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |_| { handle_mouse_middle_btn_up(&ks) } ) )
+        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| { handle_mouse_middle_btn_up(&ks,ev,&mbsc) } ) )
     } );
 
 }
 
-fn handle_mouse_middle_btn_down (ks:&KrustyState) {
+fn handle_mouse_middle_btn_down (ks:&KrustyState, ev:MouseEvent, mbs:&MouseBtnState) {
+    mbs.down.set();
+    update_stamp_mouse_dbl_click (ev.get_stamp(), &mbs.stamp, &mbs.dbl_tap);
     if ks.mod_keys.lshift.down.is_set() {
         // lshift-mbtn to go backwards in IDE cursor location
         ks.ag (Key::ExtLeft ) .m(ModKey::alt) .gen_af()();
@@ -355,7 +369,8 @@ fn handle_mouse_middle_btn_down (ks:&KrustyState) {
         MouseButton::MiddleButton.press();
     }
 }
-fn handle_mouse_middle_btn_up (ks:&KrustyState) {
+fn handle_mouse_middle_btn_up (ks:&KrustyState, _ev:MouseEvent, mbs:&MouseBtnState) {
+    mbs.down.clear(); mbs.consumed.clear(); mbs.dbl_tap.clear();
     if ks.mouse.mbtn.active.is_set() {
         ks.mouse.mbtn.active.clear();
         MouseButton::MiddleButton.release();
@@ -402,6 +417,7 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     if ksr.mouse.rbtn.down.check() {
         // right-mouse-btn-wheel support for switche task switching
         ksr.in_right_btn_scroll_state.set();
+        ksr.mouse.rbtn.consumed.set();
         let key = if incr.is_positive() { Key::F17 } else { Key::F16 };
         //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
         //ksr.mod_keys.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll

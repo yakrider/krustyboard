@@ -21,12 +21,14 @@ use crate::{*, ModKey::*};
 # [ allow (non_camel_case_types) ]
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
 pub enum ModKey {
-    no_mk, caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift, alt, win, ctrl, shift
-    // ^^ the last four (Alt/Win/Ctrl/Shfit) are intended to imply either of the L/R versions
+    no_mk,
+    caps,     lalt,     ralt,     lwin,     rwin,     lctrl,     rctrl,     lshift,     rshift,
+    caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl,
+    alt, win, ctrl, shift,
+    // ^^ the last four (alt/win/ctrl/shift) are intended to imply either of the L/R versions
     // .. and those are only for use during combo specification for l/r/lr expansion .. they dont exist in combo-bitmaps
-    // note that no_mk can be useful to fill in fn defs set to take somethhing .. its ignored at its not in bitmaps
+    // note that no_mk can be useful to fill in fn defs set to take somethhing .. its ignored as its not in bitmaps
 }
-
 
 
 
@@ -35,9 +37,11 @@ pub enum ModKey {
 # [ derive (Debug) ]
 pub struct _CapsModKey {
     // we've defined this just to be consistent with other mod-keys, but its really just a wrapper for caps key!
-    _private : (),
-    pub key  : Key,
-    pub down : Flag,
+    _private    : (),
+    pub key     : Key,
+    pub down    : Flag,
+    pub stamp   : EventStamp,
+    pub dbl_tap : Flag,
 }
 
 /// Arc-wrapped CapsModKey for cheap passing between threads etc
@@ -59,9 +63,11 @@ impl Deref for CapsModKey {
 pub struct _TrackedModKey {
     // we'll use this for modifier keys that we want to simply track down state, w/o attempting to track or sync their external active states
     // again, motivation for making this separate is to share fumctionality implementations
-    _private : (),
-    pub key  : Key,
-    pub down : Flag,
+    _private    : (),
+    pub key     : Key,
+    pub down    : Flag,
+    pub stamp   : EventStamp,
+    pub dbl_tap : Flag,
 }
 
 /// Arc wraps TrackedModKey functionality for easier cloning/sharing
@@ -90,6 +96,8 @@ pub struct _SyncdModKey {
     pub down     : Flag,
     pub active   : Flag,
     pub consumed : Flag,
+    pub stamp    : EventStamp,
+    pub dbl_tap  : Flag,
 
     pub pair     : Arc <RwLock <Option <SyncdModKey>>>, // backlink to populate to the left/right counterpart if desired
     // ^^ not the most ideal to have these cyclic backlinks, but we'll populate it at krusty creation time, so is reliable anyway
@@ -123,8 +131,6 @@ pub struct _ModKeys {
     // except r-alt which we track, but dont try to keep synced w external state .. (as we completely disable it every going out!)
     // (previously, there used to be ctrl/shift here that were pass through tracked like ralt, but they got upgraded to full SMK treatment!)
 
-    // note also that we're not tracking rwin that some machines (not mine) have .. could easily add that later if need be
-
     _private   : (),
     // capslock tracking
     pub caps   : CapsModKey,
@@ -133,6 +139,7 @@ pub struct _ModKeys {
     // the rest are synced mode keys (rwin not added so far as its not in my machine)
     pub lalt   : SyncdModKey,
     pub lwin   : SyncdModKey,
+    pub rwin   : SyncdModKey,
     pub lctrl  : SyncdModKey,
     pub rctrl  : SyncdModKey,
     pub lshift : SyncdModKey,
@@ -166,6 +173,7 @@ impl ModKeys {
             // the rest are SMKs (synced mod keys) .. (rwin excluded for now since I dont have it in this machine to test with)
             lalt   : SyncdModKey::new(Key::LAlt),
             lwin   : SyncdModKey::new(Key::LWin),
+            rwin   : SyncdModKey::new(Key::RWin),
             lctrl  : SyncdModKey::new(Key::LCtrl),
             rctrl  : SyncdModKey::new(Key::RCtrl),
             lshift : SyncdModKey::new(Key::LShift),
@@ -177,6 +185,8 @@ impl ModKeys {
         mks.rctrl  .link_pair (&mks.lctrl);
         mks.lshift .link_pair (&mks.rshift);
         mks.rshift .link_pair (&mks.lshift);
+        mks.lwin   .link_pair (&mks.rwin);
+        mks.rwin   .link_pair (&mks.lwin);
         // note ofc that ralt is set to silent so it wont link w lalt, and we've not impld rwin yet as its not on my keyboards
 
         ModKeys ( Arc::new ( mks ) )
@@ -186,9 +196,10 @@ impl ModKeys {
     pub fn static_combo_bits_mod_keys() -> [ModKey; size_of::<ComboStatesBits_ModKeys>()] {
         // Note that there are bits in combo-bitmap only for physical keys
         // (i.e. it excludes the virtual l/r agnostic enum-vals used during combo construction)
-        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; size_of::<ComboStatesBits_ModKeys>()] = {
-            [caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift]
-        };
+        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; size_of::<ComboStatesBits_ModKeys>()] = { [
+            caps,     lalt,     ralt,     lwin,     rwin,     lctrl,     rctrl,     lshift,     rshift,
+            caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl,
+        ] };
         COMBO_STATE_BITS_MOD_KEYS
     }
 
@@ -205,13 +216,19 @@ impl ModKeys {
         ];
         LR_MODS_TRIPLETS
     }
+    pub fn static_dbl_tap_mk_pairs () -> [(ModKey,ModKey);9] {
+        let mks = ModKeys::static_combo_bits_mod_keys();
+        mks[0..9] .iter().copied() .zip (mks[9..18].iter().copied()) .collect::<Vec<(ModKey,ModKey)>>() .try_into().unwrap()
+    }
+
 
     /// this will give the SMKs in order defined at the static LR_MODS_TRIPLETS so they can be matched up at runtime
     pub fn lrmk_smks (&self) -> [&SyncdModKey;4] {
         [&self.lctrl, &self.lshift, &self.lalt, &self.lwin]
     }
-    pub fn mod_smk_pairs (&self) -> [(ModKey, &SyncdModKey);6] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
-        (lwin,   &self.lwin  ), (lalt,   &self.lalt  ),
+    pub fn mod_smk_pairs (&self) -> [(ModKey, &SyncdModKey);7] { [ // note that ralt is TMK not SMK (and doesnt to activate/inactivate etc)
+        (lalt,   &self.lalt  ),
+        (lwin,   &self.lwin  ), (rwin,   &self.rwin  ),
         (lctrl,  &self.lctrl ), (rctrl,  &self.rctrl ),
         (lshift, &self.lshift), (rshift, &self.rshift),
     ] }
@@ -220,11 +237,21 @@ impl ModKeys {
         (lalt,   Some(&self.lalt.down)),
         (ralt,   Some(&self.ralt.down)),
         (lwin,   Some(&self.lwin.down)),
-        (rwin,   None),
+        (rwin,   Some(&self.rwin.down)),
         (lctrl,  Some(&self.lctrl.down)),
         (rctrl,  Some(&self.rctrl.down)),
         (lshift, Some(&self.lshift.down)),
         (rshift, Some(&self.rshift.down)),
+        //
+        (caps_dbl,   Some(&self.caps.dbl_tap)),
+        (lalt_dbl,   Some(&self.lalt.dbl_tap)),
+        (ralt_dbl,   Some(&self.ralt.dbl_tap)),
+        (lwin_dbl,   Some(&self.lwin.dbl_tap)),
+        (rwin_dbl,   Some(&self.rwin.dbl_tap)),
+        (lctrl_dbl,  Some(&self.lctrl.dbl_tap)),
+        (rctrl_dbl,  Some(&self.rctrl.dbl_tap)),
+        (lshift_dbl, Some(&self.lshift.dbl_tap)),
+        (rshift_dbl, Some(&self.rshift.dbl_tap)),
         // ^^ note again, that for the combo bitmap construction, the l/r agnostic keys should have been expanded out and eliminated
     ] }
 
@@ -241,12 +268,12 @@ impl ModKeys {
 
     pub fn some_shift_down (&self) -> bool { self.lshift.down.check() || self.rshift.down.check() }
     pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.check()  || self.rctrl.down.check() }
-    pub fn some_alt_down   (&self) -> bool { self.lalt.down.check() } // ralt is disabled for all purposes
-    pub fn some_win_down   (&self) -> bool { self.lwin.down.check() } // we've not impld rwin so far
+    pub fn some_alt_down   (&self) -> bool { self.lalt.down.check() } // ralt is disabled as an Alt key
+    pub fn some_win_down   (&self) -> bool { self.lwin.down.check()  || self.rctrl.down.check() }
 
     pub fn unstick_all (&self) {
-        [   &self.lalt, &self.lwin, &self.lctrl,
-            &self.rctrl, &self.lshift, &self.rshift
+        [   &self.lalt, &self.lwin, &self.rwin,
+            &self.lctrl, &self.rctrl, &self.lshift, &self.rshift
         ] .into_iter() .for_each (|smk| {
             smk.key.release(); smk.down.clear(); smk.active.clear();
         });
@@ -264,7 +291,7 @@ impl ModKeys {
     }
 
     pub fn proc_notice__mouse_btn_down (&self, _mbtn:MouseButton) {
-        self.lwin.consumed.set();  // doesnt matter, we can set it for any mouse btn
+        self.lwin.consumed.set();  // its just a consumed flag, doesnt matter, we can set it for any mouse btn
     }
     pub fn proc_notice__mouse_btn_up (&self, _mbtn:MouseButton) {
         // nothing to do for btn-up
@@ -281,9 +308,9 @@ impl ModKeys {
         self.ralt .setup_tracking (k, true);      // for ralt can setup w doBlock=true
 
         // lalt and lwin are set as syncd-tracked-modifier-key with special (but identical) impl .. more details under SyncdModKey impl
-        // (we're not doing rwin simply coz its not in my machine .. and ofc ralt is used in fully disabled mode above)
         self.lalt.setup_tracking (k);
         self.lwin.setup_tracking (k);
+        self.rwin.setup_tracking (k);
 
         // and we also updated both L/R of both shift and ctrl to do identical full-synced-tracked management like for lalt/lwin
         self.lctrl.setup_tracking (k);
@@ -312,15 +339,19 @@ impl CapsModKey {
                 _private : (),
                 key      : Key::CapsLock,
                 down     : Flag::default(),
+                stamp    : EventStamp::default(),
+                dbl_tap  : Flag::default(),
             } ) )
         ) .clone()
     }
 
-    fn handle_key_down (&self, ks:&KrustyState) {
+    fn handle_key_down (&self, ks:&KrustyState, ev:&KbdEvent) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
-        if !ks.mod_keys.caps.down.check() {
+        if !self.down.check() {
             // capslock can come as repeats like other mod keys .. this was a fresh one
             self.down.set();
+            update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+
             // lets notify the synced tracked mod keys, so they can invalidate/release themselves
             ks.mod_keys.proc_notice__caps_down();
             ks.mouse.proc_notice__modkey_down (None, &ks);
@@ -332,8 +363,9 @@ impl CapsModKey {
         }
     }
 
-    fn handle_key_up (&self, ks:&KrustyState) {
-        ks.mod_keys.caps.down.clear();
+    fn handle_key_up (&self, ks:&KrustyState, _ev:&KbdEvent) {
+        self.down.clear();
+        self.dbl_tap.clear();
         ks.mouse.proc_notice__modkey_up(None, &ks);
         if ks.in_managed_ctrl_down_state.is_set() {
             ks.in_managed_ctrl_down_state.clear();
@@ -358,11 +390,11 @@ impl CapsModKey {
 
         let ks = k.ks.clone();
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_down(&ks); event_proc_d } ) );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks,&ev); event_proc_d } ) );
         k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
 
         let ks = k.ks.clone();
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| { ks.mod_keys.caps.handle_key_up(&ks); event_proc_d } ) );
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks,&ev); event_proc_d } ) );
         k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
     }
 
@@ -381,8 +413,10 @@ impl TrackedModKey {
     pub fn new (tm_key: Key) -> TrackedModKey {
         TrackedModKey ( Arc::new ( _TrackedModKey {
             _private : (),
-            key  : tm_key,
-            down : Flag::default(),
+            key      : tm_key,
+            down     : Flag::default(),
+            stamp    : EventStamp::default(),
+            dbl_tap  : Flag::default(),
         } ) )
     }
 
@@ -398,16 +432,22 @@ impl TrackedModKey {
         let epds_checked     = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Disable);
 
         let (event_proc_d, cb) = if do_block {
-            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| {
-                if !e.injected { tmk.down.set() }
+            let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| {
+                if !ev.injected {
+                    tmk.down.set();
+                    update_stamp_key_dbl_tap (ev.stamp, &tmk.stamp, &tmk.dbl_tap);
+                }
                 epds_blocked
             } ) );
             (epds_blocked, cb)
         } else {
-            let cb = KbdEvCbFn_InlineCallback ( Arc::new (move |e| {
+            let cb = KbdEvCbFn_InlineCallback ( Arc::new (move |ev| {
                 if tmk.down.check() { epds_blocked }
                 else {
-                    if !e.injected { tmk.down.set() }
+                    if !ev.injected {
+                        tmk.down.set();
+                        update_stamp_key_dbl_tap (ev.stamp, &tmk.stamp, &tmk.dbl_tap);
+                    }
                     epds_passthrough
                 }
             } ) );
@@ -418,8 +458,8 @@ impl TrackedModKey {
         // for key-ups, we simply update flag (and let them go through if not blocked)
         let tmk = self.clone();
         let event_proc_d = if do_block { epds_blocked } else { epds_passthrough };
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |e| {
-            if !e.injected { tmk.down.clear() }
+        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| {
+            if !ev.injected {  tmk.down.clear(); tmk.dbl_tap.clear(); }
             event_proc_d
         } ) );
         k.iproc.kbd_bindings .bind_kbd_event ( self.key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
@@ -444,6 +484,8 @@ impl SyncdModKey {
             down     : Flag::default(),
             active   : Flag::default(),
             consumed : Flag::default(),
+            stamp    : EventStamp::default(),
+            dbl_tap  : Flag::default(),
             pair     : Arc::new(RwLock::new(None)),
         } ) )
     }
@@ -467,18 +509,24 @@ impl SyncdModKey {
     //  .. as well as restoring them when either caps/alt gets released etc
     // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
-    pub fn handle_key_down (&self, ks:&KrustyState, e:KbdEvent) {
+    pub fn handle_key_down (&self, ks:&KrustyState, ev:KbdEvent) {
         if ks.mod_keys.caps.down.check() {
             // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
             self.consumed.clear();
             if !self.down.check() { ks.mouse.proc_notice__modkey_down (Some(&self), &ks) }
-            if !e.injected { self.down.set() }
+            if !ev.injected {
+                self.down.set();
+                update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+            }
         } else {
             if self.down.check() {
                 // caps isnt down, but we were, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
             } else {
                 // caps isnt down, and alt wasnt down, so record states and let it through
-                if !e.injected { self.down.set() }
+                if !ev.injected {
+                    self.down.set();
+                    update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+                }
                 self.active.set();
                 self.consumed.clear();
                 ks.mouse.proc_notice__modkey_down (Some(&self), &ks);
@@ -489,11 +537,11 @@ impl SyncdModKey {
         if ks.mouse.lbtn.down.check() || ks.mouse.rbtn.down.check() { self.consumed.set() }
     }
 
-    fn handle_key_up (&self, ks:&KrustyState, e:KbdEvent) {
+    fn handle_key_up (&self, ks:&KrustyState, ev:KbdEvent) {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        if !e.injected { self.down.clear() }
+        if !ev.injected {  self.down.clear(); self.dbl_tap.clear(); }
         ks.mouse.proc_notice__modkey_up (Some(&self), &ks);
         if self.key == Key::LCtrl || self.key == Key::RCtrl { ks.in_ctrl_tab_scroll_state.clear() }
         if !self.active.check() || ks.mod_keys.caps.down.check() {

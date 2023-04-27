@@ -43,6 +43,7 @@ pub struct KbdEvent {
     pub key      : KbdKey,
     pub vk_code  : u32,
     pub sc_code  : u32,
+    pub stamp    : u32,
     pub injected : bool,
 }
 

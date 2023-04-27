@@ -1,7 +1,6 @@
 #![ allow (non_camel_case_types) ]
 
 use std::collections::{HashMap, HashSet};
-use std::borrow::Borrow;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
@@ -12,10 +11,12 @@ use crate::{*, key_utils::*, ModeState_T::*};
 
 
 
-pub type ComboStatesBits_ModKeys = [bool; 9];
+pub type ComboStatesBits_ModKeys = [bool; 18];
 pub type ComboStatesBits_Modes   = [bool; 8];
 pub type ComboStatesBits_Flags   = [bool; 3];
-// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), 4+4=8 modes (sel/del/word/fast, qks/qks1/qks2/qks3), 3 flags (mngd-ctrl-dn/ctrl-tab-scrl/rght-ms-scrl)
+// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
+// 4+4=8 modes ( sel / del / word / fast,  qks / qks1 / qks2 / qks3),
+// 3 flags ( mngd-ctrl-dn / ctrl-tab-scrl / rght-ms-scrl ) ..
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
 
 
@@ -179,8 +180,13 @@ impl Combo {
         if let Some(ms_t) = ks.mode_states.get_mode_t(key) {
             if !modes.contains(&ms_t) { modes.push(ms_t) }
         }
+        // we'll also add mod-keys to their double-tap combos too (our dbl-tap combos only fire while the second tap isnt released yet)
+        let mut mksc = mks.clone();
+        let dt_pairs = ModKeys::static_dbl_tap_mk_pairs();
+        dt_pairs .iter() .filter (|(mk,dmk)| mks.contains(dmk) && !mks.contains(mk)) .for_each (|(mk,_dmk)| mksc.push(*mk));
+
         // we want to expand the combos for any L/R agnostic mod-keys specified
-        Combo::fan_lr(mks.clone()) .iter() .map(|mv| {Combo::new (key, mv, modes.borrow())}) .collect::<Vec<Combo>>()
+        Combo::fan_lr(mksc) .iter() .map(|mv| {Combo::new (key, mv, &modes)}) .collect::<Vec<Combo>>()
     }
 
     fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState) -> AF {
@@ -379,9 +385,13 @@ impl CombosMap {
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
         if let Some(cmaf) = self.combos_map.read().unwrap() .get(&Combo::gen_cur_combo(key, &ks)) {
             cmaf()  // found a combo matched action .. we're done!
+        } else if ks.mod_keys.caps.dbl_tap.check() {     //println!("{:?}",("dbl-caps!"));
+            // no fallback for double-tap combos that arent explicitly registered
         } else if ks.mod_keys.caps.down.check() {
             // unregistered caps-combos have extensive fallback setups
             self.handle_caps_combo_fallback (key, ks);
+        } else if ks.mod_keys.ralt.dbl_tap.check() {
+            // no fallback for double-tap combos that arent explicitly registered
         } else if ks.mod_keys.ralt.down.check() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
             shift_press_release(key)

@@ -190,8 +190,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         _               => None,
     } {
         let key = KbdKey::from(u64::from(kb_struct.vkCode));
+        let stamp = kb_struct.time;
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
-        let event = KbdEvent { ev_t, key, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32, injected };
+        let event = KbdEvent { ev_t, key, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32, stamp, injected };
 
         // first route it through any per-key registered callbacks
         if let Some(cbe) = iproc.kbd_bindings .read().unwrap() .get (&KbdEventCbMapKey::from_event(&event)) .as_ref() {

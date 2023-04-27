@@ -1,6 +1,10 @@
+#![ allow (non_upper_case_globals) ]
 
 
 use std::{ time, thread, sync::Arc, };
+use std::collections::HashSet;
+use std::sync::RwLock;
+use once_cell::sync::Lazy;
 
 use crate::{*, KbdKey::*, key_utils::*, ModKey::*, ModeState_T::*};
 
@@ -169,6 +173,23 @@ pub fn setup_krusty_board () {
 
     // e in caret mode, so we'll put our left-handed-enter on alt-e instead .. (note that there are also caps-space-* combos for *-enter)
     k.cm .add_combo ( k.ks.cg(E).m(lalt),  k.ks.ag(Enter) );      // alt-e -> enter
+
+
+
+
+
+    // we'll setup some keys on caps double tap first, esp those that modify global-ish behavior
+    //
+    // dbl-caps T to toggle capslock
+    k.cm .add_combo    ( k.ks.cg(T).m(caps_dbl),   k.ks.ag(CapsLock) );
+    //
+    // dbl-caps (End / R) will be set to reset for now, can settle on one later
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(End).m(caps_dbl),  k.ks.ag_af ( Arc::new (move || ks.unstick_all()) ) );
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(R  ).m(caps_dbl),  k.ks.ag_af ( Arc::new (move || ks.unstick_all()) ) );
+    //
+    // could prob add something to quit too
 
 
 
@@ -520,6 +541,10 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(LBracket).m(caps).s(sel),  k.ks.ag(LBracket).m(alt).m(shift) );
     k.cm .add_combo ( k.ks.cg(RBracket).m(caps).s(sel),  k.ks.ag(RBracket).m(alt).m(shift) );
 
+    // also lets add an even quicker way to switche column mode during IDE edit (using the cur alt-shift-c)
+    k.cm .add_combo ( k.ks.cg(Numrow_8).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+
 
 
 
@@ -622,12 +647,11 @@ pub fn setup_krusty_board () {
 
 
     // this one is a hack around intellij not giving a shortcut action to hide floating tool windows
-    fn ide_float_tools_clear (ks:&KrustyState) {
+    fn _ide_float_tools_clear (ks:&KrustyState) {
         let ks = ks.clone();
         thread::spawn ( move || {  //println!("---");
             let mut n_trials = 10;  // how many times do we want to keep finding and escaping matching windows
             while {
-                //let hwnd = FindWindowW (&HSTRING::from("SunAwtDialog"), PCWSTR::null());
                 let hwnd = win_find_by_win_class ("SunAwtDialog");
                 // ^^ Note that if the found window does not close on escape, that same fgnd window might keep being retried ignoring others
                 if hwnd.0 != 0 {
@@ -640,6 +664,7 @@ pub fn setup_krusty_board () {
                     } { }
                     ks.mod_keys.lalt.inactive_action(base_action(Escape))();
                     ks.mod_keys.lalt.inactive_action(shift_action(Escape))();
+                    // ^^ ugh turns out theres a bug in IntelliJ where if the tool window has a 'split' it doesnt close by Esc .. wth!
                     thread::sleep(time::Duration::from_millis(50));
                 }
                 n_trials -= 1;
@@ -647,8 +672,24 @@ pub fn setup_krusty_board () {
             } { }
         } );
     }
-    let ks = k.ks.clone();
-    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear(&ks))) );
+    fn ide_float_tools_clear (do_restore:bool) {
+        static hidden_hwnds : Lazy <Arc <RwLock <HashSet <Hwnd>>>> = Lazy::new (|| Arc::new (RwLock::new (HashSet::new())));
+        thread::spawn ( move || {
+            if do_restore {
+                let hwnds = hidden_hwnds.read().unwrap().iter().copied().collect::<Vec<Hwnd>>();
+                hwnds .iter() .for_each (|&hwnd| {
+                    if win_check_hwnd(hwnd) { win_activate(hwnd); }
+                    else { hidden_hwnds.write().unwrap().remove(&hwnd); }
+                });
+            } else {
+                win_get_ide_dialog_hwnds() .into_iter() .for_each (|hwnd| {
+                    win_hide(hwnd);
+                    hidden_hwnds.write().unwrap().insert(hwnd);
+                } );
+        } } );
+    }
+    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear(false))) );
+    k.cm .add_combo_af ( k.ks.cg(Numrow_9).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear(true))) );
 
 
 

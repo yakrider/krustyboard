@@ -26,7 +26,6 @@ pub type Key = KbdKey ;
 
 
 
-
 # [ derive (Debug, Default, Clone) ]
 /// representation for all our flags for states mod-states, modifier-keys, mouse-btn-state etc
 pub struct Flag (Arc<AtomicBool>);
@@ -73,13 +72,30 @@ impl EventStamp {
     pub fn new() -> EventStamp {
         EventStamp ( Arc::new ( RwLock::new(0) ) )
     }
-    pub fn default() -> EventStamp {
-        EventStamp::new()
-    }
+    pub fn default() -> EventStamp { EventStamp::new() }
     pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
     pub fn get (&self) -> u32 { *self.0.read().unwrap() }
 }
 
+
+
+pub const KEY_DOUBLE_TAP_MS  : u32 = 400;
+pub const MBTN_DOUBLE_TAP_MS : u32 = 500;
+
+pub fn update_stamp_key_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
+    update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS)
+}
+pub fn update_stamp_mouse_dbl_click (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
+    update_stamp_dbl_tap (ev_t, stamp, dbl_flag, MBTN_DOUBLE_TAP_MS)
+}
+fn update_stamp_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag, thresh_ms:u32) -> bool {
+    let dt = ev_t - stamp.get();
+    stamp.set(ev_t);
+    let is_double_tap = dt < thresh_ms && dt > 50;  // we'll put a small mandatory gap for debounce
+    dbl_flag .store (is_double_tap);
+    //if is_double_tap { std::thread::spawn (move || println!("{:?}",("dbl-tap",dt))); }
+    is_double_tap
+}
 
 
 
@@ -87,22 +103,22 @@ impl EventStamp {
 /// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
 pub struct _KrustyState {
     // having this disallows direct instantiation
-    _private : (),
+    _private: (),
 
     // used for toggling key processing .. should only listen to turn-back-on combo
     pub in_disabled_state: Flag,
 
     // mod-keys .. manages the modifier-keys, their flags, and their action-wrapping
-    pub mod_keys : ModKeys,
+    pub mod_keys: ModKeys,
 
     // mode states .. manages the flagged caps-mode states, their trigger keys etc
-    pub mode_states : ModeStates,
+    pub mode_states: ModeStates,
 
     // mouse .. manages the mouse btns, wheels, wheel-spin invalidations etc
-    pub mouse : Mouse,
+    pub mouse: Mouse,
 
     // win-groups .. maanges the three supported window-grouping functionalty
-    pub win_groups : WinGroups,
+    pub win_groups: WinGroups,
 
     // for caps-ctrl eqv for caps-tab, caps-wheel, ctrl-move etc, we'll send ctrl press/rel at the right times, and will need to track that
     pub in_managed_ctrl_down_state: Flag,
@@ -167,6 +183,7 @@ impl KrustyState {
     }
 
     pub fn unstick_all (&self) {
+        println! ("WARNING: Attempting to UNSTICK_ALL !!");
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
 

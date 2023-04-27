@@ -3,7 +3,9 @@
 use std::ffi::c_void;
 use std::mem;
 use std::mem::size_of;
-#[allow(unused_imports)]
+
+use std::sync::{Arc, Mutex, RwLock};
+use once_cell::sync::Lazy;
 
 use windows::core::{PSTR, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle};
@@ -62,6 +64,9 @@ pub fn check_window_has_owner (hwnd:Hwnd) -> bool { unsafe {
     GetAncestor (hwnd, GA_ROOTOWNER).0 != hwnd.0
 } }
 
+pub fn win_check_hwnd (hwnd:Hwnd) -> bool { unsafe {
+    IsWindow (hwnd).as_bool()
+} }
 
 
 pub fn win_get_fgnd () -> Hwnd { unsafe {
@@ -112,9 +117,9 @@ pub fn win_get_work_area () -> RECT { unsafe {
 
 
 pub fn win_activate (hwnd:Hwnd) { unsafe {     //println!("winapi activate {:?}",hwnd);
-    let mut win_state =  WINDOWPLACEMENT::default();
     //ShowWindowAsync (hwnd, SW_NORMAL);
     // ^^ this will cause minimized/maximized windows to be restored
+    let mut win_state =  WINDOWPLACEMENT::default();
     GetWindowPlacement (hwnd, &mut win_state);
     if win_state.showCmd == SW_SHOWMINIMIZED {
         ShowWindowAsync (hwnd, SW_RESTORE);
@@ -131,18 +136,30 @@ pub fn win_send_to_back (hwnd:Hwnd) { unsafe {     //println!("winapi send to ba
 pub fn win_hide (hwnd:Hwnd) { unsafe {      //println!("winapi hide {:?}",hwnd);
     ShowWindow (hwnd, SW_HIDE);
 } }
+pub fn win_close (hwnd:Hwnd) { unsafe {     //println!("winapi close {:?}",hwnd);
+    //CloseWindow(hwnd);
+    // note ^^ that the u32 'CloseWindow' cmd actually minimizes it, to close, send it a WM_CLOSE msg
+    PostMessageA (hwnd, WM_CLOSE, WPARAM::default(), LPARAM::default());
+} }
 pub fn win_minimize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MINIMIZE);
 } }
 pub fn win_maximize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MAXIMIZE);
 } }
+pub fn win_toggle_maximize (hwnd:Hwnd) { unsafe {
+    let mut win_state =  WINDOWPLACEMENT::default();
+    GetWindowPlacement (hwnd, &mut win_state);
+    if win_state.showCmd == SW_SHOWMAXIMIZED {
+        ShowWindowAsync (hwnd, SW_RESTORE);
+    } else if win_state.showCmd == SW_SHOWMINIMIZED {
+        ShowWindowAsync (hwnd, SW_RESTORE);
+    } else {
+        ShowWindowAsync (hwnd, SW_SHOWMAXIMIZED);
+    }
 
-pub fn win_close (hwnd:Hwnd) { unsafe {     //println!("winapi close {:?}",hwnd);
-    //CloseWindow(hwnd);
-    // note ^^ that the u32 'CloseWindow' cmd actually minimizes it, to close, send it a WM_CLOSE msg
-    PostMessageA (hwnd, WM_CLOSE, WPARAM::default(), LPARAM::default());
 } }
+
 
 
 pub fn set_cursor (cursor_style:PCWSTR) { unsafe {
@@ -160,6 +177,7 @@ pub fn win_move_to (hwnd:Hwnd, x:i32, y:i32, width:i32, height:i32) { unsafe {
 pub fn win_find_by_win_class (cls:&str) -> Hwnd { unsafe {
    FindWindowW (&HSTRING::from(cls), PCWSTR::null()) .into()
 } }
+
 
 
 pub fn win_fgnd_stretch (dx:i32, dy:i32) { unsafe {
@@ -213,36 +231,11 @@ pub fn win_fgnd_toggle_vertmax () { unsafe {
 } }
 
 
-
 pub fn win_fgnd_toggle_max () {
-    // should in theory work by sending doubleclick at window titlebar (which works manually)
-    //PostMessageW (GetForegroundWindow(), WM_NCLBUTTONDBLCLK, WPARAM(HTCAPTION as _), LPARAM(0));
-    // ^^ except, for win32 windows, it works to max, but when already max it CLOSES them (coz it sends it at left-top icon?)
-    //PostMessageW (GetForegroundWindow(), WM_NCLBUTTONUP, WPARAM(HTMAXBUTTON as _), LPARAM(0));
-    // ^^ doesnt work
-    //PostMessageW (GetForegroundWindow(), WM_SYSCOMMAND, WPARAM(SC_MAXIMIZE as _), LPARAM(0));
-    // ^^ only maximizes not toggle, and no easy way to know if its maxed other than guessing from dimensions
-    win_fgnd_toggle_max_guess();
-    // ^^ so we'll finally just do it based on window rect dimensions .. should work for vast majority cases
+    win_toggle_maximize (win_get_fgnd())
 }
 
-fn win_fgnd_toggle_max_guess () { unsafe {
-    let (scr_w, scr_h) = win_get_screen_metrics();
-    let (hwnd, r) = win_get_fgnd_rect();
-    // complication here is where and how thick the taskbar might me ..
-    // we'll try and get at guesswork by requiring at least two sides and either width/height to be maxed?
-    if ( r.left <= 0 && r.top <= 0 && (r.right >= scr_w || r.bottom >= scr_h) ) ||
-        // ^^ covers taskbar in bottom or right
-        ( r.right >= scr_w && r.bottom >= scr_h && (r.left <= 0 || r.top <= 0) )
-        // ^^ covers taskbar in left or top
-    {
-        PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_RESTORE as _), LPARAM(0));
-    } else {
-        PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MAXIMIZE as _), LPARAM(0));
-    }
-} }
-
-pub fn win_get_screen_metrics () -> (i32, i32) { unsafe {
+pub fn _win_get_screen_metrics () -> (i32, i32) { unsafe {
     (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
 } }
 
@@ -261,16 +254,23 @@ pub fn get_fgnd_win_title () -> String { unsafe {
     String::from_utf16_lossy (&lpstr[..(copied_len as _)])
 } }
 
+
 pub fn get_fgnd_win_class () -> String { unsafe {
+    get_win_class_by_hwnd (GetForegroundWindow().into())
+} }
+pub fn get_win_class_by_hwnd (hwnd:Hwnd) -> String { unsafe {
     let mut lpstr: [u16; 120] = [0; 120];
-    let len = GetClassNameW (GetForegroundWindow(), &mut lpstr);
+    let len = GetClassNameW (hwnd, &mut lpstr);
     String::from_utf16_lossy(&lpstr[..(len as _)])
 } }
 
 
 pub fn get_fgnd_win_exe () -> Option<String> { unsafe {
+    get_exe_by_hwnd (GetForegroundWindow().into())
+} }
+pub fn get_exe_by_hwnd (hwnd:Hwnd) -> Option<String> { unsafe {
     let mut pid = 0u32;
-    let _ = GetWindowThreadProcessId (GetForegroundWindow(), Some(&mut pid));
+    let _ = GetWindowThreadProcessId (hwnd, Some(&mut pid));
     let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid);
     let mut lpstr: [u8; 256] = [0; 256];
     let mut lpdwsize = 256u32;
@@ -286,6 +286,73 @@ pub fn mic_mute_toggle () { unsafe {
     // note that the 'mute' appcommands actually do toggle, both for mic and volume
     PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MICROPHONE_VOLUME_MUTE.0 << 16) as _));
 } }
+
+
+
+
+
+
+
+
+// we'll use a static rwlocked vec to store enum-windows from callbacks, and a mutex to ensure only one enum-windows call is active
+#[allow(non_upper_case_globals)]
+static enum_hwnds_lock : Lazy <Arc <Mutex <()>>> = Lazy::new (|| Arc::new ( Mutex::new(())));
+#[allow(non_upper_case_globals)]
+static enum_hwnds : Lazy <Arc <RwLock <Vec <Hwnd>>>> = Lazy::new (|| Arc::new ( RwLock::new (vec!()) ) );
+
+
+
+type WinEnumCb = unsafe extern "system" fn (HWND, LPARAM) -> BOOL;
+
+fn win_get_hwnds_w_filt (filt_fn: WinEnumCb) -> Vec<Hwnd> { unsafe {
+    let lock = enum_hwnds_lock.lock().unwrap();
+    *enum_hwnds.write().unwrap() = Vec::with_capacity(50);   // setting up some excess capacity to reduce reallocations
+    let _ = EnumWindows ( Some(filt_fn), LPARAM::default() );
+    let hwnds = enum_hwnds.write().unwrap().drain(..).collect();
+    drop(lock);
+    hwnds
+} }
+
+pub fn win_get_switcher_filt_hwnds () -> Vec<Hwnd> {
+    win_get_hwnds_w_filt (win_enum_cb_switcher_filt)
+}
+pub unsafe extern "system" fn win_enum_cb_switcher_filt (hwnd:HWND, _:LPARAM) -> BOOL {
+    let retval = BOOL (true as i32);
+    if !check_window_visible   (hwnd.into())  { return retval }
+    if  check_window_cloaked   (hwnd.into())  { return retval }
+    if  check_window_has_owner (hwnd.into())  { return retval }
+    if  check_if_tool_window   (hwnd.into())  { return retval }
+    enum_hwnds.write().unwrap() .push (hwnd.into());
+    retval
+}
+
+pub fn win_get_ide_dialog_hwnds() -> Vec<Hwnd> {
+    win_get_hwnds_w_filt (win_enum_cb_ide_dialog_filt)
+}
+pub unsafe extern "system" fn win_enum_cb_ide_dialog_filt (hwnd:HWND, _:LPARAM) -> BOOL {
+    let retval = BOOL (true as i32);
+    if !check_window_visible (hwnd.into())  { return retval }
+    if  check_window_cloaked (hwnd.into())  { return retval }
+    if  check_if_tool_window (hwnd.into())  { return retval }
+    //if  check_window_has_owner (hwnd.into())  { return retval }
+    if get_win_class_by_hwnd (hwnd.into()) != "SunAwtDialog" { return retval }
+    if get_exe_by_hwnd (hwnd.into()) .filter (|s| s == "idea64.exe") .is_none() { return retval }
+    enum_hwnds.write().unwrap() .push (hwnd.into());
+    retval
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #[cfg(test)] #[test]

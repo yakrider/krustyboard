@@ -3,14 +3,9 @@
 
 use std::collections::{HashSet};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
-use once_cell::sync::Lazy;
-
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
-use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 
 use crate::{Flag, Key, ModeState_T};
 use crate::utils::*;
@@ -139,7 +134,7 @@ impl WinGroups {
             // to toggle, we need to find out z order of grp windows, so we'll do a win-enum call
             // .. which is a good time to cleanup dead-hwnds from our groups too
             let mut grp_ztops_count : usize = 0;
-            let hwnds = gather_win_hwnds();
+            let hwnds = win_get_switcher_filt_hwnds();
             wgs.clear_dead_grp_hwnds (wg, &hwnds);
             let grp_set = &wgs.read().unwrap() .grps[wg.idx()] .grp_set;
             for &hwnd in &hwnds {
@@ -184,38 +179,6 @@ impl WinGroups {
         self.read().unwrap() .grps[wg.idx()] .grp .iter() .for_each (|hwnd| win_close(*hwnd))
     }
 
-}
-
-
-
-
-
-
-
-// we'll use a static rwlocked vec to store child-windows from callbacks, and a mutex to ensure only one child-windows call is active
-#[allow(non_upper_case_globals)]
-static enum_hwnds_lock : Lazy <Arc <Mutex <()>>> = Lazy::new (|| Arc::new ( Mutex::new(())));
-#[allow(non_upper_case_globals)]
-static enum_hwnds : Lazy <Arc <RwLock <Vec <Hwnd>>>> = Lazy::new (|| Arc::new ( RwLock::new (vec!()) ) );
-
-
-fn gather_win_hwnds () -> Vec<Hwnd> { unsafe {
-    let lock = enum_hwnds_lock.lock().unwrap();
-    *enum_hwnds.write().unwrap() = Vec::with_capacity(50);   // setting up some excess capacity to reduce reallocations
-    let _ = EnumWindows ( Some(enum_windows_callback), LPARAM::default() );
-    let hwnds = enum_hwnds.write().unwrap().drain(..).collect();
-    drop(lock);
-    hwnds
-} }
-
-pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, _:LPARAM) -> BOOL {
-    let retval = BOOL (true as i32);
-    if !check_window_visible   (hwnd.into())  { return retval }
-    if  check_window_cloaked   (hwnd.into())  { return retval }
-    if  check_window_has_owner (hwnd.into())  { return retval }
-    if  check_if_tool_window   (hwnd.into())  { return retval }
-    enum_hwnds.write().unwrap() .push (hwnd.into());
-    retval
 }
 
 

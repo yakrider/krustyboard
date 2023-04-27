@@ -72,7 +72,11 @@ fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
         right  : pdd.rect.right  + dx,
         bottom : pdd.rect.bottom + dy,
     };
-    let dr_snap = snap_to_edge_rect_delta (&dest, &pdd);
+    let mut dr_snap = RECT::default();
+    if !ks.mod_keys.lshift.down.is_set() {
+        // if shift is down, we'll disable snap to allow finer drag/resize motions
+        dr_snap = snap_to_edge_rect_delta (&dest, &pdd);
+    }
     // we want to keep width/height same so we'll snap to left (and top) in preference to right (and bottom) if both of are available
     let dx_snap = if dr_snap.left != 0 { dr_snap.left} else { dr_snap.right };
     let dy_snap = if dr_snap.top  != 0 { dr_snap.top } else { dr_snap.bottom};
@@ -114,7 +118,11 @@ fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
         right  : pdd.rect.right  + (x - pdd.pointer.x),
         bottom : pdd.rect.bottom + (y - pdd.pointer.y),
     };
-    let dr = snap_to_edge_rect_delta (&dest, &pdd);
+    let mut dr = RECT::default();
+    if !ks.mod_keys.lshift.down.is_set() {
+        // if shift is down, we'll disable snap to allow finer drag/resize motions
+        dr = snap_to_edge_rect_delta (&dest, &pdd);
+    }
     win_move_to (
         pdd.hwnd,  dest.left,  dest.top,
         dest.right  - dest.left + dr.right,
