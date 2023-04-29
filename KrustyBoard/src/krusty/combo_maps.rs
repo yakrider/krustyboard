@@ -192,14 +192,26 @@ impl Combo {
     fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState) -> AF {
         // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         let mut af = af;
-        let lr_zip = ModKeys::static_lr_mods_triplets() .into_iter() .zip(ks.mod_keys.lrmk_smks().into_iter()) .collect::<Vec<((ModKey, ModKey, ModKey), &SyncdModKey)>>();
-        lr_zip .iter() .for_each ( |((lrmk,lmk,rmk),smk)| {
-            af = if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
-                if wrap_mod_key_guard { smk.active_action(af.clone()) } else { smk.bare_action(af.clone()) }
-            } else {
-                if wrap_mod_key_guard { smk.inactive_action(af.clone()) } else { af.clone() }
-            }
+        ks.mod_keys.mod_smk_pairs() .map (|(mk,smk)| {
+            ModKeys::static_lr_mods_triplets() .iter() .filter (|(_,lmk,_)| { mk == *lmk }) .for_each (|(lrmk,lmk,rmk)| {
+                // for smks, if not-wrapping, we just compose the action for present mk
+                // but if wrapping, we wrap either active/inactive action for all smks based on whether they are present or not
+                af = if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
+                    if wrap_mod_key_guard { smk.active_action(af.clone()) } else { smk.bare_action(af.clone()) }
+                } else {
+                    if wrap_mod_key_guard { smk.inactive_action(af.clone()) } else { af.clone() }
+                }
+            })
         });
+        ks.mod_keys.mod_tmk_pairs() .map (|(mk,tmk)| {
+            ModKeys::static_lr_mods_triplets() .iter() .filter (|(_,lmk,_)| { mk == *lmk }) .for_each (|(lrmk,lmk,rmk)| {
+                // for tmks, wrapping flags dont matter .. if its specified compose the action, else do nothing
+                if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
+                    af = tmk.bare_action(af.clone());
+                } else { }
+            })
+        } );
+
         af
     }
 
@@ -358,8 +370,8 @@ impl CombosMap {
         if let Some(msk) = ks.mode_states.qks1.key() { if msk==key { return } }
 
         // if we're in some caps mode-state, but not qks1, we do nothing for fallback (i.e. only registered combos allowed)
-        let qks1_active = ks.mode_states.qks1.down.check();
-        if ks.mode_states.some_combo_mode_active.check() && !qks1_active { return }
+        let qks1_active = ks.mode_states.qks1.down.is_set();
+        if ks.mode_states.some_combo_mode_active.is_set() && !qks1_active { return }
 
         // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
         let l2k_opt = self.l2_keys_map.read().unwrap().get(&key).copied();
@@ -372,8 +384,8 @@ impl CombosMap {
         let mut bfn: Box <dyn Fn()> = Box::new (move || press_release(fb_key));
         if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { bfn = CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
         // ^^ if its l2-key or mode-key (i.e qks1-ctrl), we wont ctrl wrap just from being here (unless there's actual ctrl or qks1-down)
-        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.check() { bfn = CombosMap::wrapped_bfn (Key::LShift, bfn) }
-        if ks.mod_keys.lalt.down.check() { bfn = CombosMap::wrapped_bfn (Key::LAlt, bfn) }
+        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() { bfn = CombosMap::wrapped_bfn (Key::LShift, bfn) }
+        if ks.mod_keys.lalt.down.is_set() { bfn = CombosMap::wrapped_bfn (Key::LAlt, bfn) }
         if ks.mod_keys.some_win_down()   { bfn = CombosMap::wrapped_bfn (Key::LWin, bfn) }
         bfn();
     }
@@ -385,18 +397,25 @@ impl CombosMap {
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
         if let Some(cmaf) = self.combos_map.read().unwrap() .get(&Combo::gen_cur_combo(key, &ks)) {
             cmaf()  // found a combo matched action .. we're done!
-        } else if ks.mod_keys.caps.dbl_tap.check() {     //println!("{:?}",("dbl-caps!"));
+        } else if ks.mod_keys.caps.dbl_tap.is_set() {     //println!("{:?}",("dbl-caps!"));
             // no fallback for double-tap combos that arent explicitly registered
-        } else if ks.mod_keys.caps.down.check() {
+            // in the few cases (like maybe caps/ctrl-f etc) we can set them individually in code ourselves
+        } else if ks.mod_keys.caps.down.is_set() {
             // unregistered caps-combos have extensive fallback setups
             self.handle_caps_combo_fallback (key, ks);
-        } else if ks.mod_keys.ralt.dbl_tap.check() {
+        } else if ks.mod_keys.ralt.dbl_tap.is_set() {
             // no fallback for double-tap combos that arent explicitly registered
-        } else if ks.mod_keys.ralt.down.check() {
+        } else if ks.mod_keys.ralt.down.is_set() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
             shift_press_release(key)
+        } else if ks.mod_keys.some_win_dbl() {
+            // we want to check this first before just win-down, but we'll let this work naturally via passthrough (as win will be active)
+            press_release(key)
+        } else if ks.mod_keys.some_win_down() {
+            // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
+            win_press_release(key)
         } else {
-            // all else works naturally via passthrough
+            // others, incl single/double ctrl/shift/no-mod presses should all work naturally via passthrough
             press_release(key)
         }
     }

@@ -132,7 +132,7 @@ impl ModeState {
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
         let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
             ms.down.set(); mss_cba();
-            if ms.consumed.check() { KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable) }
+            if ms.consumed.is_set() { KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable) }
             else { KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable) }
         } ) );
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Undetermined);
@@ -222,7 +222,7 @@ impl ModeStates {
     ] }
 
     pub fn get_cur_mode_states_bitmap (&self) -> ComboStatesBits_Modes {
-        self.mode_flag_pairs() .map (|(_,ms)| ms.down.check())
+        self.mode_flag_pairs() .map (|(_,ms)| ms.down.is_set())
     }
     pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
         ModeStates::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
@@ -250,19 +250,19 @@ impl ModeStates {
     }
 
     pub fn refresh_qks_mode_active_flag (&self) {
-        if !self.qks.down.check() && !self.qks1.down.check() && !self.qks2.down.check() && !self.qks3.down.check() {
+        if !self.qks.down.is_set() && !self.qks1.down.is_set() && !self.qks2.down.is_set() && !self.qks3.down.is_set() {
             self.some_qks_mode_active.clear()
         }
         self.refresh_caps_mode_active_flag();
     }
     pub fn refresh_l2_mode_active_flag (&self) {
-        if !self.sel.down.check() && !self.del.down.check() && !self.word.down.check() && !self.fast.down.check() {
+        if !self.sel.down.is_set() && !self.del.down.is_set() && !self.word.down.is_set() && !self.fast.down.is_set() {
             self.some_l2_mode_active.clear()
         }
         self.refresh_caps_mode_active_flag();
     }
     pub fn refresh_caps_mode_active_flag (&self) {
-        if !self.some_qks_mode_active.check() && !self.some_l2_mode_active.check() {
+        if !self.some_qks_mode_active.is_set() && !self.some_l2_mode_active.is_set() {
             self.some_combo_mode_active.clear()
         }
     }

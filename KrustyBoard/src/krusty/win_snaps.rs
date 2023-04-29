@@ -221,8 +221,8 @@ fn rects_to_viz_edgelists (rects: &Vec<(Hwnd, RECT)>) -> RectEdgeLists {
     let mut viz_edge_lists = RectEdgeLists::new_w_capacity (2 * rects.len()); // x2 because we make horiz/vert vecs each w 2 edges per rect
     rects .iter() .enumerate() .for_each ( |(i,(_,rect))| {
         let rect_edges = rect_to_edges(rect);
-        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (vec![rect_edges.left, rect_edges.right ], true,  &rects[.. i+1]) );
-        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (vec![rect_edges.top,  rect_edges.bottom], false, &rects[.. i+1]) );
+        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (vec![rect_edges.left, rect_edges.right ], true,  &rects[.. i]) );
+        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (vec![rect_edges.top,  rect_edges.bottom], false, &rects[.. i]) );
     });
     viz_edge_lists.vert  = reduce_edge_sects (&mut viz_edge_lists.vert);
     viz_edge_lists.horiz = reduce_edge_sects (&mut viz_edge_lists.horiz);
@@ -346,6 +346,12 @@ pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, pdd_hwnd:LPARAM)
 
     // minimized windows have left/top at -32000 (and frame is same as rect for top (only) .. we'll exclude those)
     if frame.top == -32000  { return retval }
+
+    // note: the WDADesktopService.exe ghost window still gets here, similar to seen in switche ..
+    // .. dont think its worthwhile trying to filter that by querying exe/class etc ..
+    // .. seems to sit in a slender wide rectangle in SE corner giving ghost edges .. oh well
+
+    //println!("{:?}",(hwnd, &frame, get_exe_by_hwnd(hwnd.into()), get_win_class_by_hwnd(hwnd.into())));
 
     enum_rects.write().unwrap() .push ((hwnd.into(),frame));
 

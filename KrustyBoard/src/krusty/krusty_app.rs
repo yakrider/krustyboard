@@ -14,10 +14,10 @@ use crate::{*, KbdKey::*, key_utils::*, ModKey::*, ModeState_T::*};
 
 /// handling for any 'special' keys that need to be bound/handled directly (like for mouse btns) rather than via combo-maps
 pub mod special_keys_setups {
+    use std::sync::Arc;
+    use crate::{*, KbdEventCbMapKeyType::*, EventPropagationDirective::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
 
-    use crate::Krusty;
-
-    pub fn setup_direct_binding_keys (_k:&Krusty) {
+    pub fn setup_direct_binding_keys (k:&Krusty) {
 
         // currently, we dont need to do it for anything .. (was more essential when mod-tracking / combo-maps mechanisms were more limited)
 
@@ -25,7 +25,26 @@ pub mod special_keys_setups {
         // ALSO, for things that require actual action in key-up callbacks, we'd do it direclty here because key-dn actions arent registered
         // > specifically in maps and so combo-maps composed callbacks can only either set key-up to do nothing, or at most clear mode flags
 
-        // IMPORTANT : note that whatever we put here, we will NOT want to include them in ANY action maps (or overwrite w these at the end) !!
+        // IMPORTANT : note that whatever we put here, we will NOT want to include them in ANY action maps (we'll overwrite w these at the end) !!
+
+
+        // we'll use one for unstick-all ..
+        // regular combo-maps are painful for this as expectation is when we want to use that any modkey/flag might be stuck for whatever reason
+        // .. so we'd need to make combos to trigger that will all possible combinations of modkeys .. which quickly gets out of hand
+        // hence we'll directly code that up here
+        // Note again that when we do direct binding here, anything via combomaps for the key will be overwritten
+
+        let ks = k.ks.clone();
+        let epd_passthrough = KbdEvProcDirectives { event_prop_d: EventProp_Continue, combo_proc_d: ComboProc_Disable };
+        k.iproc .kbd_bindings .bind_kbd_event (Key::Insert, KeyEventCb_KeyDown, KbdEventCallbackEntry {
+            event_proc_d: epd_passthrough,
+            cb: KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+                if ks.mod_keys.caps.dbl_tap.is_set() { ks.unstick_all() }
+                epd_passthrough
+            } ) ),
+        } )
+        // wont need a key-up for this as the keydown is pasthrough anyway
+
 
     }
 
@@ -89,6 +108,9 @@ pub fn setup_krusty_board () {
 
 
     // lets also disable the win-number combos as they annoyingly activate/minimize items from taskbar etc
+    // NOTE that these could be removed now that we've made win into TMK_dbl ..
+    // .. but if we set win-combo single-press fallback to win-combo, these will still be useful, so we'll let them be!,
+    // .. note ofc that everything disabled like this will be accessible on win-dbl press combos!
     "1234567890" .chars() .map (|c| Key::from_char(c)) .flatten() .for_each ( |key| {
         k.cm .add_combo_af ( k.ks.cg(key).m(lwin),                   k.ks.ag_af(no_action()) );
         k.cm .add_combo_af ( k.ks.cg(key).m(lwin).m(caps),           k.ks.ag_af(no_action()) );
@@ -103,17 +125,6 @@ pub fn setup_krusty_board () {
     // we'll disable win-d too, as I never use that show/hide desktop and it's disruptive
     k.cm .add_combo_af ( k.ks.cg(D).m(lwin),  k.ks.ag_af(no_action()) );
 
-
-
-    // we'll set up a combo (caps-alt-Insert) to unstick everything in case we get into weird states due to other hooks stealing/suppressing key events etc
-    // note since the whole point is to invoke it at stuck times, we'd want to overload that also for alt/ctr/shift etc and their combinations!
-    // .. otoh, they can all be unstuck by just press/releasing them, incl mouse btns, so for now we'll ignore that, can update as necessary
-    // further, combos incl all mode states and some other flags .. for a combo to trigger those would have to match too ..
-    // soo .. we'll let these simple combo be, but it will mostly only be useful to clear mouse-btn states .. or single mod-key sticking
-    let ks = k.ks.clone(); let clear = Arc::new (move || ks.unstick_all());
-    k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt),          k.ks.ag_af (clear.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt).m(ctrl),  k.ks.ag_af (clear.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt).m(win ),  k.ks.ag_af (clear.clone()) );
 
 
 
@@ -143,6 +154,9 @@ pub fn setup_krusty_board () {
         // however, we could at least restore caps-alt-<mode-key> to the expected ctrl-alt by default .. can ofc override these later
         //k.cm .add_combo ( k.ks.cg(key).m(caps).s(ms_t).m(lalt),  k.ks.ag(key).m(ctrl).m(alt) );
         // ^^ naah, some of these we need to be silent and modify other combos (e.g. qks1), so lets do them individually later
+
+        // aight, so at the very least we can open back up the expected caps-as-ctrl behavior for mode-trigger keys on caps-dbl
+        k.cm .add_combo ( k.ks.cg(key).m(caps_dbl),  k.ks.ag(key).m(ctrl) );
     }
 
     // setup keys for layer-2 caret nav sel/del/fast modes
@@ -181,15 +195,28 @@ pub fn setup_krusty_board () {
     // we'll setup some keys on caps double tap first, esp those that modify global-ish behavior
     //
     // dbl-caps T to toggle capslock
-    k.cm .add_combo    ( k.ks.cg(T).m(caps_dbl),   k.ks.ag(CapsLock) );
+    k.cm .add_combo ( k.ks.cg(T).m(caps_dbl),   k.ks.ag(CapsLock) );
+
+
+    // UNSTICK-ALL considerations
+    // we want to set up a combo to unstick-all in case we get into weird states due to other hooks stealing/suppressing key events etc
+    // lets do dbl-caps (Insert) for reset for now, can settle on one later .. (Insert because End is on Fn key F12, Insert is direct key on this pc)
+    //let ks = k.ks.clone(); let clear = Arc::new (move || ks.unstick_all());
+    //k.cm .add_combo_af ( k.ks.cg(Insert).m(caps_dbl),  k.ks.ag_af (clear.clone()) );
+    // ^^ nuh-uh ..
+    // however since the whole point is to invoke it at stuck times, we'd need to overload that also for alt/ctr/shift etc and their combinations!
+    // .. otoh, they can all be unstuck by just press/releasing them, incl mouse btns, so for now we'll ignore that, can update as necessary
+    // further, combos incl all mode states and some other flags .. for a combo to trigger those would have to match too ..
+    // soo .. we'll let these simple combo be, but it will mostly only be useful to clear mouse-btn states .. or single mod-key sticking
     //
-    // dbl-caps (End / R) will be set to reset for now, can settle on one later
-    let ks = k.ks.clone();
-    k.cm .add_combo_af ( k.ks.cg(End).m(caps_dbl),  k.ks.ag_af ( Arc::new (move || ks.unstick_all()) ) );
-    let ks = k.ks.clone();
-    k.cm .add_combo_af ( k.ks.cg(R  ).m(caps_dbl),  k.ks.ag_af ( Arc::new (move || ks.unstick_all()) ) );
-    //
-    // could prob add something to quit too
+    //k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt),          k.ks.ag_af (clear.clone()) );
+    //k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt).m(ctrl),  k.ks.ag_af (clear.clone()) );
+    //k.cm .add_combo_af ( k.ks.cg(Insert).m(caps).m(lalt).m(win ),  k.ks.ag_af (clear.clone()) );
+    // ^^ nuh-uh ..
+    // sooo .. instead we'll just put this in direct-binding keys .. ig finally a use for that ..
+    // note however, that anything put there wlil not be usable in any combo-maps combos!1
+
+    // could prob add something simple to quit though? .. and thatd be easier coz expectation is usage while nothing-stuck?
 
 
 
@@ -208,8 +235,8 @@ pub fn setup_krusty_board () {
     // setup tab .. caps-as-ctrl for caps-tab switching, incl for ctrl-shift-tab .. also ralt-tab for shift-tab
     let ks = k.ks.clone();
     let cb : AF = Arc::new (move || {
-        if ks.mod_keys.caps.down.check() || ks.mod_keys.some_ctrl_down() {
-            if ks.mod_keys.caps.down.check() {
+        if ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_ctrl_down() {
+            if ks.mod_keys.caps.down.is_set() {
                 ks.in_managed_ctrl_down_state.set();
                 ks.mod_keys.lctrl.ensure_active();  // this enables caps-as-ctrl for caps-tab switching
                 // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
@@ -366,19 +393,22 @@ pub fn setup_krusty_board () {
     // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
     fn media_skips_action (n_skips:u32, ks:&KrustyState, fwd_not_bkwd:bool) -> AF {
         let action_key = if fwd_not_bkwd {VolumeUp} else {VolumeDown};
-        ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
+        //ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
+        ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
             Arc::new ( move || { (0 .. n_skips) .into_iter() .for_each (|_| { press_release(action_key) }) } )
-    ) ) ) }
+    ) ) }
     // ^^ gives an AF with specified number of skips
 
     // it uses alt-active media-skips, so we'll need alt_inactive-action, plus guard on win-combo it is on
     let ks = k.ks.clone();
-    let media_next_action = k.ks.mod_keys.lwin.inactive_action ( k.ks.mod_keys.lalt.inactive_action ( Arc::new ( move || {
-        if !ks.mod_keys.caps.down.check() { press_release(MediaNextTrack) }
+    //let media_next_action = k.ks.mod_keys.lwin.inactive_action ( k.ks.mod_keys.lalt.inactive_action ( Arc::new ( move || {
+    let media_next_action = k.ks.mod_keys.lalt.inactive_action ( Arc::new ( move || {
+        if !ks.mod_keys.caps.down.is_set() { press_release(MediaNextTrack) }
         else { press_release(MediaPrevTrack) }
         let ks = ks.clone();  // clone again to move into spawned thread (spawned since combos run in single queued side-thread)
         thread::spawn ( move || { thread::sleep(time::Duration::from_millis(2000));  media_skips_action(3,&ks,true)(); } );
-    } ) ) );
+    } ) );
+    // note that in the above, although we're using win-combos, we dont have to wrap in win-action guards anymore as win is now as TMK_dbl
 
     // win-f2 for next with some initial skip
     k.cm .add_combo_af ( k.ks.cg(F2).m(lwin),          k.ks.ag_af(media_next_action.clone()) );
@@ -487,6 +517,9 @@ pub fn setup_krusty_board () {
 
         // and on lalt w/o caps, we'll layer qks1 as ctrl like it is used elsewhere
         k.cm .add_combo ( k.ks.cg(key).m(lalt).s(qks1),  k.ks.ag(key).m(alt).m(ctrl) );
+
+        // plus we'll layer caps-as-ctrl on caps-dbl for these for easy access
+        k.cm .add_combo ( k.ks.cg(key).m(caps_dbl),  k.ks.ag(key).m(ctrl) );
     }
 
     // filling out l2/l3 actions
@@ -523,6 +556,11 @@ pub fn setup_krusty_board () {
     k.cm .add_combo_af ( k.ks.cg(Space).m(caps).m(lalt).s(sel ).s(word),   k.ks.ag_af (lsa) );
     k.cm .add_combo_af ( k.ks.cg(Space).m(caps).m(lalt).s(del),            k.ks.ag_af (lda) );
 
+    // this one is here simply coz its Space and on l2, but we'll use it for Find-Window trigger in IDE via Ctrl-Enter
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),  k.ks.ag(Enter).m(ctrl) );
+    // similar for this one on expanding things in find window (for txt-search)
+    k.cm .add_combo ( k.ks.cg(Slash).m(caps).s(word),  k.ks.ag(Equal).m(ctrl).m(alt).m(shift) );
+
     // we can further add cut/copy/paste actions on the sel mode (caps-e-x/c/v)
     fn gen_wxcv_af (key:Key) -> AF { Arc::new ( move || {
         LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); press_release(key); LCtrl.release();
@@ -532,18 +570,21 @@ pub fn setup_krusty_board () {
     k.cm .add_combo_af ( k.ks.cg(V).m(caps).s(sel),  k.ks.ag_af (gen_wxcv_af(V)) );
 
     // specifically for IDE, we can also add move actions to nearest matching brace/paren (via ctrl-shift-p)
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),  k.ks.ag(P).m(ctrl).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(word),  k.ks.ag(P).m(ctrl).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(word),  k.ks.ag(P).m(ctrl).m(shift) );
     // unfortunately, there's no support in IDE for selecting while doing so !! :(
 
     // and lets support nav to code-block (brace) start/end (and the IDE supports select for this, but its much less useful, oh well)
-    //k.cm .add_combo ( k.ks.cg(LBracket).m(lalt),         k.ks.ag(LBracket).m(alt) );
-    //k.cm .add_combo ( k.ks.cg(RBracket).m(lalt),         k.ks.ag(RBracket).m(alt) );
+    //k.cm .add_combo ( k.ks.cg(LBracket).m(lalt),       k.ks.ag(LBracket).m(alt) );
+    //k.cm .add_combo ( k.ks.cg(RBracket).m(lalt),       k.ks.ag(RBracket).m(alt) );
     k.cm .add_combo ( k.ks.cg(LBracket).m(caps).s(sel),  k.ks.ag(LBracket).m(alt).m(shift) );
     k.cm .add_combo ( k.ks.cg(RBracket).m(caps).s(sel),  k.ks.ag(RBracket).m(alt).m(shift) );
 
     // also lets add an even quicker way to switche column mode during IDE edit (using the cur alt-shift-c)
-    k.cm .add_combo ( k.ks.cg(Numrow_8).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
-    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    // the I and Comma both do toggle but its better to have both for muscle memory on shift-move up/down
+    k.cm .add_combo ( k.ks.cg(I       ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Comma   ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),          k.ks.ag(C).m(alt).m(shift) );
 
 
 

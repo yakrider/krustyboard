@@ -246,11 +246,13 @@ pub fn win_fgnd_min () { unsafe {
 
 
 
-
 pub fn get_fgnd_win_title () -> String { unsafe {
+    get_win_title (GetForegroundWindow().into())
+} }
+pub fn get_win_title (hwnd:Hwnd) -> String { unsafe {
     const MAX_LEN : usize = 512;
     let mut lpstr : [u16; MAX_LEN] = [0; MAX_LEN];
-    let copied_len = GetWindowTextW (GetForegroundWindow(), &mut lpstr);
+    let copied_len = GetWindowTextW (hwnd, &mut lpstr);
     String::from_utf16_lossy (&lpstr[..(copied_len as _)])
 } }
 

@@ -153,17 +153,18 @@ impl Mouse {
     }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
-    pub fn proc_notice__modkey_down (&self, mk:Option<&SyncdModKey>, ks:&KrustyState) {
-        // (note that caps notice comes with mk param set to None)
+    pub fn proc_notice__modkey_down (&self, mk:ModKey, ks:&KrustyState) {
+        use ModKey::*;
         self.vwheel.spin_invalidated.set();
-        if ks.mouse.lbtn.down.is_set() && ( mk.is_none() ||  mk.filter(|mk| mk.key == Key::LWin).is_some() ) {
+        if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
             // we'll want to capture/refresh pre-drag-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
             self.capture_pre_drag_dat(ks);
         }
     }
-    pub fn proc_notice__modkey_up (&self, mk:Option<&SyncdModKey>, ks:&KrustyState) {
+    pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:&KrustyState) {
+        use ModKey::*;
         self.vwheel.spin_invalidated.set();
-        if mk.is_none() && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
+        if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
             // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
             self.capture_pre_drag_dat(ks);
         }
@@ -296,7 +297,7 @@ fn handle_mouse_right_btn_up (ks:&KrustyState, _ev:MouseEvent) {
     ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
     ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.rbtn.btn);
 
-    if ks.in_right_btn_scroll_state.check() {
+    if ks.in_right_btn_scroll_state.is_set() {
         ks.in_right_btn_scroll_state.clear();
         // Ctrl-F18 is the exit hotkey for switche if we were doing right-btn-scroll
         ks.mod_keys.lctrl.active_on_key(Key::F18)();
@@ -401,7 +402,7 @@ fn handle_wheel_guarded (delta:i32, ksr:&KrustyState) {
     //let gap = ksr.last_wheel_stamp.read().unwrap().duration_since(last_stamp);
     //println!("{:#?}", dur.as_millis());
     const GUARD_DUR_MS: u128 = 120;  // from dur printouts above, looked like max inertial gap is 120 (min 7ms, usually <100)
-    if !ksr.mouse.vwheel.spin_invalidated.check() {
+    if !ksr.mouse.vwheel.spin_invalidated.is_set() {
         handle_wheel_action(delta, ksr);
     } else if GUARD_DUR_MS < ksr.mouse.vwheel.last_stamp.get().duration_since(last_stamp).as_millis() {
         ksr.mouse.vwheel.spin_invalidated.clear();
@@ -414,7 +415,7 @@ fn handle_wheel_guarded (delta:i32, ksr:&KrustyState) {
 fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
     let incr = delta / WHEEL_DELTA as i32;
-    if ksr.mouse.rbtn.down.check() {
+    if ksr.mouse.rbtn.down.is_set() {
         // right-mouse-btn-wheel support for switche task switching
         ksr.in_right_btn_scroll_state.set();
         ksr.mouse.rbtn.consumed.set();
@@ -422,7 +423,7 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
         //ksr.mod_keys.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll
         press_release(key);                                 // we'd rather use direct press hotkeys for best perf
-    } else  if ksr.mod_keys.lalt.down.check() {
+    } else  if ksr.mod_keys.lalt.down.is_set() {
         // wheel support for scrolling in windows native alt-tab task-switching screen
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
@@ -431,17 +432,17 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
             handle_alt_tab_wheel(incr)
         } else {
             // alt-wheel for (fine delta) control, qks1-alt-wheel for larger adjustments
-            let mult = if ksr.mode_states.qks1.down.check() {5} else {1};
+            let mult = if ksr.mode_states.qks1.down.is_set() {5} else {1};
             incr_brightness (incr * mult)
             // ^^ potentially could spawn this out too, but in this queue thread, meh it'll be fine
         }
-    } else if ksr.mod_keys.lwin.down.check() {
+    } else if ksr.mod_keys.lwin.down.is_set() {
         // win-wheel for (fine delta) control, qks1-win-wheel for larger adjustments
         ksr.mod_keys.lwin.consumed.set();
-        let mult = if ksr.mode_states.qks1.down.check() {2} else {1};
+        let mult = if ksr.mode_states.qks1.down.is_set() {2} else {1};
         incr_volume (incr * mult)
-    } else if ksr.mod_keys.caps.down.check() || ksr.mod_keys.some_ctrl_down() {
-        if ksr.mod_keys.caps.down.check() {
+    } else if ksr.mod_keys.caps.down.is_set() || ksr.mod_keys.some_ctrl_down() {
+        if ksr.mod_keys.caps.down.is_set() {
             ksr.in_managed_ctrl_down_state.set();
             ksr.mod_keys.lctrl.ensure_active();
         }
@@ -498,7 +499,7 @@ pub fn setup_mouse_move_handling (k:&Krusty) {
     k.iproc.mouse_bindings .bind_pointer_event ( MouseEventCallbackEntry {
         event_prop_directive: EventProp_Continue,
         cb: MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
-            if ks.mod_keys.lwin.down.check() && ks.mouse.lbtn.down.check() {
+            if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 ks.mod_keys.lwin.consumed.set();
                 if let move_event { x_pos, y_pos, .. } = ev {
                     handle_pointer_move (x_pos, y_pos, &ks)
@@ -511,8 +512,8 @@ fn handle_pointer_move (x:i32, y:i32, ks:&KrustyState) {
     // NOTE that mouse move is inline pass-through before these handler calls get queued
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
-    if ks.mouse.lbtn.down.check() && ks.mouse.lbtn.consumed.is_clear(){
-        if ks.mod_keys.caps.down.check() && ks.mode_states.qks1.down.is_clear() {
+    if ks.mouse.lbtn.down.is_set() && ks.mouse.lbtn.consumed.is_clear(){
+        if ks.mod_keys.caps.down.is_set() && ks.mode_states.qks1.down.is_clear() {
             handle_pointer_window_resize_spaced (x, y, &ks)
         } else {
             handle_pointer_window_drag_spaced (x, y, &ks)

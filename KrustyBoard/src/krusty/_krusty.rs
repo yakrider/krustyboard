@@ -1,17 +1,13 @@
 
-use std::{
-    time::Instant,
-    ops::Deref,
-    sync::{Arc, RwLock},
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::thread;
+use std::time::{Instant, Duration};
+use std::ops::Deref;
+use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use once_cell::sync::OnceCell;
 
 use crate::*;
-
-
-
 
 
 // todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
@@ -38,7 +34,6 @@ impl Flag {
     pub fn clear (&self) { self.0 .store (false, Ordering::SeqCst) }
     pub fn store (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
 
-    pub fn check    (&self) -> bool { self.0 .load (Ordering::SeqCst) }
     pub fn is_set   (&self) -> bool { true  == self.0 .load (Ordering::SeqCst) }
     pub fn is_clear (&self) -> bool { false == self.0 .load (Ordering::SeqCst) }
 }
@@ -194,6 +189,9 @@ impl KrustyState {
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
            &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
+
+        // lets send a delayed Esc for any context menus etc that show up
+        thread::spawn (|| { thread::sleep (Duration::from_millis(300)); key_utils::press_release(Key::Escape) } );
     }
 
     /// Utlity function to create a new Combo-generator (for combo-specification) <br>
@@ -262,6 +260,7 @@ pub mod key_utils {
     // note that these are ONLY to be used when the mod key states DONT need to be tracked (e.g. in composition fallback actions)
     pub fn ctrl_press_release  (key:Key) { wrapped_press_release (Key::Ctrl,  press_release, key) }
     pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, press_release, key) }
+    pub fn win_press_release   (key:Key) { wrapped_press_release (Key::LWin,  press_release, key) }
 
     // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
     /// wraps a given unitary function with NO input args into an Arc Fn
@@ -275,6 +274,7 @@ pub mod key_utils {
     pub fn fast_action  (key:Key) -> AF { action_p1 (double_press_release, key) }
     pub fn ctrl_action  (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
     pub fn shift_action (key:Key) -> AF { action_p1 (shift_press_release,  key) }
+    pub fn win_action   (key:Key) -> AF { action_p1 (win_press_release,    key) }
 
 }
 

@@ -92,7 +92,7 @@ impl WinGroups {
         let mut grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .map(|i| *i) .collect::<Vec<_>>();
         grp.push(hwnd);
         let grp_set = grp .iter() .copied() .collect::<HashSet<_>>();
-        let topmost = Flag::new (grps [grp_e.idx()] .topmost .check());
+        let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
         grps[grp_e.idx()] = WinGroup {grp, grp_set, topmost};
     }
 
@@ -101,7 +101,7 @@ impl WinGroups {
         if grps [grp_e.idx()] .grp_set .contains(&hwnd) {
             let grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .copied() .collect::<Vec<_>>();
             let grp_set = grp .iter() .map(|i| *i) .collect::<HashSet<_>>();
-            let topmost = Flag::new (grps [grp_e.idx()] .topmost .check());
+            let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
             grps [grp_e.idx()] = WinGroup {grp, grp_set, topmost};
     } }
 
@@ -115,7 +115,7 @@ impl WinGroups {
 
     pub fn activate_win_group (&self, grp_e:WinGroups_E) {
         let grp = &self.read().unwrap() .grps[grp_e.idx()];
-        let topmost = grp.topmost.check();
+        let topmost = grp.topmost.is_set();
         grp.grp .iter() .enumerate() .for_each ( |(i, &hwnd)| {
             // api calls causing focus change seem to need some delay .. lowering the delay below starts giving unreliable activation
             thread::spawn (move || {
