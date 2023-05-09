@@ -168,6 +168,16 @@ impl Mouse {
             // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
             self.capture_pre_drag_dat(ks);
         }
+        else if mk == lalt && ks.is_replacing_alt_tab.is_set() && ks.in_right_btn_scroll_state.is_set() {
+            // todo prob want to add check for switche in fgnd as we'd like clicking outside to take us out of the state
+            // some special handling for alt-tab replacment
+            ks.in_right_btn_scroll_state.clear();
+            let switche_af = ks.mod_keys.lalt.inactive_action ( ks.mod_keys.lctrl.active_on_key(Key::F18));
+            //switche_af.as_ref()();
+            //thread::sleep (time::Duration::from_millis(50));
+            switche_af.as_ref()();
+        }
+
     }
 
 }
@@ -287,10 +297,10 @@ fn handle_mouse_right_btn_down (ks:&KrustyState, ev:MouseEvent) {
             if ks.mode_states.qks2.down.is_set() { ks.win_groups.remove_from_group (qks2.try_into().unwrap(), win_get_hwnd_from_pointer()) }
             if ks.mode_states.qks3.down.is_set() { ks.win_groups.remove_from_group (qks3.try_into().unwrap(), win_get_hwnd_from_pointer()) }
         }
-    } else {
-        ks.mouse.rbtn.active.set();
-        MouseButton::RightButton.press();
+        return
     }
+    ks.mouse.rbtn.active.set();
+    MouseButton::RightButton.press();
 }
 
 fn handle_mouse_right_btn_up (ks:&KrustyState, _ev:MouseEvent) {
@@ -427,14 +437,20 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         // wheel support for scrolling in windows native alt-tab task-switching screen
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
-        if get_fgnd_win_class() == "MultitaskingViewFrame" { // alt-tab states
-            ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
-            handle_alt_tab_wheel(incr)
+        if ksr.is_replacing_alt_tab.is_set() && ksr.in_right_btn_scroll_state.is_set() {
+            ksr.mod_keys.lalt.ensure_inactive();    // we cant have alt-tab go out as thatd trigger the actual alt-tab
+            handle_alt_tab_wheel(incr);
         } else {
-            // alt-wheel for (fine delta) control, qks1-alt-wheel for larger adjustments
-            let mult = if ksr.mode_states.qks1.down.is_set() {5} else {1};
-            incr_brightness (incr * mult)
-            // ^^ potentially could spawn this out too, but in this queue thread, meh it'll be fine
+            let fgnd_class = get_fgnd_win_class();
+            if fgnd_class == "XamlExplorerHostIslandWindow" || fgnd_class == "MultitaskingViewFrame" {  //dbg!(task_switching_state);
+                ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
+                handle_alt_tab_wheel(incr)
+            } else {
+                // alt-wheel for (fine delta) control, qks1-alt-wheel for larger adjustments
+                let mult = if ksr.mode_states.qks1.down.is_set() {5} else {1};
+                incr_brightness (incr * mult)
+                // ^^ potentially could spawn this out too, but in this queue thread, meh it'll be fine
+            }
         }
     } else if ksr.mod_keys.lwin.down.is_set() {
         // win-wheel for (fine delta) control, qks1-win-wheel for larger adjustments

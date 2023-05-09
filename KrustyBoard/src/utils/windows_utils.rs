@@ -224,6 +224,19 @@ pub fn win_fgnd_toggle_always_on_top () { unsafe {
     win_fgnd_change_always_on_top (z_tog_val)
 } }
 
+pub fn win_fgnd_toggle_titlebar () { unsafe {
+    // works but only for win32 apps, not for UWP etc
+    let hwnd = GetForegroundWindow();
+    let style = GetWindowLongW (hwnd, GWL_STYLE);
+    //println! ( "{:#x?}", ( style, style as u32, (WS_CAPTION | WS_SYSMENU).0, style as u32 & (!(WS_CAPTION | WS_SYSMENU)).0 ) );
+    //println! ( "{:#x?}", ( style as u32 & !((WS_CAPTION | WS_SYSMENU).0), style as u32 | (WS_CAPTION | WS_SYSMENU).0) );
+    if style as u32 & WS_CAPTION.0 > 0 {
+        SetWindowLongW (hwnd, GWL_STYLE, (style as u32 & (!(WS_CAPTION | WS_SYSMENU)).0) as i32);
+    } else {
+        SetWindowLongW (hwnd, GWL_STYLE, (style as u32 | (WS_CAPTION | WS_SYSMENU).0) as i32 );
+    }
+} }
+
 
 pub fn win_fgnd_toggle_vertmax () { unsafe {
     // works by sending doubleclick at top of window (which also works manually)

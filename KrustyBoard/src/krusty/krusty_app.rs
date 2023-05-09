@@ -175,7 +175,7 @@ pub fn setup_krusty_board () {
 
 
 
-    // we want to overlay some additional combos on some of these w Alt (other that modify other combos should remain silent)
+    // we want to overlay some additional combos on some of these w Alt (others that modify other combos should remain silent)
     k.cm .add_combo ( k.ks.cg(E).m(caps).s(sel ).m(lalt),   k.ks.ag(E).m(ctrl).m(alt) );
     k.cm .add_combo ( k.ks.cg(D).m(caps).s(del ).m(lalt),   k.ks.ag(D).m(ctrl).m(alt) );
     //k.cm .add_combo ( k.ks.cg(F).m(caps).s(word).m(lalt),   k.ks.ag(F).m(ctrl).m(alt) );   // overriden below
@@ -186,7 +186,9 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(F).m(caps).s(word).m(lalt),  k.ks.ag(F).m(lalt) );     // caps-lalt-f to alt-f, though it goes against typical mode-key usage
 
     // e in caret mode, so we'll put our left-handed-enter on alt-e instead .. (note that there are also caps-space-* combos for *-enter)
-    k.cm .add_combo ( k.ks.cg(E).m(lalt),  k.ks.ag(Enter) );      // alt-e -> enter
+    k.cm .add_combo ( k.ks.cg(E).m(lalt),           k.ks.ag(Enter) );            // alt-e       ->  Enter
+    k.cm .add_combo ( k.ks.cg(E).m(caps).s(qks),    k.ks.ag(Enter).m(ctrl) );    // caps-q-e    ->  ctrl-Enter
+    k.cm .add_combo ( k.ks.cg(E).m(caps).m(lalt),   k.ks.ag(Enter).m(ctrl) );    // caps-alt-e  ->  ctrl-Enter
 
 
 
@@ -196,6 +198,18 @@ pub fn setup_krusty_board () {
     //
     // dbl-caps T to toggle capslock
     k.cm .add_combo ( k.ks.cg(T).m(caps_dbl),   k.ks.ag(CapsLock) );
+
+    // we'll set dbl-caps-alt-S/C/A/W as tmp shift/ctrl/alt/win lock (useful for doing mouse horiz scroll on say moon-reader etc)
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(S).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lshift.ensure_active()) ) );
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(C).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lctrl.ensure_active()) ) );
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(A).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lalt.ensure_active()) ) );
+    //let ks = k.ks.clone();
+    //k.cm .add_combo_af ( k.ks.cg(W).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lwin.ensure_active()) ) );
+    // todo ^^ fix or remove it .. theres no ensure-active for TMK
+
 
 
     // UNSTICK-ALL considerations
@@ -223,16 +237,38 @@ pub fn setup_krusty_board () {
 
 
 
-    // setup backquote .. make normal case be Delete, caps or alt do back-tick, and shift or ralt do its tilde
-    k.cm .add_combo ( k.ks.cg(Backquote),          k.ks.ag(ExtDelete) );
-    k.cm .add_combo ( k.ks.cg(Backquote).m(caps),  k.ks.ag(Backquote) );
-    k.cm .add_combo ( k.ks.cg(Backquote).m(lalt),  k.ks.ag(Backquote) );
-    //k.cm .add_combo ( k.ks.cg(Backquote).m(shift),   k.ks.ag(Backquote).m(shift) );
-    //k.cm .add_combo ( k.ks.cg(Backquote).m(ralt),    k.ks.ag(Backquote).m(shift) );
-    // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
+
+    // we'll setup caps-dbl-alt-tab as toggling whether switche handles alt-tab or not
+    let ks = k.ks.clone();
+    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps_dbl).m(lalt),     k.ks.ag_af ( Arc::new (move || ks.toggle_alt_tab_replace()) ) );
+
+    // todo .. since alt-tab state is in ks .. see if the alt-tab impl shouldnt be out here in app-code?
+
+    // setup alt-tab
+    let ks = k.ks.clone();
+    let cb : AF = Arc::new (move || {
+        if ks.is_replacing_alt_tab.is_set() && ks.mod_keys.lalt.down.is_set() {
+            ks.in_right_btn_scroll_state.set(); // we'll reuse the flag from the other mechanism of triggering switche
+            if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
+                // if it was only shift, it would naturally layer from press, but for ralt support we need to add it explicitly
+                 ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.inactive_on_key(F16))()
+            } else { ks.mod_keys.lalt.inactive_on_key(F16)() }
+        }
+        else {
+            // for natural alt-tab again, for just shift, it would layer naturally, but we'll make it explicity to support ralt
+            if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
+                ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.active_on_key(Tab))()
+            } else { press_release(Tab) }
+        }
+    } );
+    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt),           k.ks.ag_af (cb.clone()) );
+    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt).m(shift),  k.ks.ag_af (cb.clone()) );
+    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt).m(ralt ),  k.ks.ag_af (cb.clone()) );
 
 
-    // setup tab .. caps-as-ctrl for caps-tab switching, incl for ctrl-shift-tab .. also ralt-tab for shift-tab
+    // setup ctrl-tab .. caps-as-ctrl for caps-tab switching (and shift/ralt combos will work out naturally in fallbacks)
+    // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
+    // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
     let ks = k.ks.clone();
     let cb : AF = Arc::new (move || {
         if ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_ctrl_down() {
@@ -245,35 +281,12 @@ pub fn setup_krusty_board () {
             press_release(Tab)
         }
     } );
-    // lets add support for this in caps tab, incl for various flags that might be active (since they are now in combo bits)
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps),                                   k.ks.ag_af(cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).s(mngd_ctrl_dn),                   k.ks.ag_af(cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(cb.clone()) );
-
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl),                                    k.ks.ag_af(cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl).s(mngd_ctrl_dn ),                   k.ks.ag_af(cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl).s(ctrl_tab_scrl),                   k.ks.ag_af(cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl).s(mngd_ctrl_dn ).s(ctrl_tab_scrl),  k.ks.ag_af(cb.clone()) );
-
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(shift),                                   k.ks.ag_af(cb.clone()).m(shift) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(shift).s(mngd_ctrl_dn),                   k.ks.ag_af(cb.clone()).m(shift) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(shift).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(cb.clone()).m(shift) );
-
-    // lets explicitly support arrow keys during ctrl tab (coz fallback will send full ctrl-action as it doesnt check act/inact guards)
-    k.cm .add_combo ( k.ks.cg(Left ).m(caps).s(mngd_ctrl_dn),  k.ks.ag(Left ).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Right).m(caps).s(mngd_ctrl_dn),  k.ks.ag(Right).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Up   ).m(caps).s(mngd_ctrl_dn),  k.ks.ag(Up   ).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Down ).m(caps).s(mngd_ctrl_dn),  k.ks.ag(Down ).mkg_nw() );
-
-    k.cm .add_combo ( k.ks.cg(Left ).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag(Left ).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Right).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag(Right).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Up   ).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag(Up   ).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg(Down ).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag(Down ).mkg_nw() );
-
-    // and finally for ralt-as-shift support for caps-tabbing too
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(ralt),                                   k.ks.ag_af(cb.clone()).m(shift) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(ralt).s(mngd_ctrl_dn),                   k.ks.ag_af(cb.clone()).m(shift) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(ralt).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(cb.clone()).m(shift) );
+    // lets add support for this in caps tab ..
+    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps),            k.ks.ag_af(cb.clone()) );
+    // the rest of these below (for ctrl/shift/ralt) work naturally via fallback, but we'll keep them here for reference/reminder
+    //k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl),          k.ks.ag_af(cb.clone()) );
+    //k.cm .add_combo_af ( k.ks.cg(Tab).m(caps).m(ralt),  k.ks.ag_af(cb.clone()) );
+    //k.cm .add_combo_af ( k.ks.cg(Tab).m(ctrl).m(ralt),  k.ks.ag_af(cb.clone()) );
 
 
 
@@ -302,15 +315,35 @@ pub fn setup_krusty_board () {
 
 
 
+    // setup backquote .. make normal case be Delete, caps or alt do back-tick, and shift or ralt do its tilde
+    k.cm .add_combo ( k.ks.cg(Backquote),          k.ks.ag(ExtDelete) );
+    k.cm .add_combo ( k.ks.cg(Backquote).m(caps),  k.ks.ag(Backquote) );
+    k.cm .add_combo ( k.ks.cg(Backquote).m(lalt),  k.ks.ag(Backquote) );
+    //k.cm .add_combo ( k.ks.cg(Backquote).m(shift),   k.ks.ag(Backquote).m(shift) );
+    //k.cm .add_combo ( k.ks.cg(Backquote).m(ralt),    k.ks.ag(Backquote).m(shift) );
+    // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
+
 
     // setup space key .. ralt-space as enter, caps-space as ctrl-space, caps-lalt-space as alt-enter for intellij
-    k.cm .add_combo ( k.ks.cg(Space).m(ralt),          k.ks.ag(Enter) );                  // ralt-space -> enter
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt),  k.ks.ag(Enter).m(lalt) );          // caps-lalt-space -> alt-enter
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(ralt),  k.ks.ag(Escape) );                 // caps-ralt-space -> Escape
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks1),  k.ks.ag(Space).m(ctrl).m(shift) ); // qks1-space -> ctrl_shift_space for IDE
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks2),  k.ks.ag(Space).m(ctrl).m(shift) ); // ^^ ditto for qks2
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps),          k.ks.cg(Space).m(ctrl) );   // caps-space -> ctrl-enter
+    k.cm .add_combo ( k.ks.cg(Space).m(ralt),          k.ks.ag(Enter) );                  // ralt-space       -> Enter
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(ralt),  k.ks.ag(Escape) );                 // caps-ralt-space  -> Escape
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks1),  k.ks.ag(Space).m(ctrl).m(shift) ); // qks1-space       -> ctrl_shift_space for IDE
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks2),  k.ks.ag(Space).m(ctrl).m(shift) ); // qks1-space       -> ctrl_shift_space for IDE
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps),          k.ks.cg(Space).m(ctrl) );        // caps-space       -> ctrl-space
     // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt),  k.ks.ag(Enter).m(lalt) );          // caps-lalt-space  -> alt-enter
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks),   k.ks.ag(Enter).m(ctrl) );          // caps-q-space     -> ctrl-enter
+
+
+    fn compose_seq_actions (af_a:AF, af_b:AF) -> AF {
+        Arc::new ( move || { af_a(); af_b(); } )
+    }
+    fn ide_find_in_new_window_af (k:&Krusty) -> AF {
+        compose_seq_actions ( k.ks.ag(H).m(alt).gen_af(), k.ks.ag(Enter).m(ctrl).gen_af() )
+    }
+    k.cm .add_combo_af ( k.ks.cg(H).m(caps).s(qks),   k.ks.ag_af (ide_find_in_new_window_af(&k)) );
+
+
 
 
 
@@ -320,7 +353,7 @@ pub fn setup_krusty_board () {
     // win-i should start irfanview
     k.cm .add_combo_af ( k.ks.cg(I).m(lwin),  k.ks.ag_af(action(start_irfanview)) );
 
-    // win-n should start chrome-incognito
+    // win-n should start chrome-incognitoa
     k.cm .add_combo_af ( k.ks.cg(N).m(lwin),  k.ks.ag_af(action(start_chrome_incognito)) );
 
     // we'll setup win-C to quickly bring up chrome Tabs-Outliner via switche Ctrl-Alt-F20 hotkey
@@ -352,9 +385,13 @@ pub fn setup_krusty_board () {
     k.cm .add_combo_af ( k.ks.cg(Numrow_2).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume(-2))) );
     k.cm .add_combo_af ( k.ks.cg(Numrow_3).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume( 2))) );
 
+    // for now we'll use win-alt-F1 as mute .. we'll see if makes sense to keep it that way
+    k.cm .add_combo ( k.ks.cg(F1).m(lwin).m(lalt),  k.ks.ag (VolumeMute) );
+
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
     k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F16) );                   // switche next
+    //k.cm .add_combo_af ( k.ks.cg(F1),          k.ks.ag_af (Arc::new (|| switche_next_w_taskbar_pop())) );                   // switche next
     //k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F17) );                 // switche prev
     k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F16).m(shift) );          // switche prev (passthrough shift-F16 instead of F17 is more efficient)
     k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F19).m(alt).m(ctrl) );    // switche no-popup next switch
@@ -560,6 +597,8 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),  k.ks.ag(Enter).m(ctrl) );
     // similar for this one on expanding things in find window (for txt-search)
     k.cm .add_combo ( k.ks.cg(Slash).m(caps).s(word),  k.ks.ag(Equal).m(ctrl).m(alt).m(shift) );
+    // (but since we've essentially associated Enter with E, we've added combos e.g. caps-q-e for ctrl-Enter etc there too)
+
 
     // we can further add cut/copy/paste actions on the sel mode (caps-e-x/c/v)
     fn gen_wxcv_af (key:Key) -> AF { Arc::new ( move || {
@@ -599,6 +638,11 @@ pub fn setup_krusty_board () {
     k.cm .add_combo_af ( k.ks.cg(N).m(caps).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_min())) );
     // caps-win-t should toggle always on top for fgnd window
     k.cm .add_combo_af ( k.ks.cg(T).m(caps).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
+
+    // we also have some additional more drastic ones with double-caps-win combos
+    k.cm .add_combo_af ( k.ks.cg(S).m(caps_dbl).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_titlebar())) );
+    k.cm .add_combo_af ( k.ks.cg(C).m(caps_dbl).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_titlebar())) );
+    k.cm .add_combo_af ( k.ks.cg(T).m(caps_dbl).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
 
     fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32) {
         // we'll setup caps-win combos for regular move/stretch etc, and caps-ctrl or caps-qks1 combos for fineer control
@@ -644,8 +688,6 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(U).m(caps).s(qks2),  k.ks.ag(F11).m(ctrl).m(shift) );
     // and to bring up the bookmarks viewer
     k.cm .add_combo ( k.ks.cg(K).m(caps).s(qks2),  k.ks.ag(F11).m(shift) );
-    // this toggles IDE col edit mode via Alt-Shift-C (but can be done w/o moving hands much)
-    k.cm .add_combo ( k.ks.cg(C).m(caps).s(qks2),  k.ks.ag(C).m(alt).m(shift) );
 
 
     // but for switche-hotkeys, instead of caps, we'll do on lalt, and on qks1

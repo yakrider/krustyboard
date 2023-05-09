@@ -13,11 +13,13 @@ use crate::{*, key_utils::*, ModeState_T::*};
 
 pub type ComboStatesBits_ModKeys = [bool; 18];
 pub type ComboStatesBits_Modes   = [bool; 8];
-pub type ComboStatesBits_Flags   = [bool; 3];
+pub type ComboStatesBits_Flags   = [bool; 2];
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
 // 4+4=8 modes ( sel / del / word / fast,  qks / qks1 / qks2 / qks3),
-// 3 flags ( mngd-ctrl-dn / ctrl-tab-scrl / rght-ms-scrl ) ..
+// 2 flags ( mngd-ctrl-dn / ctrl-tab-scrl ) ..
+//
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
+// note also that rght-ms-scrl and some other flags are not included in combo maps .. just check them at use
 
 
 
@@ -118,18 +120,19 @@ impl Combo {
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    pub fn static_flags_modes () -> [ModeState_T;3] {
+    pub fn static_flags_modes () -> [ModeState_T;2] {
         // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
-        static FLAGS_MODES : [ModeState_T;3] = [mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl];
+        static FLAGS_MODES : [ModeState_T;2] = [mngd_ctrl_dn, ctrl_tab_scrl]; // rght_ms_scrl];
         FLAGS_MODES
     }
     fn get_cur_flags_states_bitmap (ks:&KrustyState) -> ComboStatesBits_Flags {
         // note that the order of these must match the order given by the static_flag_modes fn above
-        [ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set(), ks.in_right_btn_scroll_state.is_set()]
+        [ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set()] //, ks.in_right_btn_scroll_state.is_set()]
     }
     fn make_combo_flags_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Flags {
         Combo::static_flags_modes() .map (|ms| modes.contains(&ms))
     }
+    // todo: think can take out all of this ^^ now right, given that we dont wanna use them for combo differentiation
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
@@ -355,10 +358,7 @@ impl CombosMap {
 
 
 
-    fn wrapped_bfn (wk:Key, bfn: Box <dyn Fn()>) -> Box <dyn Fn()> {
-        Box::new ( move || { wk.press(); bfn(); wk.release(); } )
-    }
-    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrustyState) {
+    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrustyState) {   //println!("fallback: {:?}",(key));
         // - if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
         // - as to l2 keys (for l3 fallback), we want l2-key expected behavior with other mod key combos ..
@@ -380,14 +380,16 @@ impl CombosMap {
         // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
         let qks1_ctrl = ks.mode_states.check_if_mode_key(key) || l2k_opt.is_some();
 
-        // note that stable rust doesnt let us use existential/dyn stuff in vars to wrap progressively, so use boxes at some minimal cost
-        let mut bfn: Box <dyn Fn()> = Box::new (move || press_release(fb_key));
-        if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { bfn = CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
+        // we can now start progressively wrapping the actions with the appropriate mod-key actions
+        let mut af : AF = Arc::new (move || press_release(fb_key));
+        if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { af = ks.mod_keys.lctrl.active_action(af) } //CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
         // ^^ if its l2-key or mode-key (i.e qks1-ctrl), we wont ctrl wrap just from being here (unless there's actual ctrl or qks1-down)
-        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() { bfn = CombosMap::wrapped_bfn (Key::LShift, bfn) }
-        if ks.mod_keys.lalt.down.is_set() { bfn = CombosMap::wrapped_bfn (Key::LAlt, bfn) }
-        if ks.mod_keys.some_win_down()   { bfn = CombosMap::wrapped_bfn (Key::LWin, bfn) }
-        bfn();
+        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() { af = ks.mod_keys.lshift.active_action(af) }
+        if ks.mod_keys.lalt.down.is_set() { af = ks.mod_keys.lalt.active_action(af) }
+        if ks.mod_keys.some_win_down()   { af = ks.mod_keys.lwin.active_action(af) }
+
+        // aight, now we exec the layered action we built, and we're done
+        af();
     }
 
 
@@ -407,13 +409,13 @@ impl CombosMap {
             // no fallback for double-tap combos that arent explicitly registered
         } else if ks.mod_keys.ralt.down.is_set() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
-            shift_press_release(key)
+            ks.mod_keys.lshift.active_on_key(key)()
         } else if ks.mod_keys.some_win_dbl() {
             // we want to check this first before just win-down, but we'll let this work naturally via passthrough (as win will be active)
             press_release(key)
-        } else if ks.mod_keys.some_win_down() {
+        } else if ks.mod_keys.some_win_down() { // note that win is set to only be active upon dbl-tap
             // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
-            win_press_release(key)
+            ks.mod_keys.lwin.active_on_key(key)()       // <-- temp hopefully until we get used to double-tap ??
         } else {
             // others, incl single/double ctrl/shift/no-mod presses should all work naturally via passthrough
             press_release(key)

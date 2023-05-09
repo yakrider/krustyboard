@@ -201,9 +201,12 @@ impl ModKeys {
     pub fn get_smk (&self, mk:ModKey) -> Option <SyncdModKey> {
         self.mod_smk_pairs() .iter() .filter_map (|(pmk,psmk)| if mk == *pmk { Some(psmk.clone()) } else { None } ) .cloned() .next()
     }
+    // todo ^^ prob could make an enum-ordinal based array to avoid the looping in get_smk
+
     pub fn get_tmk (&self, mk:ModKey) -> Option <TrackedModKey> {
         self.mod_tmk_pairs() .iter() .filter_map (|(pmk,ptmk)| if mk == *pmk { Some(ptmk.clone()) } else { None } ) .cloned() .next()
     }
+
     pub fn is_lwin_smk (&self) -> bool {
         // this is simply to allow code to remain maximally compatible with switching lwin from TMK_D to SMK
         false
@@ -467,7 +470,7 @@ impl TrackedModKey {
         }
     }
     pub fn handle_key_down__tmk_b (&self, ev:KbdEvent, ks:&KrustyState) -> KbdEvProcDirectives {
-        if !ev.injected {
+        if !ev.injected && !self.down.is_set() {
             self.down.set();
             update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
             ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
@@ -545,12 +548,106 @@ impl TrackedModKey {
     }
 
 
-    /// For SMKs there's no wrapping of active/inactive actions like for SMK
-    ///  .. but we'll create a similar bare-action wrapper so the same pattern can be applied to these during combo AF generation
+    // unassigned vks: 0x88-0x8F, 0x97-0x9F, 0xD8-0xDA, 0xE8 ..  undefined: 0x07, 0x0E-0x0F, 0x3A-0x40
+    //fn mask (&self) -> Key { Key::Other(0xFF) }
+    fn mask (&self) -> Key { Key::OtherKey(0x9A) }
+
+
+    fn is_rel_masking   (&self) -> bool { self.modkey.key() == Key::LWin || self.modkey.key() == Key::RWin || self.modkey.key() == Key::LAlt } // excluding RAlt
+    fn is_rel_delaying  (&self) -> bool { self.modkey.key() == Key::LWin || self.modkey.key() == Key::RWin }
+    fn is_keyup_unified (&self) -> bool { self.modkey.key() == Key::LShift || self.modkey.key() == Key::RShift }
+
+    fn paired_down     (&self) -> bool { self.paired() .iter() .any (|p| p.down.is_set()) }
+    fn paired_active   (&self) -> bool { self.paired() .iter() .any (|p| p.active.is_set()) }
+    fn pair_any_active (&self) -> bool { self.active.is_set() || self.paired_active() }
+
+    fn release_w_masking(&self) {
+        // masking w an unassigned key helps avoid/reduce focus loss to menu etc for alt/win
+        self.active.clear();
+        if !self.is_rel_masking() || !self.consumed.is_set() { self.modkey.key().release(); }
+        else { self.mask().press(); self.modkey.key().release(); self.mask().release(); }
+    }
+
+    fn reactivate        (&self) { self.active.set(); self.modkey.key().press(); }
+    fn paired_reactivate (&self) { self.paired() .iter() .for_each (|p| p.reactivate()) }
+
+    pub fn ensure_inactive (&self) {
+        // utility to ensure modkey is inactive regardless if held down
+        // shouldnt really be necessary since there are action wrappers available to set/restore mod-key for any need at any mod-key state
+        self.consumed.set();
+        if self.active.is_set() { self.release_w_masking(); } // rel call will clear active flag too
+    }
+    pub fn ensure_active (&self) {
+        // utility to get the mod out reliably whether its currently pressed or not, while keeping state tracking updated
+        // this should really ONLY be necessary where we want the mod to be left hanging on until later .. e.g. to simulate alt-tab
+        self.consumed.set();
+        if !self.active.is_set() { self.active.set(); self.modkey.key().press(); }
+    }
+
+
+
+    /// All mod-actions mark the mod-down consumed too, but if its a no-key action (like brightness etc), wrap with this to mark it consumed.
+    /// The consumed flag marks it to have its later release be masked with control to avoid activating win-menu etc
+    pub fn keydn_consuming_action (&self, af:AF) -> AF {
+        let smk = self.clone();
+        Arc::new ( move || { smk.consumed.set(); af(); } )
+    }
+
+
+    /// Use this to wrap activation action blindly (whether its already active or not) and without masking on release.
+    /// ... Should be useful only in cases we explicitly dont expect any contention and want to avoid masking
     pub fn bare_action (&self, af:AF) -> AF {
         let k = self.modkey.key();
         Arc::new ( move || { k.press(); af(); k.release() })
     }
+
+    /// Use this to wrap actions when we want the mod-key to be ACTIVE in the combo .. can use for both self-mod-key combos or unrelated combos.
+    /// .. e.g. if setting up alt-X to send alt-win-y, we'd set lalt-mapping on Key::X as k.alt.active_action(k.win.active_on_key(Key::Y))
+    pub fn active_action (&self, af:AF) -> AF {
+        let smk = self.clone();
+        Arc::new ( move || {
+            smk.consumed.set();
+            if smk.pair_any_active() { af() }
+            else { smk.modkey.key().press(); af(); smk.release_w_masking(); }
+        })
+    }
+    #[allow(dead_code)]
+    pub fn active_on_key (&self, key:Key) -> AF { self.active_action (key_utils::base_action(key)) }
+    // ^^ some sugar to make common things simpler
+
+
+
+    /// Use this to wrap actions ONLY when setting combos with this mod key itself AND we want the mod-key to be INACTIVE in the combo.
+    /// .. e.g. if setting up alt-X to send win-y, we'd set lalt-mapping on Key::X as k.alt.inactive_action(k.win.inactive_on_key(Key::Y))
+    pub fn inactive_action (&self, af:AF) -> AF { // note that given our setup, this only gets called for left-side of LR mod keys
+        // in theory, we should be able to just do a masked release here, and that work for alt .. win however is finicky
+        // apparently win start menu triggers unless there's some timing gap between the masked release and another press
+        // .. and from quick expts apparently even 80ms is sometimes too little .. not sure if also machine dependent
+        let smk = self.clone();
+        Arc::new ( move || {
+            if !smk.pair_any_active() { af() }
+            else {
+                smk.consumed.set();
+                if smk.active.is_set() { smk.release_w_masking() }
+                if smk.paired_active() { smk.paired() .iter() .for_each (|p| p.release_w_masking()) }
+                af();
+                if !smk.is_rel_delaying() { // post release reactivation delays (for win)
+                    // basically any/both thats down is activated, but if none are down, still reactivate self (which is the left one)
+                    if smk.paired_down() { smk.paired_reactivate() } else { smk.reactivate() }
+                    if smk.down.is_set() && !smk.active.is_set() { smk.reactivate() } // if still not active from above when down, do it
+                } else {
+                    let smk = smk.clone(); // for the delay closure
+                    thread::spawn ( move || {
+                        thread::sleep(time::Duration::from_millis(100));
+                        // since we're delayed, we'll check if the modkeys are still down before reactivating
+                        if smk.down.is_set() { smk.reactivate() }
+                        if smk.paired_down() { smk.paired_reactivate() }
+                    } );
+        } } } )
+    }
+    #[allow(dead_code)]
+    pub fn inactive_on_key (&self, key:Key) -> AF { self.inactive_action (key_utils::base_action(key)) }
+    // ^^ some sugar to make common things simpler .. could add for ctrl etc too if there was use
 
 
 }
@@ -571,11 +668,16 @@ impl SyncdModKey {
         Self ( Arc::new ( _ModKey::new(mk,pair) ) )
     }
 
-    fn paired (&self) -> Option <&SyncdModKey> {
+    fn _paired (&self) -> Option <&SyncdModKey> {
         static PAIRED : OnceCell <Option <SyncdModKey>> = OnceCell::new();
-        PAIRED .get_or_init (||
-            self.pair .map (|p| KrustyState::instance().mod_keys.get_smk(p)) .flatten()
+        PAIRED .get_or_init (|| {
+            let p = self.pair .map (|p| KrustyState::instance().mod_keys.get_smk(p)) .flatten();
+            println!("paired: {:?}",((self.modkey, p.as_ref())));
+            p }
         ) .as_ref()
+    }
+    fn paired (&self) -> Option <SyncdModKey> {
+        self.pair .map (|p| KrustyState::instance().mod_keys.get_smk(p)) .flatten()
     }
 
 
@@ -596,24 +698,27 @@ impl SyncdModKey {
         if ks.mod_keys.caps.down.is_set() {
             // caps is down, record alt being down if not already, but either way block it (so no change to alt-active state)
             self.consumed.clear();
-            if !self.down.is_set() { ks.mouse.proc_notice__modkey_down (self.modkey, &ks) }
+            //if !self.down.is_set() { ks.mouse.proc_notice__modkey_down (self.modkey, &ks) }
             if !ev.injected {
-                self.down.set();
-                update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
-            }
+                if !self.down.is_set() {
+                    self.down.set();
+                    ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
+                    update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+                }
+            } else {  self.active.set() }
+            // ^^ if its injected, we'll at least try to keep our state in sync w outside (otherwise w caps down, we never send mod press)
         } else {
             if self.down.is_set() {
                 // caps isnt down, but we were, so its repeat .. we'll block it even if out-of-sync or its coming after combo caps release
+                if ev.injected { self.active.set() }  // but for injected events, at least update update our internal model
             } else {
-                // caps isnt down, and alt wasnt down, so record states and let it through
+                // caps isnt down, and our mod key wasnt down i.e not a key-repeat, so record states and let it through
                 if !ev.injected {
                     self.down.set();
                     update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+                    ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
                 }
-                self.active.set();
-                self.consumed.clear();
-                ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
-                // notice that we're only doing this if not a repeat
+                self.active.set(); self.consumed.clear();
                 let key = self.modkey.key();
                 thread::spawn (move || key.press());
         } }
@@ -624,9 +729,11 @@ impl SyncdModKey {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        if !ev.injected {  self.down.clear(); self.dbl_tap.clear(); }
-        ks.mouse.proc_notice__modkey_up (self.modkey, &ks);
-        if self.modkey.key() == Key::LCtrl || self.modkey.key() == Key::RCtrl { ks.in_ctrl_tab_scroll_state.clear() }
+        if !ev.injected {
+            self.down.clear(); self.dbl_tap.clear();
+            ks.mouse.proc_notice__modkey_up (self.modkey, &ks);
+            if self.modkey == lctrl || self.modkey == rctrl { ks.in_ctrl_tab_scroll_state.clear() }
+        }
         if !self.active.is_set() || ks.mod_keys.caps.down.is_set() {
             // if inactive or caps-down we just suppress this keyup
         } else {
@@ -761,6 +868,7 @@ impl SyncdModKey {
         let smk = self.clone();
         Arc::new ( move || {
             smk.consumed.set();
+            //if smk.pair_any_active() { dbg!((smk.modkey, &smk.paired())); af() }
             if smk.pair_any_active() { af() }
             else { smk.modkey.key().press(); af(); smk.release_w_masking(); }
         })

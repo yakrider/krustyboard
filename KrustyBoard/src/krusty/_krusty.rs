@@ -1,3 +1,4 @@
+#![ allow (dead_code) ]
 
 use std::thread;
 use std::time::{Instant, Duration};
@@ -6,6 +7,9 @@ use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use once_cell::sync::OnceCell;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::HINSTANCE;
+use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, HCURSOR, HICON, IDC_ARROW, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENWSE, IDC_WAIT, LoadCursorW, SetSystemCursor, SYSTEM_CURSOR_ID};
 
 use crate::*;
 
@@ -78,7 +82,14 @@ pub const KEY_DOUBLE_TAP_MS  : u32 = 400;
 pub const MBTN_DOUBLE_TAP_MS : u32 = 500;
 
 pub fn update_stamp_key_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
-    update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS)
+    let is_double_tap = update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS);
+    if is_double_tap {
+        jiggle_cursor();
+        //let curs = Cursors::instance();
+        //curs.hc_app_starting.toggle_cursor (OCR_NORMAL, &curs.hc_arrow);
+        //curs.hc_app_starting.toggle_cursor (OCR_IBEAM,  &curs.hc_ibeam)
+    }
+    is_double_tap
 }
 pub fn update_stamp_mouse_dbl_click (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
     update_stamp_dbl_tap (ev_t, stamp, dbl_flag, MBTN_DOUBLE_TAP_MS)
@@ -88,8 +99,65 @@ fn update_stamp_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag, thresh_ms:
     stamp.set(ev_t);
     let is_double_tap = dt < thresh_ms && dt > 50;  // we'll put a small mandatory gap for debounce
     dbl_flag .store (is_double_tap);
-    //if is_double_tap { std::thread::spawn (move || println!("{:?}",("dbl-tap",dt))); }
     is_double_tap
+}
+fn jiggle_cursor() {
+    thread::spawn (|| {
+        MousePointer::move_rel(5,5);
+        thread::sleep(Duration::from_millis(100));
+        MousePointer::move_rel(-5,-5);
+    } );
+}
+
+# [ derive (Debug, Clone) ]
+struct Cursor (Option<HICON>);
+impl Cursor {
+    unsafe fn load_copy_cursor (id:PCWSTR) -> Option<HICON> { LoadCursorW (HINSTANCE(0), id).ok() .map (|hc| CopyIcon(hc).ok()) .flatten() }
+    fn new (id:PCWSTR) -> Cursor { unsafe { Cursor ( Cursor::load_copy_cursor(id) ) } }
+    fn get (&self) -> Option<HICON> { self.0.clone() }
+
+    pub fn swap_cursor ( &self, id:SYSTEM_CURSOR_ID ) { unsafe {
+        self.0 .iter() .map (|&hc| CopyIcon(hc).ok()) .flatten() .for_each (|hc| {SetSystemCursor (HCURSOR(hc.0), id);});
+    } }
+    pub fn toggle_cursor ( &self,  id:SYSTEM_CURSOR_ID, cur_restore:&Cursor ) { unsafe {
+        let cur = self.get(); let res = cur_restore.get();
+        thread::spawn ( move || {
+            cur .map (|hc| CopyIcon(hc).ok()) .flatten() .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
+            thread::sleep(Duration::from_millis(300));
+            res .map (|hc| CopyIcon(hc).ok()) .flatten() .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
+        } );
+    } }
+}
+
+# [ derive (Debug, Clone) ]
+pub struct _Cursors {
+    hc_arrow        : Cursor,
+    hc_ibeam        : Cursor,
+    hc_size_all     : Cursor,
+    hc_size_nwse    : Cursor,
+    hc_app_starting : Cursor,
+}
+# [ derive (Debug, Clone) ]
+pub struct Cursors ( Arc <_Cursors> );
+
+impl Deref for Cursors {
+    type Target = _Cursors;
+    fn deref (&self) -> &_Cursors { &self.0 }
+}
+
+impl Cursors {
+    pub fn instance() -> Cursors {
+        static INSTANCE : OnceCell<Cursors> = OnceCell::new();
+        INSTANCE .get_or_init ( ||
+            Cursors ( Arc::new ( _Cursors {
+                hc_arrow        : Cursor::new (IDC_ARROW),
+                hc_ibeam        : Cursor::new (IDC_IBEAM),
+                hc_size_all     : Cursor::new (IDC_SIZEALL),
+                hc_size_nwse    : Cursor::new (IDC_SIZENWSE),
+                hc_app_starting : Cursor::new (IDC_WAIT),
+            } ) )
+        ) .clone()
+    }
 }
 
 
@@ -121,6 +189,8 @@ pub struct _KrustyState {
     pub in_ctrl_tab_scroll_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
     pub in_right_btn_scroll_state: Flag,
+    // we'll track whether we're set to replace alt-tab or not .. (should be togglable via hotkey, and not in combo maps)
+    pub is_replacing_alt_tab: Flag,
 
 }
 
@@ -173,6 +243,7 @@ impl KrustyState {
                 in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
+                is_replacing_alt_tab       : Flag::new(true),
             } ) )
         ) .clone()
     }
@@ -187,11 +258,16 @@ impl KrustyState {
         X1Button.release(); X2Button.release();
 
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
+           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state, &self.is_replacing_alt_tab,
         ] .into_iter() .for_each (|flag| flag.clear());
 
         // lets send a delayed Esc for any context menus etc that show up
         thread::spawn (|| { thread::sleep (Duration::from_millis(300)); key_utils::press_release(Key::Escape) } );
+    }
+
+    pub fn toggle_alt_tab_replace (&self) {
+        self.is_replacing_alt_tab.store (!self.is_replacing_alt_tab.is_set());
+        //println! ("alt-tab-repl-state: {:?}", (self.is_replacing_alt_tab.is_set()))
     }
 
     /// Utlity function to create a new Combo-generator (for combo-specification) <br>
@@ -262,12 +338,30 @@ pub mod key_utils {
     pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, press_release, key) }
     pub fn win_press_release   (key:Key) { wrapped_press_release (Key::LWin,  press_release, key) }
 
-    // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
-    /// wraps a given unitary function with NO input args into an Arc Fn
-    pub fn action (f:fn()) -> AF { Arc::new (move || f()) }
 
-    /// wraps a given unitary function with ONE input arg into an Arc Fn
-    pub fn action_p1<T> (f:fn(T), t:T) -> AF where T: Copy + Send + Sync + 'static { Arc::new (move || f(t)) }
+    // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
+
+    /// wraps a given unitary function closure with NO input args into an Arc Fn
+    //pub fn action (f:fn()) -> AF { Arc::new (move || f()) }
+    pub fn action<F> (f:F) -> AF where F: Fn() + Send + Sync + 'static { Arc::new (move || f()) }
+
+    /// wraps a given unitary function closure with ONE input arg into an Arc Fn
+    //pub fn action_p1<T> (f:fn(T), t:T) -> AF where T: Copy + Send + Sync + 'static { Arc::new (move || f(t)) }
+    pub fn action_p1<F,T> (f:F, t:T) -> AF
+        where F: Fn(T) +  Send + Sync + 'static,
+              T: Copy + Send + Sync + 'static
+    { Arc::new ( move || f(t) ) }
+
+    // d- todo add caps-q-e as ctrl-enter, or maybe caps-2-e
+    // d- todo .. or maybe caps-q-space too .. or maybe just reassign caps-alt-e?
+    // d- todo add caps-q-h / caps-alt-q-h / caps-1-h etc for combo to bring up the txt-search (alt-h) and move to usage window (ctrl-enter)
+    //
+    // todo consider combining the TMK and SMK impls if they are getting too much overlap .. they already share struct anyway
+    // todo .. and for that consider if theres a way to put the different binding setups in traits
+    //
+    // todo .. there's also the pending thought marked in combo-maps to see if can remove additional flag-modes from bitmap
+    //
+    // d- todo .. consider adding impl for switche to take over alt-tab (impld in krusty) .. my win11 alt-tab is infuriatingly laggy
 
     pub fn no_action           () -> AF { Arc::new ( || {} ) }
     pub fn base_action  (key:Key) -> AF { action_p1 (press_release,        key) }

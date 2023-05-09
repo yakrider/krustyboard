@@ -18,7 +18,9 @@ pub enum ModeState_T {
     no_ms,  // no_ms can be useful to fill in fns set to take somethhing .. its ignored at its not in bitmaps
     sel, del, word, fast,
     qks, qks1, qks2, qks3,
-    mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl,
+    mngd_ctrl_dn, ctrl_tab_scrl,
+    // note rght_ms_scrl and some other flags are not included in these!
+    // todo: more of these should be removable now that we pretty much dont use bare flags in combo spec or bitmaps
 }
 
 
