@@ -13,9 +13,7 @@ use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_SYSTEM_AWARE, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
-use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION
-};
+use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
 
 
 // we'll define our own new-type of Hwnd mostly because HWND doesnt implement trait Hash to put into maps etc
@@ -36,6 +34,10 @@ impl From<Hwnd> for HWND {
 
 pub fn win_set_thread_dpi_aware() { unsafe {
     SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+} }
+
+pub fn win_set_cur_process_priority_high() -> bool { unsafe {
+    SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS) .as_bool()
 } }
 
 pub fn dpi_conv_point (hwnd:Hwnd, p:POINT) -> POINT { unsafe {

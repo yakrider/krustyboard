@@ -4,13 +4,13 @@ use std::{
     thread::sleep,
     time::Duration,
     mem::size_of,
-    collections::HashMap,
     os::raw::c_int,
 };
 use windows::Win32::{
     UI::Input::KeyboardAndMouse::*,
 };
 use once_cell::sync::Lazy;
+use rustc_hash::FxHashMap;
 
 
 use crate::*;
@@ -50,10 +50,10 @@ pub struct KbdEvent {
 
 /// Intended as a temp hack to send (possibly extended) scan-codes instead of virtual-key-codes for left/right modifier-keys.
 /// .. In particular since machines dont seem to be consistent in what they send, and this ensures the L/R key nature is consistent
-static KEY_SWAPS_MAP: Lazy<HashMap<KbdKey,u64>> = Lazy::new ( || {
+static KEY_SWAPS_MAP: Lazy<FxHashMap<KbdKey,u64>> = Lazy::new ( || {
     [   (KbdKey::RAlt, 0xE038 as u64), (KbdKey::RCtrl, 0xE01D as u64) , (KbdKey::RShift, 0x0036 as u64),
         (KbdKey::LAlt, 0x0038 as u64), (KbdKey::LCtrl, 0x001D as u64) , (KbdKey::LShift, 0x002A as u64)
-    ] .into_iter() .collect::<HashMap<KbdKey,u64>>()
+    ] .into_iter() .collect::<FxHashMap<KbdKey,u64>>()
 } );
 
 

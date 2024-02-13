@@ -1,10 +1,11 @@
 #![ allow (non_camel_case_types) ]
 
-use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use once_cell::sync::OnceCell;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 
 use crate::{*, key_utils::*, ModeState_T::*};
@@ -13,10 +14,12 @@ use crate::{*, key_utils::*, ModeState_T::*};
 
 pub type ComboStatesBits_ModKeys = [bool; 18];
 pub type ComboStatesBits_Modes   = [bool; 8];
+pub type ComboStatesBits_Latches = [bool; 4];
 pub type ComboStatesBits_Flags   = [bool; 2];
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
 // 4+4=8 modes ( sel / del / word / fast,  qks / qks1 / qks2 / qks3),
 // 2 flags ( mngd-ctrl-dn / ctrl-tab-scrl ) ..
+// 4 latched layer combo states
 //
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
 // note also that rght-ms-scrl and some other flags are not included in combo maps .. just check them at use
@@ -30,9 +33,10 @@ pub type ComboStatesBits_Flags   = [bool; 2];
 pub struct Combo {
     _private:(),
     pub key : Key,
-    pub mk_state   : ComboStatesBits_ModKeys,
-    pub mode_state : ComboStatesBits_Modes,
-    pub flags_state: ComboStatesBits_Flags,
+    pub modkey_states : ComboStatesBits_ModKeys,
+    pub mode_states   : ComboStatesBits_Modes,
+    pub latch_states  : ComboStatesBits_Latches,
+    pub flags_states  : ComboStatesBits_Flags,
 }
 
 
@@ -88,11 +92,11 @@ pub struct ActionGen_wAF<'a> {
 pub struct _CombosMap {
     _private : (),
     // the combos map itself, mapping key+mod-key+mode-state combos to actions
-    combos_map : Arc <RwLock <HashMap <Combo, AF>>>,
+    combos_map : Arc <RwLock <FxHashMap <Combo, AF>>>,
     // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
-    l2_keys_map : Arc <RwLock <HashMap <Key, Key>>>,
+    l2_keys_map : Arc <RwLock <FxHashMap <Key, Key>>>,
     // and we'll hold a registry for keys that only need default/fallback bindings
-    default_bind_keys : Arc <RwLock <HashSet <Key>>>,
+    default_bind_keys : Arc <RwLock <FxHashSet <Key>>>,
 }
 # [ derive (Clone) ]
 pub struct CombosMap ( Arc <_CombosMap> );
@@ -112,10 +116,11 @@ impl Deref for CombosMap {
 impl Combo {
 
     pub fn new (key:Key, mod_keys:&[ModKey], modes:&[ModeState_T]) -> Combo {
-        let mk_state    = ModKeys::make_combo_mod_keys_states_bitmap(mod_keys);
-        let mode_state  = ModeStates::make_combo_mode_states_bitmap(modes);
-        let flags_state = Combo::make_combo_flags_states_bitmap(modes);
-        Combo { _private:(), key, mk_state, mode_state, flags_state }
+        let modkey_states = ModKeys::make_combo_mod_keys_states_bitmap(mod_keys);
+        let mode_states   = ModeStates::make_combo_mode_states_bitmap(modes);
+        let latch_states  = ModeStates::make_combo_latch_states_bitmap(modes);
+        let flags_states  = Combo::make_combo_flags_states_bitmap(modes);
+        Combo { _private:(), key, modkey_states, mode_states, latch_states, flags_states }
     }
 
 
@@ -136,17 +141,20 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub fn gen_cur_combo (key:Key, ks:&KrustyState) -> Combo {
+    pub fn gen_cur_combo (key:Key, ks:&KrustyState) -> (Combo, Combo) {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
-        let mode_state  = ks.mode_states.get_cur_mode_states_bitmap();
-        let mk_state    = ks.mod_keys.get_cur_mod_keys_states_bitmap();
-        let flags_state = Combo::get_cur_flags_states_bitmap(ks);
+        let modkey_states = ks.mod_keys.get_cur_mod_keys_states_bitmap();
+        let mode_states   = ks.mode_states.get_cur_mode_states_bitmap();
+        let latch_states  = ks.mode_states.get_cur_latch_states_bitmap();
+        let flags_states  = Combo::get_cur_flags_states_bitmap(ks);
         // NOTE that we're not including mouse btn down keys in states bitmap
         // .. this way, we can use them freely with other states .. else we'd need whole set of combos to support when mouse btn down
         // .. (which might not be a bad idea if we decide we do want to restrict down to specific combos to enable when mouse btns held!)
 
         //println! ("{:?}", Combo { _private:(), key, mk_state, mode_state, flags_state });
-        Combo { _private:(), key, mk_state, mode_state, flags_state }
+        let combo_w_latch  = Combo { _private:(), key, modkey_states, mode_states, latch_states, flags_states };
+        let combo_no_latch = Combo { _private:(), key, modkey_states, mode_states, latch_states: ComboStatesBits_Latches::default(), flags_states };
+        (combo_w_latch, combo_no_latch)
     }
 
 
@@ -323,9 +331,9 @@ impl CombosMap {
         INSTANCE .get_or_init (||
             CombosMap ( Arc::new ( _CombosMap {
                 _private : (),
-                combos_map  : Arc::new ( RwLock::new ( HashMap::new() ) ),
-                l2_keys_map : Arc::new ( RwLock::new ( HashMap::new() ) ),
-                default_bind_keys : Arc::new ( RwLock::new ( HashSet::new() ) ),
+                combos_map  : Arc::new ( RwLock::new ( FxHashMap::default() ) ),
+                l2_keys_map : Arc::new ( RwLock::new ( FxHashMap::default() ) ),
+                default_bind_keys : Arc::new ( RwLock::new ( FxHashSet::default() ) ),
             } ) )
         ) .clone()
     }
@@ -397,8 +405,11 @@ impl CombosMap {
     pub fn combo_maps_handle_key_down (&self, key:Key, ks:&KrustyState) {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
-        if let Some(cmaf) = self.combos_map.read().unwrap() .get(&Combo::gen_cur_combo(key, &ks)) {
-            cmaf()  // found a combo matched action .. we're done!
+        let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (key, &ks);
+        if let Some(cmaf) = self.combos_map.read().unwrap() .get(&combo_w_latch) {
+            cmaf()  // if we find a combo w latch active, that overrides everything else
+        } else if let Some(cmaf) = self.combos_map.read().unwrap() .get(&combo_no_latch) {
+            cmaf()  // else we're now ok w just a combo ignoring latches
         } else if ks.mod_keys.caps.dbl_tap.is_set() {     //println!("{:?}",("dbl-caps!"));
             // no fallback for double-tap combos that arent explicitly registered
             // in the few cases (like maybe caps/ctrl-f etc) we can set them individually in code ourselves
@@ -416,7 +427,7 @@ impl CombosMap {
         } else if ks.mod_keys.some_win_down() { // note that win is set to only be active upon dbl-tap
             // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
             ks.mod_keys.lwin.active_on_key(key)()       // <-- temp hopefully until we get used to double-tap ??
-        } else {
+        } else {    //println!("passthrough: {:?}",key);
             // others, incl single/double ctrl/shift/no-mod presses should all work naturally via passthrough
             press_release(key)
         }
@@ -429,10 +440,11 @@ impl CombosMap {
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
         // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
-        let mut handled_keys = HashSet::new();
+        let mut handled_keys = FxHashSet::default();
         self.combos_map .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
         self.default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
-        k .ks .mode_states .mode_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
+        k .ks .mode_states .mode_flag_pairs()  .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
+        k .ks .mode_states .latch_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
 
         // lets prep the AF to send into kbd-events-queue
         let (ks, cm) = (k.ks.clone(), self.clone());

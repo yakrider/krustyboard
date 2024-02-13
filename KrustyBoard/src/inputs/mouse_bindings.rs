@@ -3,18 +3,18 @@
 #![allow(non_camel_case_types)]
 
 use std::{
-    collections::hash_map::HashMap,
     sync::{Arc, RwLock},
     ops::Deref,
 };
 
+use rustc_hash::FxHashMap;
 use once_cell::sync::OnceCell;
 
 use crate::{*, MouseEventCbMapKeyAction::*};
 
 
 /// Mouse-Events callback bindings map type: the map-key has event-src and-event type, the map-value is the callback entry
-pub type MouseEventCbMap = HashMap <MouseEventCbMapKey, MouseEventCallbackEntry>;
+pub type MouseEventCbMap = FxHashMap <MouseEventCbMapKey, MouseEventCallbackEntry>;
 
 
 /// The bindings-map event-source type can be specified button, specified wheel, or the pointer
@@ -93,7 +93,7 @@ impl MouseBindings {
     pub fn instance() -> MouseBindings {
         static INSTANCE: OnceCell <MouseBindings> = OnceCell::new();
         INSTANCE .get_or_init ( ||
-            MouseBindings ( Arc::new ( RwLock::new ( HashMap::new() ) ) )
+            MouseBindings ( Arc::new ( RwLock::new ( FxHashMap::default() ) ) )
         ) .clone()
     }
 

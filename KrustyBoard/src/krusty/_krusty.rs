@@ -34,9 +34,10 @@ pub struct Flag (Arc<AtomicBool>);
 impl Flag {
     pub fn new (state:bool) -> Flag { Flag ( Arc::new ( AtomicBool::new(state) ) ) }
 
-    pub fn set   (&self) { self.0 .store (true,  Ordering::SeqCst) }
-    pub fn clear (&self) { self.0 .store (false, Ordering::SeqCst) }
-    pub fn store (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
+    pub fn set    (&self) { self.0 .store (true,  Ordering::SeqCst) }
+    pub fn clear  (&self) { self.0 .store (false, Ordering::SeqCst) }
+    pub fn toggle (&self) { self.0 .store ( !self.0.load (Ordering::SeqCst), Ordering::SeqCst) }
+    pub fn store  (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
 
     pub fn is_set   (&self) -> bool { true  == self.0 .load (Ordering::SeqCst) }
     pub fn is_clear (&self) -> bool { false == self.0 .load (Ordering::SeqCst) }
@@ -223,7 +224,7 @@ pub struct Krusty {
 
 
 
-
+pub const ALT_TAB_REPL_DEFAULT_STATE : bool = true;
 
 /// impl for Krusty-State
 impl KrustyState {
@@ -243,7 +244,7 @@ impl KrustyState {
                 in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
-                is_replacing_alt_tab       : Flag::new(true),
+                is_replacing_alt_tab       : Flag::new(ALT_TAB_REPL_DEFAULT_STATE),
             } ) )
         ) .clone()
     }
@@ -258,8 +259,10 @@ impl KrustyState {
         X1Button.release(); X2Button.release();
 
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state, &self.is_replacing_alt_tab,
+           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
+
+        self.is_replacing_alt_tab.store(ALT_TAB_REPL_DEFAULT_STATE);
 
         // lets send a delayed Esc for any context menus etc that show up
         thread::spawn (|| { thread::sleep (Duration::from_millis(300)); key_utils::press_release(Key::Escape) } );
@@ -319,6 +322,8 @@ impl Krusty {
 pub mod key_utils {
 
     use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
     use crate::*;
 
     pub fn press                (key:Key) { key.press(); }
@@ -343,7 +348,9 @@ pub mod key_utils {
 
     /// wraps a given unitary function closure with NO input args into an Arc Fn
     //pub fn action (f:fn()) -> AF { Arc::new (move || f()) }
-    pub fn action<F> (f:F) -> AF where F: Fn() + Send + Sync + 'static { Arc::new (move || f()) }
+    pub fn action<F> (f:F) -> AF
+        where F: Fn() + Send + Sync + 'static
+    { Arc::new (move || f()) }
 
     /// wraps a given unitary function closure with ONE input arg into an Arc Fn
     //pub fn action_p1<T> (f:fn(T), t:T) -> AF where T: Copy + Send + Sync + 'static { Arc::new (move || f(t)) }
@@ -351,6 +358,9 @@ pub mod key_utils {
         where F: Fn(T) +  Send + Sync + 'static,
               T: Copy + Send + Sync + 'static
     { Arc::new ( move || f(t) ) }
+
+
+
 
     // d- todo add caps-q-e as ctrl-enter, or maybe caps-2-e
     // d- todo .. or maybe caps-q-space too .. or maybe just reassign caps-alt-e?
@@ -370,6 +380,20 @@ pub mod key_utils {
     pub fn shift_action (key:Key) -> AF { action_p1 (shift_press_release,  key) }
     pub fn win_action   (key:Key) -> AF { action_p1 (win_press_release,    key) }
 
+
+    /// wraps a given AF into an action that is spawned in its own thread
+    pub fn spawned_action (af:AF) -> AF {
+        Arc::new ( move || {
+            let af = af.clone();
+            thread::spawn ( move || af() );
+    } ) }
+
+    /// wraps a given AF into an action that is spawned in its own thread and executed with the specified milliseconds delay
+    pub fn delayed_action (tms:u64, af:AF) -> AF {
+        Arc::new ( move || {
+            let af = af.clone();
+            thread::spawn ( move || { thread::sleep(Duration::from_millis(tms)); af() } );
+    } ) }
 }
 
 

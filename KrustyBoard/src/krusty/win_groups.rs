@@ -1,11 +1,11 @@
 #![ allow (non_camel_case_types) ]
 
 
-use std::collections::{HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use rustc_hash::FxHashSet;
 
 use crate::{Flag, Key, ModeState_T};
 use crate::utils::*;
@@ -52,7 +52,7 @@ impl From <WinGroups_E> for ModeState_T {
 // Note: this is intended as quick throwaway grouping and set that we'd rather replace than update
 pub struct WinGroup {
     grp     : Vec <Hwnd>,
-    grp_set : HashSet <Hwnd>,
+    grp_set : FxHashSet <Hwnd>,
     topmost : Flag,
 }
 
@@ -91,7 +91,7 @@ impl WinGroups {
         let grps = &mut self.write().unwrap().grps;
         let mut grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .map(|i| *i) .collect::<Vec<_>>();
         grp.push(hwnd);
-        let grp_set = grp .iter() .copied() .collect::<HashSet<_>>();
+        let grp_set = grp .iter() .copied() .collect::<FxHashSet<_>>();
         let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
         grps[grp_e.idx()] = WinGroup {grp, grp_set, topmost};
     }
@@ -100,13 +100,13 @@ impl WinGroups {
         let grps = &mut self.write().unwrap().grps;
         if grps [grp_e.idx()] .grp_set .contains(&hwnd) {
             let grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .copied() .collect::<Vec<_>>();
-            let grp_set = grp .iter() .map(|i| *i) .collect::<HashSet<_>>();
+            let grp_set = grp .iter() .map(|i| *i) .collect::<FxHashSet<_>>();
             let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
             grps [grp_e.idx()] = WinGroup {grp, grp_set, topmost};
     } }
 
     fn clear_dead_grp_hwnds (&self, wg:WinGroups_E, hwnds:&Vec<Hwnd>) {
-        let hwnds_set = hwnds .iter() .copied() .collect::<HashSet<_>>();
+        let hwnds_set = hwnds .iter() .copied() .collect::<FxHashSet<_>>();
         let grp_hwnds = self.read().unwrap() .grps[wg.idx()] .grp .iter()
             .filter (|h| !hwnds_set.contains(h)) .copied().collect::<Vec<_>>();
         // ^^ we want to have a local copy of this so we're not extending read lock context into the remove calls

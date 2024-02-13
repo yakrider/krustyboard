@@ -331,11 +331,13 @@ fn mouse_rbtn_release_masked () {
     // and looks like for such a manual-move strategy to work, there HAS to be a delay before we move the pointer back
     // (also, this works for almost all applications EXCEPT for windows-explorer .. MS ofc has to be special .. meh)
     let point = MousePointer::pos();
-    MousePointer::move_abs (0xFFFF, 0xFFFF);
-    MouseButton::RightButton.release();
-    // some delay to actually have the release processed while pointer is still away
     thread::spawn ( move || {
-        thread::sleep(time::Duration::from_millis(50));
+        // we'll add a delay before release, to avoid focus stealing from switche intended window etc
+        MousePointer::move_abs (0xFFFF, 0xFFFF);
+        thread::sleep(time::Duration::from_millis(20));
+        MouseButton::RightButton.release();
+        // we'll add some delay to actually have the release processed while pointer is still away
+        thread::sleep(time::Duration::from_millis(40));
         // note that reducing this delay or even removing it will mostly work (as the event handling can happen before spawned thread comes up)..
         // .. however, for times when there's load etc and the event handling is also pushed out, we'll want at least some delay
         win_set_thread_dpi_aware();
@@ -365,16 +367,22 @@ pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
 fn handle_mouse_middle_btn_down (ks:&KrustyState, ev:MouseEvent, mbs:&MouseBtnState) {
     mbs.down.set();
     update_stamp_mouse_dbl_click (ev.get_stamp(), &mbs.stamp, &mbs.dbl_tap);
-    if ks.mod_keys.lshift.down.is_set() {
+    if ks.mod_keys.lwin.down.is_set() {
+        ks.mod_keys.lwin.consumed.set();
+        let pointed_hwnd = win_get_hwnd_from_pointer();
+        if ( // for the pointed window, w caps/ctrl/shift and fgnd, we'll try close-tab via ctrl-w
+            ks.mod_keys.caps.down.is_set() || ks.mod_keys.lctrl.down.is_set() || ks.mod_keys.lshift.down.is_set()
+        ) && pointed_hwnd == win_get_fgnd() {
+            ks.ag (Key::W) .m(ModKey::ctrl) .gen_af()();
+        } else { // and for no-mods win-mbtn we'll close the mouse-pointed window
+            win_close (pointed_hwnd);
+        }
+    } else if ks.mod_keys.lshift.down.is_set() {
         // lshift-mbtn to go backwards in IDE cursor location
         ks.ag (Key::ExtLeft ) .m(ModKey::alt) .gen_af()();
-    } else if ks.mod_keys.lctrl.down.is_set() {
+    } else if ks.mod_keys.caps.down.is_set() || ks.mod_keys.lctrl.down.is_set() {
         // lctrl-mbtn to go forwards in IDE cursor location
         ks.ag (Key::ExtRight) .m(ModKey::alt) .gen_af()();
-    } else if ks.mod_keys.lwin.down.is_set() {
-        // win-mbtn to close the mouse-pointed window
-        ks.mod_keys.lwin.consumed.set();
-        win_close (win_get_hwnd_from_pointer());
     } else {
         ks.mouse.mbtn.active.set();
         MouseButton::MiddleButton.press();
@@ -446,16 +454,16 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
                 ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
                 handle_alt_tab_wheel(incr)
             } else {
-                // alt-wheel for (fine delta) control, qks1-alt-wheel for larger adjustments
-                let mult = if ksr.mode_states.qks1.down.is_set() {5} else {1};
+                // alt-wheel for (large delta) control, qks1-alt-wheel for finer adjustments
+                let mult = if ksr.mode_states.qks1.down.is_set() {1} else {4};
                 incr_brightness (incr * mult)
                 // ^^ potentially could spawn this out too, but in this queue thread, meh it'll be fine
             }
         }
     } else if ksr.mod_keys.lwin.down.is_set() {
-        // win-wheel for (fine delta) control, qks1-win-wheel for larger adjustments
+        // win-wheel for (large delta) control, qks1-win-wheel for finer adjustments
         ksr.mod_keys.lwin.consumed.set();
-        let mult = if ksr.mode_states.qks1.down.is_set() {2} else {1};
+        let mult = if ksr.mode_states.qks1.down.is_set() {1} else {1}; // meh just do incrs in 1 .. its already too fast
         incr_volume (incr * mult)
     } else if ksr.mod_keys.caps.down.is_set() || ksr.mod_keys.some_ctrl_down() {
         if ksr.mod_keys.caps.down.is_set() {
@@ -485,6 +493,7 @@ fn handle_wheel_to_arrows_action (incr:i32) {
 pub fn incr_volume (incr:i32) {
     let key = if incr > 0 { Key::VolumeUp } else { Key::VolumeDown };
     (0 .. incr.abs()) .for_each(|_| key.press());
+    //bringup_click_monitor_cdc();
 }
 
 pub fn incr_brightness (incr:i32) {

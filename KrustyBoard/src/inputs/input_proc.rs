@@ -22,7 +22,7 @@ use crate::{
     *, MouseButton::*, MouseWheel::*, EventPropagationDirective::*,
     KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*, MouseEventCallbackFnType::*,
 };
-use crate::utils::win_set_thread_dpi_aware;
+use crate::utils::{win_set_cur_process_priority_high, win_set_thread_dpi_aware};
 
 
 // this is used for identifying the fake keypresses we insert, so we don't process them in an infinite loop
@@ -136,6 +136,10 @@ impl InputProcessor {
         };
         // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
         win_set_thread_dpi_aware();
+
+        // also, we might as well set the whole process higher priority, as we dont want lag in basic input processing
+        let _ = win_set_cur_process_priority_high();
+
         // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
         //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop
         // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)

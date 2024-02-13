@@ -4,19 +4,19 @@
 
 
 use std::{
-    collections::hash_map::HashMap,
     sync::{Arc, RwLock},
     ops::Deref,
 };
 
 use once_cell::sync::OnceCell;
+use rustc_hash::FxHashMap;
 
 
 use crate::{*, KbdEventCbMapKeyType::*};
 
 
 /// Keyboard bindings map type : the map-key has the key and event-type, the map-value is the callback entry
-pub type KbdEventCbMap = HashMap <KbdEventCbMapKey, KbdEventCallbackEntry>;
+pub type KbdEventCbMap = FxHashMap <KbdEventCbMapKey, KbdEventCallbackEntry>;
 
 
 /// The bindings-map key type for any key can be key-down or key-up .. (no press-rel, hold, dbl-click etc)
@@ -117,7 +117,7 @@ impl KbdBindings {
     pub fn instance() -> KbdBindings {
         static INSTANCE: OnceCell <KbdBindings> = OnceCell::new();
         INSTANCE .get_or_init ( ||
-            KbdBindings ( Arc::new ( RwLock::new ( HashMap::new() ) ) )
+            KbdBindings ( Arc::new ( RwLock::new ( FxHashMap::default() ) ) )
         ) .clone()
     }
 

@@ -3,11 +3,11 @@
 
 
 use std::sync::{Arc, RwLock, Mutex};
-use std::collections::HashMap;
 
 use grouping_by::GroupingBy;
 use once_cell::sync::Lazy;
 use rand::Rng;
+use rustc_hash::FxHashMap;
 
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
 
@@ -42,7 +42,7 @@ pub struct PreDragDat {
     pub snap_thresh : u32,
     pub pointer     : POINT,
     pub edge_lists  : RectEdgeLists,
-    pub grp_rects   : HashMap <Hwnd,RECT>,
+    pub grp_rects   : FxHashMap <Hwnd,RECT>,
 }
 
 
@@ -170,10 +170,10 @@ pub fn capture_pre_drag_dat (ks:&KrustyState) -> PreDragDat {    //println!("{:?
     let padding = calc_window_padding (&rect, &frame);
 
     // we'll want to store rects for any group windows to make mirrored moves if in grp mode
-    let grp_rects : HashMap <Hwnd,RECT> = if ks.mode_states.qks1.down.is_set() {    //println!("{:?}",("caching"));
+    let grp_rects : FxHashMap <Hwnd,RECT> = if ks.mode_states.qks1.down.is_set() {    //println!("{:?}",("caching"));
         let grp_hwnds = ks.win_groups.check_win_group(hwnd) .map (|g| ks.win_groups.get_grp_hwnds(g)) .unwrap_or_default();
         grp_hwnds .into_iter() .filter_map ( |gh| rects.iter() .find (|(h,_)| gh == *h) .copied() ) .collect()
-    } else { HashMap::default() };
+    } else { FxHashMap::default() };
 
     // plus lets get the full workable area of the screen to add screen edges to edge-list
     // we'll also use that as cheap dpi-awareness mechanism by setting snap threshold to 2% of screen height
