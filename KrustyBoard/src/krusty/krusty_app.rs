@@ -242,7 +242,7 @@ pub fn setup_krusty_board () {
     k.cm .add_combo_af ( k.ks.cg(A).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lalt.ensure_active()) ) );
     //let ks = k.ks.clone();
     //k.cm .add_combo_af ( k.ks.cg(W).m(caps_dbl).m(lalt),          k.ks.ag_af ( Arc::new (move || ks.mod_keys.lwin.ensure_active()) ) );
-    // todo ^^ fix or remove it .. theres no ensure-active for TMK
+    // win is now dbled modkey (and so not full-managed), and so ensure-active doesnt make sense for it
 
 
     // we'll set dbl-caps-p to bring up process explorer (via ctrl-shift-esc)
@@ -332,8 +332,9 @@ pub fn setup_krusty_board () {
     // (we'll do it by escaping it first (via space then ctrl rel), then invoking the searchable switcher)
     fn gen_ide_switcher_switch_af (k:&Krusty, key:Key) -> AF {
         let ks = k.ks.clone();
+        let ctrl_key_af = k.ks.mod_keys.lctrl.active_on_key(key);
         Arc::new ( move || {
-            if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() {
+            if ks.in_ctrl_tab_scroll_state.is_set() && get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() {
                 // space defocuses from list so we wont actually switch tabs when we release the ctrl
                 press_release(Space);
                 // now release the ctrl so the transient-switcher popup goes away
@@ -346,10 +347,12 @@ pub fn setup_krusty_board () {
                     thread::sleep (time::Duration::from_millis(10));
                     ks.mod_keys.lctrl.active_on_key(E)()
                 } );
-            } else { press_release(key) }
+            } else { ctrl_key_af() }
         } )
     }
-    k.cm .add_combo_af ( k.ks.cg(Space).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
+    k.cm .add_combo_af ( k.ks.cg(Space).m(caps),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
+    //k.cm .add_combo_af ( k.ks.cg(Space).m(caps).s(mngd_ctrl_dn),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
+    //k.cm .add_combo_af ( k.ks.cg(Space).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
 
 
 
@@ -566,11 +569,8 @@ pub fn setup_krusty_board () {
 
 
     // escape is just escape, but we want it to do press-release immediately (so switche is faster)
-    // (incl separately for various flag states that go into combo-bits)
     k.cm .add_combo ( k.ks.cg(Escape),                                          k.ks.ag(Escape) );
     k.cm .add_combo ( k.ks.cg(Escape).m(caps),                                  k.ks.ag(Escape) );
-    k.cm .add_combo ( k.ks.cg(Escape).m(caps).s(mngd_ctrl_dn),                  k.ks.ag(Escape) );
-    k.cm .add_combo ( k.ks.cg(Escape).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl), k.ks.ag(Escape) );
 
     // use the apps key to send shift-escape ..
     k.cm .add_combo ( k.ks.cg(Apps),            k.ks.ag(Escape).m(shift) );

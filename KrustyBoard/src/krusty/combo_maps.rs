@@ -1,5 +1,6 @@
 #![ allow (non_camel_case_types) ]
 
+use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
@@ -8,17 +9,17 @@ use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 
-use crate::{*, key_utils::*, ModeState_T::*};
+use crate::{*, key_utils::*};
 
 
 
 pub type ComboStatesBits_ModKeys = [bool; 18];
 pub type ComboStatesBits_Modes   = [bool; 8];
 pub type ComboStatesBits_Latches = [bool; 4];
-pub type ComboStatesBits_Flags   = [bool; 2];
+pub type ComboStatesBits_Flags   = [bool; 0];
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
 // 4+4=8 modes ( sel / del / word / fast,  qks / qks1 / qks2 / qks3),
-// 2 flags ( mngd-ctrl-dn / ctrl-tab-scrl ) ..
+// 0 flags () .. mngd-ctrl-dn, ctrl-tab-scrl, right-ms-scrl no longer included in bitmap
 // 4 latched layer combo states
 //
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
@@ -125,19 +126,28 @@ impl Combo {
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    pub fn static_flags_modes () -> [ModeState_T;2] {
+    pub fn static_flags_modes () -> [ModeState_T; size_of::<ComboStatesBits_Flags>()] {
         // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
-        static FLAGS_MODES : [ModeState_T;2] = [mngd_ctrl_dn, ctrl_tab_scrl]; // rght_ms_scrl];
+        // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
+        static FLAGS_MODES : [ModeState_T; size_of::<ComboStatesBits_Flags>()] = {
+            //[mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl];
+            //[mngd_ctrl_dn, ctrl_tab_scrl]; // rght_ms_scrl];
+            //[mngd_ctrl_dn]; //, ctrl_tab_scrl]; // rght_ms_scrl];
+            [] //mngd_ctrl_dn]; //, ctrl_tab_scrl]; // rght_ms_scrl];
+        };
         FLAGS_MODES
     }
-    fn get_cur_flags_states_bitmap (ks:&KrustyState) -> ComboStatesBits_Flags {
+    fn get_cur_flags_states_bitmap (_:&KrustyState) -> ComboStatesBits_Flags {
         // note that the order of these must match the order given by the static_flag_modes fn above
-        [ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set()] //, ks.in_right_btn_scroll_state.is_set()]
+        // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
+        //[ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set(), ks.in_right_btn_scroll_state.is_set()]
+        //[ks.in_managed_ctrl_down_state.is_set(), ks.in_ctrl_tab_scroll_state.is_set()] //, ks.in_right_btn_scroll_state.is_set()]
+        //[ks.in_managed_ctrl_down_state.is_set()] //, ks.in_ctrl_tab_scroll_state.is_set()] //, ks.in_right_btn_scroll_state.is_set()]
+        [] //ks.in_managed_ctrl_down_state.is_set()] //, ks.in_ctrl_tab_scroll_state.is_set()] //, ks.in_right_btn_scroll_state.is_set()]
     }
     fn make_combo_flags_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Flags {
         Combo::static_flags_modes() .map (|ms| modes.contains(&ms))
     }
-    // todo: think can take out all of this ^^ now right, given that we dont wanna use them for combo differentiation
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
@@ -201,28 +211,32 @@ impl Combo {
     }
 
     fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState) -> AF {
-        // note that this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
+        // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
+        // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
+        // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
+        // note-4: reminder that e.g. we have ralt blocked, and lalt managed .. and its still ok to specify ralt in combo-gen (sending out)
         let mut af = af;
-        ks.mod_keys.mod_smk_pairs() .map (|(mk,smk)| {
-            ModKeys::static_lr_mods_triplets() .iter() .filter (|(_,lmk,_)| { mk == *lmk }) .for_each (|(lrmk,lmk,rmk)| {
-                // for smks, if not-wrapping, we just compose the action for present mk
-                // but if wrapping, we wrap either active/inactive action for all smks based on whether they are present or not
-                af = if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
-                    if wrap_mod_key_guard { smk.active_action(af.clone()) } else { smk.bare_action(af.clone()) }
+        ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
+            ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
+                // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
+                if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
+                    // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
+                    // so if this is managed mk and the wrapping flag is set, we'll wrap in active action, else just direct action
+                    if umk.is_managed() && wrap_mod_key_guard {
+                        af = umk.active_action(af.clone())
+                    } else {
+                        af = umk.bare_action(af.clone())
+                    }
                 } else {
-                    if wrap_mod_key_guard { smk.inactive_action(af.clone()) } else { af.clone() }
+                    // we're in a triplet where neither of lr/l/r is in the modkeys set for this combo
+                    // so if this is managed mk, we will wrap an inactive action around it .. else it can be as is
+                    if umk.is_managed() && wrap_mod_key_guard { af =
+                        umk.inactive_action(af.clone())
+                    }
                 }
             })
         });
-        ks.mod_keys.mod_tmk_pairs() .map (|(mk,tmk)| {
-            ModKeys::static_lr_mods_triplets() .iter() .filter (|(_,lmk,_)| { mk == *lmk }) .for_each (|(lrmk,lmk,rmk)| {
-                // for tmks, wrapping flags dont matter .. if its specified compose the action, else do nothing
-                if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
-                    af = tmk.bare_action(af.clone());
-                } else { }
-            })
-        } );
-
+        // finally we can return the AF, whether it got wrapped above or not
         af
     }
 
@@ -259,8 +273,8 @@ impl<'a> ComboGen<'a> {
     fn kdn_consume_wrap (&self, af:AF) -> AF {
         let mut afc = af;
         if !self.mod_key_no_consume {
-            self.ks.mod_keys.mod_smk_pairs() .iter() .for_each ( |(mk, smk)| {
-                if self.mks.contains(mk) { afc = smk.keydn_consuming_action (afc.clone()) }
+            self.ks.mod_keys.mod_umk_pairs() .iter() .for_each ( |(mk, umk)| {
+                if umk.is_managed() && self.mks.contains(mk) { afc = umk.keydn_consuming_action (afc.clone()) }
             });
         }
         if !self.mode_kdn_no_consume {
@@ -403,6 +417,7 @@ impl CombosMap {
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
     pub fn combo_maps_handle_key_down (&self, key:Key, ks:&KrustyState) {
+        //println!("key press : {:?}", key);
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
         let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (key, &ks);

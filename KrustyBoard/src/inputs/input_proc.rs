@@ -204,7 +204,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
             match &cbe.cb {
                 KbdEvCbFn_InlineCallback (cb)  => {
                     let epd = cb(event);
-                    if event_proc_d.event_prop_d == EventProp_Undetermined { event_proc_d = epd }
+                    if event_proc_d.event_prop_d == EventProp_Undetermined {
+                        event_proc_d = epd
+                    }
                 }
                 KbdEvCbFn_SpawnedCallback (cb) => {
                     let (cb, kbe) = (cb.clone(), event.clone());    // clone as we'll need the event later again

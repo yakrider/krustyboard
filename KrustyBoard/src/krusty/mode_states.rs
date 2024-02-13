@@ -2,6 +2,7 @@
 
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
+use std::mem::size_of;
 
 use rustc_hash::FxHashSet;
 
@@ -20,9 +21,8 @@ pub enum ModeState_T {
     sel, del, word, fast,
     qks, qks1, qks2, qks3,
     latch_1, latch_2, latch_3, latch_4,
-    mngd_ctrl_dn, ctrl_tab_scrl,
-    // note rght_ms_scrl and some other flags are not included in these!
-    // todo: more of these should be removable now that we pretty much dont use bare flags in combo spec or bitmaps
+    //mngd_ctrl_dn, //ctrl_tab_scrl, //right_ms_scrl,
+    // note: ^^ want minimal flags use here, as we dont want a set flag to change the combo state so other combos w/o flags get invalidated
 }
 
 
@@ -297,29 +297,24 @@ impl ModeStates {
         static QKS_MODES : [ModeState_T;4] = [qks, qks1, qks2, qks3];
         QKS_MODES
     }
-    pub fn static_l2_qks_modes () -> [ModeState_T;8] {
-        // NOTE that this will be our source of ordering for the mode-states bits in combo bitmap!
-        static L2_QKS_MODES : [ModeState_T;8]  = [sel, del, word, fast, qks, qks1, qks2, qks3];
-        L2_QKS_MODES
-    }
-    pub fn static_combo_modes() -> [ModeState_T;9] {
-        // note that this also includes mngd_ctrl_dn which is a flag in KrS (i.e. not managed here)
-        static COMBO_MODES: [ModeState_T;9] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
+    pub fn static_combo_modes() -> [ModeState_T; size_of::<ComboStatesBits_Modes>()] {
+        //static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
+        static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [sel, del, word, fast, qks, qks1, qks2, qks3];
         COMBO_MODES
     }
-    pub fn static_latch_states() -> [ModeState_T;4] {
-        static LATCH_STATES: [ModeState_T;4] = [latch_1, latch_2, latch_3, latch_4];
+    pub fn static_latch_states() -> [ModeState_T; size_of::<ComboStatesBits_Latches>()] {
+        static LATCH_STATES: [ModeState_T; size_of::<ComboStatesBits_Latches>()] = [latch_1, latch_2, latch_3, latch_4];
         LATCH_STATES
     }
 
 
-    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState);8] { [
+    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); size_of::<ComboStatesBits_Modes>() ] { [
         // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (sel, &self.sel), (del,  &self.del),  (word, &self.word), (fast, &self.fast),
         (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3),
     ] }
-    pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState);4] { [
+    pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState); size_of::<ComboStatesBits_Latches>()] { [
         // NOTE that the ordering here MUST match that given by the static_latch_states above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (latch_1, &self.latch_1), (latch_2,  &self.latch_2),  (latch_3, &self.latch_3), (latch_4, &self.latch_4),
@@ -333,7 +328,7 @@ impl ModeStates {
     }
 
     pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
-        ModeStates::static_l2_qks_modes() .map (|ms| modes.contains(&ms))
+        ModeStates::static_combo_modes() .map (|ms| modes.contains(&ms))
     }
     pub fn make_combo_latch_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Latches {
         ModeStates::static_latch_states() .map (|ms| modes.contains(&ms))

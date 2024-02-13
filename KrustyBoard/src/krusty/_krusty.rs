@@ -360,19 +360,6 @@ pub mod key_utils {
     { Arc::new ( move || f(t) ) }
 
 
-
-
-    // d- todo add caps-q-e as ctrl-enter, or maybe caps-2-e
-    // d- todo .. or maybe caps-q-space too .. or maybe just reassign caps-alt-e?
-    // d- todo add caps-q-h / caps-alt-q-h / caps-1-h etc for combo to bring up the txt-search (alt-h) and move to usage window (ctrl-enter)
-    //
-    // todo consider combining the TMK and SMK impls if they are getting too much overlap .. they already share struct anyway
-    // todo .. and for that consider if theres a way to put the different binding setups in traits
-    //
-    // todo .. there's also the pending thought marked in combo-maps to see if can remove additional flag-modes from bitmap
-    //
-    // d- todo .. consider adding impl for switche to take over alt-tab (impld in krusty) .. my win11 alt-tab is infuriatingly laggy
-
     pub fn no_action           () -> AF { Arc::new ( || {} ) }
     pub fn base_action  (key:Key) -> AF { action_p1 (press_release,        key) }
     pub fn fast_action  (key:Key) -> AF { action_p1 (double_press_release, key) }
