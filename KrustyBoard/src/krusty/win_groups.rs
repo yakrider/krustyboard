@@ -1,10 +1,11 @@
 #![ allow (non_camel_case_types) ]
 
 
-use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+
+use derive_deref::Deref;
 use rustc_hash::FxHashSet;
 
 use crate::{Flag, Key, ModeState_T};
@@ -62,13 +63,9 @@ pub struct _WinGroups {
     grps: [WinGroup; NUM_WIN_GROUPS],
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct WinGroups ( Arc <RwLock <_WinGroups>> );
 
-impl Deref for WinGroups {
-    type Target = RwLock<_WinGroups>;
-    fn deref (&self) -> &RwLock<_WinGroups> { &self.0 }
-}
 
 impl WinGroups {
 

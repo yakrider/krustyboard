@@ -23,6 +23,7 @@ futures = "0.3.16"
 rand = "0.8.5"
 grouping_by = "0.2.2"
 rustc-hash = "1.1.0"
+derive_deref = "1.1.1"
 
 
 [target.'cfg(windows)'.dependencies.windows]

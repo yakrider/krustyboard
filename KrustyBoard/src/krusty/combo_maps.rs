@@ -1,11 +1,10 @@
 #![ allow (non_camel_case_types) ]
 
 use std::mem::size_of;
-use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
+use derive_deref::Deref;
 use once_cell::sync::OnceCell;
-
 use rustc_hash::{FxHashMap, FxHashSet};
 
 
@@ -47,7 +46,6 @@ pub struct Combo {
 // The following generators comprise the Combo and Action Generation fluent api structs, with Key or with supplied AF
 // .. once populated they can be used for generation of either a combo or a (possibly guarded) action
 
-# [ allow (non_camel_case_types) ]
 # [ derive (Clone) ]
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 pub struct ComboGen<'a> {
@@ -62,7 +60,6 @@ pub struct ComboGen<'a> {
 
 }
 
-# [ allow (non_camel_case_types) ]
 # [ derive (Clone) ]
 /// Combo-Action-Generator for a combo targeting a key-action (e.g. mapping a combo to another key)
 pub struct ActionGen_wKey<'a> {
@@ -73,7 +70,6 @@ pub struct ActionGen_wKey<'a> {
     wrap_mod_key_guard : bool,
 }
 
-# [ allow (non_camel_case_types) ]
 # [ derive (Clone) ]
 /// Combo-Action-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
 pub struct ActionGen_wAF<'a> {
@@ -99,13 +95,9 @@ pub struct _CombosMap {
     // and we'll hold a registry for keys that only need default/fallback bindings
     default_bind_keys : Arc <RwLock <FxHashSet <Key>>>,
 }
-# [ derive (Clone) ]
+# [ derive (Clone, Deref) ]
 pub struct CombosMap ( Arc <_CombosMap> );
 
-impl Deref for CombosMap {
-    type Target = _CombosMap;
-    fn deref (&self) -> &Self::Target { &self.0 }
-}
 
 
 

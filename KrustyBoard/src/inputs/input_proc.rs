@@ -8,8 +8,8 @@ use std::{
     sync::atomic::{Ordering, AtomicPtr, AtomicU32},
     sync::mpsc::{sync_channel, SyncSender},
     os::raw::c_int,
-    ops::Deref,
 };
+use derive_deref::Deref;
 
 use windows::Win32::{
     Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
@@ -56,13 +56,9 @@ pub struct _InputProcessor {
     pub mouse_af_queue   : SyncSender <( MouseEvCbFn_OffThreadCb_T, MouseEvent )>,
 }
 
-# [ derive (Clone) ]
+# [ derive (Clone, Deref) ]
 pub struct InputProcessor ( Arc <_InputProcessor> );
 
-impl Deref for InputProcessor {
-    type Target = _InputProcessor;
-    fn deref(&self) -> &_InputProcessor { &self.0 }
-}
 
 
 impl InputProcessor {

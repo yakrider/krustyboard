@@ -3,10 +3,10 @@
 
 use std::time;
 use std::thread;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::mem::size_of;
 
+use derive_deref::Deref;
 use once_cell::sync::OnceCell;
 use strum_macros::EnumIter;
 
@@ -101,29 +101,16 @@ impl _ModKey {
 
 
 /// CapsModKey holds the caps-lock key and its impl as the base for most l2/l3 functionality
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct CapsModKey ( Arc <_ModKey> );
-
-impl Deref for CapsModKey {
-    type Target = _ModKey;
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
-// NOTE rest of the impl for this further down
 
 
 
 
 /// Unified-Modifier-Key is now used for all modkeys regardless of ModKey_Mgmt behavior variation (other than for the capslock key)
 // (for reference, we used to have a SyncedModKey for the fully managed type, and a TrackedModKey for all the others)
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct UnifModKey ( Arc <_ModKey> );
-
-impl Deref for UnifModKey {
-    type Target = _ModKey;
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
-// NOTE rest of the impl for this further down
-
 
 
 
@@ -161,13 +148,9 @@ pub struct _ModKeys {
 }
 
 /// Arc wraps our collection of ModiferKeys for cheap cloning/sharing
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct ModKeys ( Arc <_ModKeys> );
 
-impl Deref for ModKeys {
-    type Target = _ModKeys;
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
 
 
 

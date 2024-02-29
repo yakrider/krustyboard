@@ -1,11 +1,10 @@
 #![ allow (non_camel_case_types) ]
 
-use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::mem::size_of;
 
+use derive_deref::Deref;
 use rustc_hash::FxHashSet;
-
 use strum_macros::EnumIter;
 
 use crate::{*, ModeState_T::*};
@@ -39,14 +38,9 @@ pub struct _ModeState {
     pub consumed : Flag,
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 /// Implements the (Arc wrapped) ModeState functionality
 pub struct ModeState ( Arc <_ModeState> );
-
-impl Deref for ModeState {
-    type Target = _ModeState;
-    fn deref(&self) -> &_ModeState { &self.0 }
-}
 
 
 
@@ -60,14 +54,9 @@ pub struct _LatchState {
     pub active   : Flag,
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 /// Implements the (Arc wrapped) ModeState functionality
 pub struct LatchState ( Arc <_LatchState> );
-
-impl Deref for LatchState {
-    type Target = _LatchState;
-    fn deref(&self) -> &_LatchState { &self.0 }
-}
 
 
 
@@ -104,14 +93,10 @@ pub struct _ModeStates {
 
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 /// Implements the (Arc wrapped) ModeStates-holder functionality
 pub struct ModeStates ( Arc <_ModeStates> );
 
-impl Deref for ModeStates {
-    type Target = _ModeStates;
-    fn deref(&self) -> &_ModeStates { &self.0 }
-}
 
 
 

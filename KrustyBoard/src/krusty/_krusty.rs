@@ -2,9 +2,9 @@
 
 use std::thread;
 use std::time::{Instant, Duration};
-use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
 use windows::core::PCWSTR;
@@ -138,13 +138,9 @@ pub struct _Cursors {
     hc_size_nwse    : Cursor,
     hc_app_starting : Cursor,
 }
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct Cursors ( Arc <_Cursors> );
 
-impl Deref for Cursors {
-    type Target = _Cursors;
-    fn deref (&self) -> &_Cursors { &self.0 }
-}
 
 impl Cursors {
     pub fn instance() -> Cursors {
@@ -196,15 +192,10 @@ pub struct _KrustyState {
 }
 
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 /// Arc wrapped KrustyState for cheap cloning/sharing
 pub struct KrustyState ( Arc <_KrustyState> );
 // ^^ we'll use this wrapped type so cloning and passing around is cheap
-
-impl Deref for KrustyState {
-    type Target = _KrustyState;
-    fn deref(&self) -> &_KrustyState { &self.0 }
-}
 
 
 

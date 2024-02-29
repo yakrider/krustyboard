@@ -2,9 +2,9 @@
 
 use std::{
     thread, time,
-    ops::Deref,
     sync::{Arc, RwLock},
 };
+use derive_deref::Deref;
 
 use crate::{
     *, key_utils::*, utils::*, EventPropagationDirective::*,
@@ -22,13 +22,9 @@ pub struct _MouseBtnState {
     pub dbl_tap  : Flag,
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct MouseBtnState ( Arc <_MouseBtnState> );
 
-impl Deref for MouseBtnState {
-    type Target = _MouseBtnState;
-    fn deref(&self) -> &_MouseBtnState { &self.0 }
-}
 
 // since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
 /// Debounced-Arc/Action-Function Fn(MouseEvent) representation that can be passed around to debounce wrapper
@@ -65,13 +61,9 @@ pub struct _MouseWheelState {
     pub spin_invalidated : Flag,
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct MouseWheelState ( Arc <_MouseWheelState> );
 
-impl Deref for MouseWheelState {
-    type Target = _MouseWheelState;
-    fn deref(&self) -> &_MouseWheelState { &self.0 }
-}
 
 impl MouseWheelState {
     pub fn new (wheel:MouseWheel) -> MouseWheelState {
@@ -99,13 +91,9 @@ pub struct _Mouse {
     pub pre_drag_dat : Arc <RwLock <PreDragDat>>,
 }
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Deref) ]
 pub struct Mouse ( Arc <_Mouse> );
 
-impl Deref for Mouse {
-    type Target = _Mouse;
-    fn deref (&self) -> &_Mouse { &self.0 }
-}
 
 impl Mouse {
 
@@ -311,14 +299,15 @@ fn handle_mouse_right_btn_up (ks:&KrustyState, _ev:MouseEvent) {
         ks.in_right_btn_scroll_state.clear();
         // Ctrl-F18 is the exit hotkey for switche if we were doing right-btn-scroll
         ks.mod_keys.lctrl.active_on_key(Key::F18)();
-        mouse_rbtn_release_masked();
+        ks.mouse.rbtn.consumed.clear();
+        if ks.mouse.rbtn.active.is_set() { ks.mouse.rbtn.active.clear(); mouse_rbtn_release_masked(); }
     } else  if ks.mouse.rbtn.active.is_clear() {
         // if it is inactive we didnt send a report out, so nothing to release
-    } else  if ks.mouse.rbtn.consumed.is_set() {
-        ks.mouse.rbtn.consumed.clear();
+    } else  if ks.mouse.rbtn.consumed.is_set() { // ie. active and consumed are both set
+        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
         mouse_rbtn_release_masked();
     } else {
-        ks.mouse.rbtn.active.clear();
+        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
         MouseButton::RightButton.release();
     }
 }
@@ -332,6 +321,7 @@ fn mouse_rbtn_release_masked () {
     // (also, this works for almost all applications EXCEPT for windows-explorer .. MS ofc has to be special .. meh)
     let point = MousePointer::pos();
     thread::spawn ( move || {
+        win_set_thread_dpi_aware();
         // we'll add a delay before release, to avoid focus stealing from switche intended window etc
         MousePointer::move_abs (0xFFFF, 0xFFFF);
         thread::sleep(time::Duration::from_millis(20));
@@ -340,7 +330,6 @@ fn mouse_rbtn_release_masked () {
         thread::sleep(time::Duration::from_millis(40));
         // note that reducing this delay or even removing it will mostly work (as the event handling can happen before spawned thread comes up)..
         // .. however, for times when there's load etc and the event handling is also pushed out, we'll want at least some delay
-        win_set_thread_dpi_aware();
         MousePointer::move_abs (point.x, point.y);
     } );
 }
@@ -380,7 +369,7 @@ fn handle_mouse_middle_btn_down (ks:&KrustyState, ev:MouseEvent, mbs:&MouseBtnSt
     } else if ks.mod_keys.lshift.down.is_set() {
         // lshift-mbtn to go backwards in IDE cursor location
         ks.ag (Key::ExtLeft ) .m(ModKey::alt) .gen_af()();
-    } else if ks.mod_keys.caps.down.is_set() || ks.mod_keys.lctrl.down.is_set() {
+    } else if ks.mod_keys.lctrl.down.is_set() { // || ks.mod_keys.caps.down.is_set() {
         // lctrl-mbtn to go forwards in IDE cursor location
         ks.ag (Key::ExtRight) .m(ModKey::alt) .gen_af()();
     } else {
@@ -436,6 +425,9 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     if ksr.mouse.rbtn.down.is_set() {
         // right-mouse-btn-wheel support for switche task switching
         ksr.in_right_btn_scroll_state.set();
+        //if ksr.mouse.rbtn.consumed.is_clear() { ksr.mouse.rbtn.active.clear(); ksr.mouse.rbtn.btn.release(); }
+        if ksr.mouse.rbtn.consumed.is_clear() { ksr.mouse.rbtn.active.clear(); mouse_rbtn_release_masked(); }
+        // ^^ to avoid having mouse events keep going to old window while rbtn is held down, we'll send an external release here
         ksr.mouse.rbtn.consumed.set();
         let key = if incr.is_positive() { Key::F17 } else { Key::F16 };
         //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)

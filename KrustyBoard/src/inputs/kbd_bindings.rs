@@ -5,8 +5,8 @@
 
 use std::{
     sync::{Arc, RwLock},
-    ops::Deref,
 };
+use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
 use rustc_hash::FxHashMap;
@@ -102,13 +102,9 @@ pub struct KbdEventCallbackEntry {
 
 
 /// The key-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads
-# [ derive (Clone) ]
+# [ derive (Clone, Deref) ]
 pub struct KbdBindings ( Arc <RwLock <KbdEventCbMap>> );
 
-impl Deref for KbdBindings {
-    type Target = RwLock <KbdEventCbMap>;
-    fn deref (&self) -> &Self::Target { &self.0 }
-}
 
 
 

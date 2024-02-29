@@ -1,4 +1,4 @@
-#![ allow (non_upper_case_globals) ]
+#![ allow (non_snake_case, non_upper_case_globals, unused_doc_comments) ]
 
 
 use std::{ time, thread, sync::Arc, };
@@ -288,8 +288,9 @@ pub fn setup_krusty_board () {
         if ks.is_replacing_alt_tab.is_set() && ks.mod_keys.lalt.down.is_set() {
             ks.in_right_btn_scroll_state.set(); // we'll reuse the flag from the other mechanism of triggering switche
             if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
-                // if it was only shift, it would naturally layer from press, but for ralt support we need to add it explicitly
-                 ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.inactive_on_key(F16))()
+                //ks.mod_keys.lshift.inactive_action (ks.mod_keys.lalt.inactive_on_key(F17))()
+                // ^^ passthrough shift-F16 instead of F17 is more efficient
+                ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.inactive_on_key(F16))()
             } else { ks.mod_keys.lalt.inactive_on_key(F16)() }
         }
         else {
@@ -480,7 +481,7 @@ pub fn setup_krusty_board () {
 
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
-    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F16) );                   // switche next
+    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15) );                   // switche invoke/next
     //k.cm .add_combo_af ( k.ks.cg(F1),          k.ks.ag_af (Arc::new (|| switche_next_w_taskbar_pop())) );                   // switche next
     //k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F17) );                 // switche prev
     k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F16).m(shift) );          // switche prev (passthrough shift-F16 instead of F17 is more efficient)
@@ -576,9 +577,16 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(Apps),            k.ks.ag(Escape).m(shift) );
 
     // for alt-escape, we want to override the default send-to-back behavior, as it has issues detailed in notes
-    //k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af(no_action()) );
+    // .. we'll use alt-escape to switch to next window in switche and send cur to back
+    //  .. however if switche is fgnd, we simply send a esc so the swiche window is simply dismissed instead
+    // k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af(no_action()) );
     let switche_next_af = k.ks.ag(F19).m(alt).m(ctrl).gen_af();
-    let alt_esc_action = Arc::new ( move || { let h = win_get_fgnd(); switche_next_af(); win_send_to_back(h); } );
+    let non_alt_esc_af  = k.ks.mod_keys.lalt.inactive_on_key(Escape);
+    let alt_esc_action = Arc::new ( move || {
+        let h = win_get_fgnd();
+        if get_exe_by_hwnd(h).filter(|s| s == "switche.exe").is_some() { non_alt_esc_af(); }
+        else { switche_next_af(); win_send_to_back(h); }
+    } );
     //k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (action (|| {win_send_to_back(win_get_fgnd()); })) );
     k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (alt_esc_action) );
 
@@ -619,6 +627,8 @@ pub fn setup_krusty_board () {
     // >  appears to be a common kbd pcb layout issue .. heres from 2007: (https://www.joachim-breitner.de/blog/250-Shift-Caps-2)
     // sooo .. to makeup, we'll do alt-caps-w do the alt-f4 business instead
     k.cm .add_combo ( k.ks.cg(W).m(caps).m(lalt),  k.ks.ag(F4).m(lalt) );
+    // huh .. we seem to be instinctively trying to use win-w for that .. so we'll just set that up too
+    k.cm .add_combo ( k.ks.cg(W).m(lwin),  k.ks.ag(F4).m(lalt) );
 
 
 

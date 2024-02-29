@@ -4,9 +4,9 @@
 
 use std::{
     sync::{Arc, RwLock},
-    ops::Deref,
 };
 
+use derive_deref::Deref;
 use rustc_hash::FxHashMap;
 use once_cell::sync::OnceCell;
 
@@ -77,13 +77,9 @@ pub struct MouseEventCallbackEntry {
 
 
 /// The mouse-events-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads
-# [ derive (Clone) ]
+# [ derive (Clone, Deref) ]
 pub struct MouseBindings ( Arc <RwLock <MouseEventCbMap>> );
 
-impl Deref for MouseBindings {
-    type Target = RwLock <MouseEventCbMap>;
-    fn deref (&self) -> &Self::Target { &self.0 }
-}
 
 
 
