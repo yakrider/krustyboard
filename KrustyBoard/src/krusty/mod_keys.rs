@@ -1,9 +1,10 @@
-#![ allow (non_snake_case) ]
+#![ allow (non_snake_case, non_camel_case_types) ]
 
 
 use std::time;
 use std::thread;
 use std::sync::Arc;
+use std::fmt::Debug;
 use std::mem::size_of;
 
 use derive_deref::Deref;
@@ -54,15 +55,11 @@ impl TryFrom <ModKey> for KbdKey {
 }
 
 
-/// ModKey_Mgmt type determines how the particular modkey is internally managed
-# [ allow (non_camel_case_types) ]
-# [ derive ( Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd ) ]
-pub enum ModKey_Mgmt {
-    ModKey_Passthrough,
-    ModKey_Blocked,
-    ModKey_Doubled,
-    ModKey_Managed,
-}
+
+/// for composition of modkey behavior variations, we define a KeyHandling trait ..
+/// then keep a box-dyn of the right variant in the modkey struct ..
+/// it needs to be send/sync/'static for cross-thread usage, but shouldnt need to be cloned itself, hence just Box instead of Arc
+pub type KH = Box <dyn KeyHandling + Send + Sync + 'static>;
 
 
 /// We'll used this as the common struct for all types of modkeys whether simple blocked TMKs or the complex SMKs
@@ -74,7 +71,7 @@ pub struct _ModKey {
     // these flags track whether the key is down, if it has been sent out (active), and if we should release it masked (consumed)
     _private     : (),
     pub modkey   : ModKey,
-    pub mk_mgmt  : ModKey_Mgmt,
+    pub handling : KH,                 // box dyn w handling behavior for this key (passthrough/blocked/doubled/managed)
     pub pair     : Option <ModKey>,    // pairing to the left/right counterpart if desired
     pub down     : Flag,
     pub active   : Flag,
@@ -83,10 +80,10 @@ pub struct _ModKey {
     pub dbl_tap  : Flag,
 }
 impl _ModKey {
-    pub fn new (modkey:ModKey, mk_mgmt:ModKey_Mgmt, pair:Option<ModKey>) -> _ModKey { _ModKey {
+    pub fn new (modkey:ModKey, handling:KH, pair:Option<ModKey>) -> _ModKey { _ModKey {
         _private : (),
         modkey,
-        mk_mgmt,
+        handling,
         pair,
         down     : Flag::default(),
         active   : Flag::default(),
@@ -109,12 +106,54 @@ pub struct CapsModKey ( Arc <_ModKey> );
 
 /// Unified-Modifier-Key is now used for all modkeys regardless of ModKey_Mgmt behavior variation (other than for the capslock key)
 // (for reference, we used to have a SyncedModKey for the fully managed type, and a TrackedModKey for all the others)
+//# [ derive (Debug, Clone, Deref) ]
+//pub struct UnifModKey <T:KeyHandling> ( Arc <_ModKey<T>> );
+
+
+/// the setups for managed mod keys come in four flavors ..
+// - passthrough .. simply monitors the state and lets the key events pass through (e.g. none currently)
+// - blocked     .. the key events are blocked at this level and never make it out externally (e.g. ralt )
+// - doubled     .. when double-tapped, they behave like single tapped, whereas single tapped are monitored but blocked (e.g. win)
+// - managed     .. full management .. track both physical and logical states
+
+// note that we wont need any data in the variant objects, they are simply used as types to associate the behavior
+
 # [ derive (Debug, Clone, Deref) ]
 pub struct UnifModKey ( Arc <_ModKey> );
 
 
 
+# [ derive (Debug) ]
+pub struct ModKey_Passthrough;
 
+# [ derive (Debug) ]
+pub struct ModKey_Blocked;
+
+# [ derive (Debug) ]
+pub struct ModKey_Doubled;
+
+# [ derive (Debug) ]
+pub struct ModKey_Managed;
+
+
+/// KeyHandling behavior variants
+/// .. note that these only handle the external logical state management .. some common physical etc mgmt is in the UnifModKey itself
+pub trait KeyHandling : Debug {
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
+    fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
+
+    // utility fn to make prepping these binding/processing directives less cumbersome
+    fn epds (&self, epd:EventPropagationDirective) -> KbdEvProcDirectives {
+        KbdEvProcDirectives::new (epd, KbdEvCbComboProcDirective::ComboProc_Disable)
+    }
+    // note that the self is in params simply to allow calling w/o full impl specification
+    // (and w that adding 'where Self:Sized' is no longer needed .. which otherwise we'd need for trait object associated fn )
+    fn epds_blocked      (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Stop) }
+    fn epds_continue     (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Continue) }
+    fn epds_undetermined (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Undetermined) }
+
+    fn is_managed (&self) -> bool { false }
+}
 
 
 
@@ -160,26 +199,25 @@ pub struct ModKeys ( Arc <_ModKeys> );
 impl ModKeys {
 
     pub fn new() -> Self {
-        use ModKey_Mgmt::*;
         Self ( Arc::new ( _ModKeys {
             _private : (),
             // caps is a special singleton for itself
             caps   : CapsModKey::instance(),
             // ralt is fully blocked .. we'll typically use it as shift instead
-            ralt   : UnifModKey::new (ralt, ModKey_Blocked, None),
+            ralt   : UnifModKey::new (ralt, Box::new(ModKey_Blocked), None),
             // lwin/rwin are doubled, so their functionality is only activated on dbl-press
-            lwin   : UnifModKey::new (lwin, ModKey_Doubled, Some(rwin)),
-            rwin   : UnifModKey::new (rwin, ModKey_Doubled, Some(lwin)),
+            lwin   : UnifModKey::new (lwin, Box::new(ModKey_Doubled), Some(rwin)),
+            rwin   : UnifModKey::new (rwin, Box::new(ModKey_Doubled), Some(lwin)),
             // the other modifier-keys are fully managed
-            lalt   : UnifModKey::new (lalt,   ModKey_Managed, None),
-            lctrl  : UnifModKey::new (lctrl,  ModKey_Managed, Some(rctrl)),
-            rctrl  : UnifModKey::new (rctrl,  ModKey_Managed, Some(lctrl)),
-            lshift : UnifModKey::new (lshift, ModKey_Managed, Some(rshift)),
-            rshift : UnifModKey::new (rshift, ModKey_Managed, Some(lshift)),
+            lalt   : UnifModKey::new (lalt,   Box::new(ModKey_Managed), None),
+            lctrl  : UnifModKey::new (lctrl,  Box::new(ModKey_Managed), Some(rctrl)),
+            rctrl  : UnifModKey::new (rctrl,  Box::new(ModKey_Managed), Some(lctrl)),
+            lshift : UnifModKey::new (lshift, Box::new(ModKey_Managed), Some(rshift)),
+            rshift : UnifModKey::new (rshift, Box::new(ModKey_Managed), Some(lshift)),
         } ) )
     }
 
-    pub fn get_umk (&self, mk:ModKey) -> Option <UnifModKey> {
+    pub fn get_umk (&self, mk:ModKey) -> Option<UnifModKey> {
         self.mod_umk_pairs() .iter() .filter_map (|(pmk,pumk)| if mk == *pmk { Some((*pumk).clone()) } else { None } ) .next()
     }
 
@@ -313,9 +351,10 @@ impl CapsModKey {
 
     pub fn instance () -> Self {
         // note that since ofc there's only one caps key, we'll set this up as singleton (unlike for the TMKs and SMKs below)
+        // also note that while we use ModKey_Blocked here to satisfy construction, that field is irrelevant outside UniModKey
         static INSTANCE: OnceCell<CapsModKey> = OnceCell::new();
         INSTANCE .get_or_init (||
-            Self ( Arc::new ( _ModKey::new (caps, ModKey_Mgmt::ModKey_Managed, None) ) )
+            Self ( Arc::new ( _ModKey::new (caps, Box::new(ModKey_Blocked), None) ) )
         ) .clone()
     }
 
@@ -380,15 +419,65 @@ impl CapsModKey {
 
 
 
-/// Impl for Managed-Modifier-Key functionality
-impl UnifModKey {
+/// impl for key handling for various ModKey_* behaviors
+// note that there's some more common key handling in the UnifModKey itself, esp for physical states ..
+// .. and only variations dealing w managing the external logical 'active' state should be in these
 
-    /// the setups for managed mod keys come in four flavors ..
-    // - passthrough .. simply monitors the state and lets the key events pass through (e.g. none currently)
-    // - blocked     .. the key events are blocked at this level and never make it out externally (e.g. ralt )
-    // - doubled     .. when double-tapped, they behave like single tapped, whereas single tapped are monitored but blocked (e.g. win)
-    // - managed     .. full management .. track both physical and logical states
+/// passthrough keyhandling only tracks state with no other management
+impl KeyHandling for ModKey_Passthrough {
 
+    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        bmk.active.set();
+        self.epds_continue()
+    }
+
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        bmk.active.clear();
+        self.epds_continue()
+    }
+
+}
+
+
+/// blocked modkey handling simply stops all propagation (physical states are tracked, but it should never be logically active)
+impl KeyHandling for ModKey_Blocked {
+
+    fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        self.epds_blocked()
+    }
+
+    fn handle_key_up (&self, _:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        self.epds_blocked()
+    }
+
+}
+
+
+/// doubled modkeys behave like regular when double-tapped, but single taps are monitored but blocked
+impl KeyHandling for ModKey_Doubled {
+
+    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        if bmk.dbl_tap.is_set() {
+            bmk.active.set();
+            self.epds_continue()
+        } else {
+            self.epds_blocked()
+        }
+    }
+
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+        if bmk.active.is_set() {
+            bmk.active.clear();
+            self.epds_continue()
+        } else {
+            self.epds_blocked()
+        }
+    }
+
+}
+
+/// key handling for fully managed modkeys .. check comments for details
+impl KeyHandling for ModKey_Managed {
 
     /// key-down management for the complex 'managed' modkey type
     // NOTE: given that kbds seem to have idiosyncrasies with what scancode vs vk codes they sent, we end up getting out of sync w
@@ -404,70 +493,74 @@ impl UnifModKey {
     //  .. as well as restoring them when either caps/alt gets released etc
     // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives {
+        // we should clear the consumed flag, but not if mouse btns are down, so we'll just put mouse-btns state there
+        //self.consumed.clear();
+        bmk.consumed .store ( ks.mouse.lbtn.down.is_set() || ks.mouse.rbtn.down.is_set() );
+
+        if ks.mod_keys.caps.down.is_clear() {
+            // caps isnt down (and its repeat filtered), so record it and let it through (or send replacment as detailed above)
+            bmk.active.set();
+            let key = bmk.modkey.key();
+            thread::spawn (move || key.press());
+        } // else if caps was down, we just block it
+        self.epds_blocked()
+    }
+
+    fn handle_key_up (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives {
+        // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
+        // else if win was consumed, we release with mask, else we can actually pass it through unblocked
+        // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
+        if !bmk.active.is_set() || ks.mod_keys.caps.down.is_set() {
+            // if inactive or caps-down we just suppress this keyup
+        } else {
+            if bmk.is_keyup_unified() && bmk.paired_down() {
+                // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
+            } else {
+                let umk = bmk.clone();
+                thread::spawn ( move || {
+                    umk.release_w_masking();  // this checks/updates flags too
+                    if umk.is_keyup_unified() { // and for up-unified, try and clear the other too
+                        umk.paired() .iter() .for_each (|p| {
+                            if !p.down.is_set() && p.active.is_set() { p.release_w_masking(); }
+                    } ) }
+                } );
+        }  }
+        self.epds_blocked()
+    }
+
+    // for other mgmt types, its false by default, but for managed, we'll explicitly override it to true
+    fn is_managed (&self) -> bool { true }
+
+}
+
+
+
+
+/// base impl for shared functionality among all mod-key types
+impl UnifModKey {
+
+
+    pub fn new (mk: ModKey, handling: KH, pair:Option<ModKey>) -> Self {
+        Self ( Arc::new ( _ModKey::new (mk, handling, pair) ) )
+    }
+
+
+    pub fn paired (&self) -> Option<UnifModKey> {
+        self.pair .map (|p| KrustyState::instance().mod_keys.get_umk(p)) .flatten()
+    }
+
 
     /// NOTE re injected events .. we block our own (and ahk) injections at hook level .. so anything here is external
     // so we'll want to let them through, only updating our tracking of external state (not our physical state)
 
-    pub fn new (mk: ModKey, mk_mgmt:ModKey_Mgmt, pair:Option<ModKey>) -> Self {
-        Self ( Arc::new ( _ModKey::new (mk, mk_mgmt, pair) ) )
-    }
-
-
-    pub fn paired (&self) -> Option <UnifModKey> {
-        self.pair .map (|p| KrustyState::instance().mod_keys.get_umk(p)) .flatten()
-    }
-    pub fn is_managed (&self) -> bool {
-        self.mk_mgmt == ModKey_Mgmt::ModKey_Managed
-    }
-
-
-    // utility fn to make prepping these binding/processing directives less cumbersome
-    fn epds (epd:EventPropagationDirective) -> KbdEvProcDirectives {
-        KbdEvProcDirectives::new (epd, KbdEvCbComboProcDirective::ComboProc_Disable)
-    }
-    fn epds_blocked      () -> KbdEvProcDirectives { Self::epds (EventPropagationDirective::EventProp_Stop) }
-    fn epds_continue     () -> KbdEvProcDirectives { Self::epds (EventPropagationDirective::EventProp_Continue) }
-    fn epds_undetermined () -> KbdEvProcDirectives { Self::epds (EventPropagationDirective::EventProp_Undetermined) }
-
-
-
-
-    fn handle_key_down__umk_passthrough (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        self.active.set();
-        Self::epds_continue()
-    }
-    fn handle_key_down__umk_blocked (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        Self::epds_blocked()
-    }
-    fn handle_key_down__umk_doubled (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        if self.dbl_tap.is_set() {
-            self.active.set();
-            Self::epds_continue()
-        } else {
-            Self::epds_blocked()
-        }
-    }
-    fn handle_key_down__umk_managed (&self, ks:&KrustyState) -> KbdEvProcDirectives {
-        // we should clear the consumed flag, but not if mouse btns are down, so we'll just put mouse-btns state there
-        //self.consumed.clear();
-        self.consumed .store ( ks.mouse.lbtn.down.is_set() || ks.mouse.rbtn.down.is_set() );
-
-        if ks.mod_keys.caps.down.is_clear() {
-            // caps isnt down (and its repeat filtered), so record it and let it through (or send replacment as detailed above)
-            self.active.set();
-            let key = self.modkey.key();
-            thread::spawn (move || key.press());
-        } // else if caps was down, we just block it
-        Self::epds_blocked()
-    }
-
     fn handle_key_down (&self, ev:KbdEvent, ks:&KrustyState) -> KbdEvProcDirectives {
         if ev.injected {
             self.active.set();
-            return Self::epds_continue()
+            return self.handling.epds_continue()
         }
         if self.down.is_set() {     // repeats are blocked w/o further processing
-            return Self::epds_blocked()
+            return self.handling.epds_blocked()
         }
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
 
@@ -477,59 +570,15 @@ impl UnifModKey {
         ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
 
         // then for external active state etc updates, we'll call the mgmt specific fns
-        use crate::{ModKey_Mgmt as Mgmt};
-        match self.mk_mgmt {
-            Mgmt::ModKey_Passthrough => self.handle_key_down__umk_passthrough (ks),
-            Mgmt::ModKey_Blocked     => self.handle_key_down__umk_blocked (ks),
-            Mgmt::ModKey_Doubled     => self.handle_key_down__umk_doubled (ks),
-            Mgmt::ModKey_Managed     => self.handle_key_down__umk_managed (ks),
-        }
+        self.handling.handle_key_down (self, ks)
     }
 
-
-
-    fn handle_key_up__umk_passthrough (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        self.active.clear();
-        Self::epds_continue()
-    }
-    fn handle_key_up__umk_blocked (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        Self::epds_blocked()
-    }
-    fn handle_key_up__umk_doubled (&self, _:&KrustyState) -> KbdEvProcDirectives {
-        if self.active.is_set() {
-            self.active.clear();
-            Self::epds_continue()
-        } else {
-            Self::epds_blocked()
-        }
-    }
-    fn handle_key_up__umk_managed (&self, ks:&KrustyState) -> KbdEvProcDirectives {
-        // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
-        // else if win was consumed, we release with mask, else we can actually pass it through unblocked
-        // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        if !self.active.is_set() || ks.mod_keys.caps.down.is_set() {
-            // if inactive or caps-down we just suppress this keyup
-        } else {
-            if self.is_keyup_unified() && self.paired_down() {
-                // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
-            } else {
-                let umk = self.clone();
-                thread::spawn ( move || {
-                    umk.release_w_masking();  // this checks/updates flags too
-                    if umk.is_keyup_unified() { // and for up-unified, try and clear the other too
-                        umk.paired() .iter() .for_each (|p| {
-                            if !p.down.is_set() && p.active.is_set() { p.release_w_masking(); }
-                    } ) }
-                } );
-        }  }
-        Self::epds_blocked()
-    }
 
     fn handle_key_up (&self, ev:KbdEvent, ks:&KrustyState) -> KbdEvProcDirectives {
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
         if ev.injected {
             self.active.clear();
-            return Self::epds_continue()
+            return self.handling.epds_continue()
         }
         // lets do some common work (physical state etc) ..
         self.down.clear(); self.dbl_tap.clear();
@@ -537,13 +586,7 @@ impl UnifModKey {
         if self.modkey == lctrl || self.modkey == rctrl { ks.in_ctrl_tab_scroll_state.clear() }
 
         // then for external active state etc updates, we'll call the mgmt specific fns
-        use crate::{ModKey_Mgmt as Mgmt};
-        match self.mk_mgmt {
-            Mgmt::ModKey_Passthrough => self.handle_key_up__umk_passthrough (ks),
-            Mgmt::ModKey_Blocked     => self.handle_key_up__umk_blocked (ks),
-            Mgmt::ModKey_Doubled     => self.handle_key_up__umk_doubled (ks),
-            Mgmt::ModKey_Managed     => self.handle_key_up__umk_managed (ks),
-        }
+        self.handling.handle_key_up (&self, ks)
     }
 
 
@@ -555,14 +598,14 @@ impl UnifModKey {
         let umk = self.clone(); let ks = k.ks.clone();
         k.iproc.kbd_bindings .bind_kbd_event (
             self.modkey.key(), KeyEventCb_KeyDown, KbdEventCallbackEntry {
-                event_proc_d: Self::epds_undetermined(),
+                event_proc_d: self.handling.epds_undetermined(),
                 cb: KbdEvCbFn_InlineCallback ( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
         } );
 
         let umk = self.clone(); let ks = k.ks.clone();
         k.iproc.kbd_bindings .bind_kbd_event (
             self.modkey.key(), KeyEventCb_KeyUp, KbdEventCallbackEntry {
-                event_proc_d: Self::epds_undetermined(),
+                event_proc_d: self.handling.epds_undetermined(),
                 cb: KbdEvCbFn_InlineCallback ( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
         } );
     }
@@ -573,7 +616,7 @@ impl UnifModKey {
         // we will immediately invalidate and clear any down mod-key found upon caps activation!
         // note that internally tracked physical is_down will continue to be down
         // note also that each of paired mod-keys will get their own notification too
-        if self.is_managed()  &&  self.down.is_set() && self.active.is_set() {
+        if self.handling.is_managed()  &&  self.down.is_set() && self.active.is_set() {
             self.consumed.set();
             let umk = self.clone();
             thread::spawn ( move || umk.release_w_masking() ); // this will update flags too
@@ -585,7 +628,7 @@ impl UnifModKey {
         // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
         // .. so to check the logic here must use lower level key inspections like via ahk key history!!
         // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
-        if self.is_managed()  &&  self.down.is_set() {
+        if self.handling.is_managed()  &&  self.down.is_set() {
             let umk = self.clone();
             thread::spawn ( move || {
                 thread::sleep(time::Duration::from_millis(150));

@@ -214,7 +214,7 @@ impl Combo {
                 if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
                     // so if this is managed mk and the wrapping flag is set, we'll wrap in active action, else just direct action
-                    if umk.is_managed() && wrap_mod_key_guard {
+                    if umk.handling.is_managed() && wrap_mod_key_guard {
                         af = umk.active_action(af.clone())
                     } else {
                         af = umk.bare_action(af.clone())
@@ -222,7 +222,7 @@ impl Combo {
                 } else {
                     // we're in a triplet where neither of lr/l/r is in the modkeys set for this combo
                     // so if this is managed mk, we will wrap an inactive action around it .. else it can be as is
-                    if umk.is_managed() && wrap_mod_key_guard { af =
+                    if umk.handling.is_managed() && wrap_mod_key_guard { af =
                         umk.inactive_action(af.clone())
                     }
                 }
@@ -266,7 +266,7 @@ impl<'a> ComboGen<'a> {
         let mut afc = af;
         if !self.mod_key_no_consume {
             self.ks.mod_keys.mod_umk_pairs() .iter() .for_each ( |(mk, umk)| {
-                if umk.is_managed() && self.mks.contains(mk) { afc = umk.keydn_consuming_action (afc.clone()) }
+                if umk.handling.is_managed() && self.mks.contains(mk) { afc = umk.keydn_consuming_action (afc.clone()) }
             });
         }
         if !self.mode_kdn_no_consume {
