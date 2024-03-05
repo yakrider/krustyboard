@@ -619,7 +619,11 @@ impl UnifModKey {
         if self.handling.is_managed()  &&  self.down.is_set() && self.active.is_set() {
             self.consumed.set();
             let umk = self.clone();
-            thread::spawn ( move || umk.release_w_masking() ); // this will update flags too
+            thread::spawn ( move || {
+                if !utils::get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
+                    umk.release_w_masking()   // this will update flags too
+                }
+            } );
         }
     }
     pub fn proc_notice__caps_up (&self) {
@@ -628,7 +632,7 @@ impl UnifModKey {
         // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
         // .. so to check the logic here must use lower level key inspections like via ahk key history!!
         // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
-        if self.handling.is_managed()  &&  self.down.is_set() {
+        if self.handling.is_managed()  &&  self.down.is_set() { //&& !KrustyState::instance().in_right_btn_scroll_state.is_set() {
             let umk = self.clone();
             thread::spawn ( move || {
                 thread::sleep(time::Duration::from_millis(150));

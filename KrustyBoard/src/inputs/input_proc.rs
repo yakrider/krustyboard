@@ -151,10 +151,9 @@ impl InputProcessor {
 
 
 /// debug printout
-#[allow(dead_code)]
-fn print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
-    println!("w_param: {:X}, vk_code: {:#06X}, scanCode: {:#06X}, flags: {:#018b}, time: {}, dwExtraInfo: {:X}",
-             wp.0, kbs.vkCode, kbs.scanCode, kbs.flags.0, kbs.time, kbs.dwExtraInfo);
+fn _print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
+    println!("w_param: {:X}, vk_code: {:?}, scanCode: {:#06X}, flags: {:#018b}, time: {}, dwExtraInfo: {:X}",
+             wp.0, KbdKey::from(kbs.vkCode as u64), kbs.scanCode, kbs.flags.0, kbs.time, kbs.dwExtraInfo);
 }
 
 /// Keyboard lower-level-hook processor
@@ -174,10 +173,10 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     let kb_struct = *(l_param.0 as *const KBDLLHOOKSTRUCT);
 
-    //print_kbd_event (&w_param, &kb_struct);
-
     // if we injected this event ourselves, we should just bail
     if kb_struct.dwExtraInfo == FAKE_EXTRA_INFO { return return_call() }
+
+    //_print_kbd_event (&w_param, &kb_struct);
 
     let mut event_proc_d = KbdEvProcDirectives::default();
 
@@ -193,6 +192,8 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let stamp = kb_struct.time;
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
         let event = KbdEvent { ev_t, key, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32, stamp, injected };
+
+        //println! ("{:?}", event);
 
         // first route it through any per-key registered callbacks
         if let Some(cbe) = iproc.kbd_bindings .read().unwrap() .get (&KbdEventCbMapKey::from_event(&event)) .as_ref() {

@@ -276,35 +276,6 @@ pub fn setup_krusty_board () {
 
 
 
-    // we'll setup caps-dbl-alt-tab as toggling whether switche handles alt-tab or not
-    let ks = k.ks.clone();
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(caps_dbl).m(lalt),     k.ks.ag_af ( Arc::new (move || ks.toggle_alt_tab_replace()) ) );
-
-    // todo .. since alt-tab state is in ks .. see if the alt-tab impl shouldnt be out here in app-code?
-
-    // setup alt-tab
-    let ks = k.ks.clone();
-    let cb : AF = Arc::new (move || {
-        if ks.is_replacing_alt_tab.is_set() && ks.mod_keys.lalt.down.is_set() {
-            ks.in_right_btn_scroll_state.set(); // we'll reuse the flag from the other mechanism of triggering switche
-            if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
-                //ks.mod_keys.lshift.inactive_action (ks.mod_keys.lalt.inactive_on_key(F17))()
-                // ^^ passthrough shift-F16 instead of F17 is more efficient
-                ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.inactive_on_key(F16))()
-            } else { ks.mod_keys.lalt.inactive_on_key(F16)() }
-        }
-        else {
-            // for natural alt-tab again, for just shift, it would layer naturally, but we'll make it explicity to support ralt
-            if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
-                ks.mod_keys.lshift.active_action (ks.mod_keys.lalt.active_on_key(Tab))()
-            } else { press_release(Tab) }
-        }
-    } );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt),           k.ks.ag_af (cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt).m(shift),  k.ks.ag_af (cb.clone()) );
-    k.cm .add_combo_af ( k.ks.cg(Tab).m(lalt).m(ralt ),  k.ks.ag_af (cb.clone()) );
-
-
     // setup ctrl-tab .. caps-as-ctrl for caps-tab switching (and shift/ralt combos will work out naturally in fallbacks)
     // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
     // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
@@ -577,17 +548,16 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(Apps),            k.ks.ag(Escape).m(shift) );
 
     // for alt-escape, we want to override the default send-to-back behavior, as it has issues detailed in notes
-    // .. we'll use alt-escape to switch to next window in switche and send cur to back
-    //  .. however if switche is fgnd, we simply send a esc so the swiche window is simply dismissed instead
-    // k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af(no_action()) );
+    // .. if switche not in fgnd, we'll switch to next window in switche and send cur to back
+    //  .. and if switche is fgnd, we send a switche hotkey so the swiche window is simply dismissed instead
+    // note: any alt release (eg for bare Esc) will disrupt alt-tab, and any alt-esc variation will trigger windows, hence a dedicated hotkey
+    let swi_alt_esc_af = k.ks.ag(F18).m(alt).m(ctrl).gen_af();
     let switche_next_af = k.ks.ag(F19).m(alt).m(ctrl).gen_af();
-    let non_alt_esc_af  = k.ks.mod_keys.lalt.inactive_on_key(Escape);
     let alt_esc_action = Arc::new ( move || {
         let h = win_get_fgnd();
-        if get_exe_by_hwnd(h).filter(|s| s == "switche.exe").is_some() { non_alt_esc_af(); }
+        if get_exe_by_hwnd(h).is_some_and(|s| s == "switche.exe") { swi_alt_esc_af(); }
         else { switche_next_af(); win_send_to_back(h); }
     } );
-    //k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (action (|| {win_send_to_back(win_get_fgnd()); })) );
     k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (alt_esc_action) );
 
 
@@ -762,6 +732,14 @@ pub fn setup_krusty_board () {
 
 
 
+    // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
+    // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
+    // so instead, we'll layer that on k itself with lalt, (and use alt-end for activation instead)
+    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt).s(word), k.ks.ag(End).m(alt) );
+    // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via Tab)
+    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt).s(word), k.ks.ag(Tab) );
+
+
 
     // then the caps-win combo (l4?) actions :
 
@@ -892,14 +870,14 @@ pub fn setup_krusty_board () {
             } { }
         } );
     }
-    fn ide_float_tools_clear (do_restore:bool) {
+    fn ide_float_tools_clear () {
         static hidden_hwnds : Lazy <Arc <RwLock <FxHashSet <Hwnd>>>> = Lazy::new (|| Arc::new (RwLock::new (FxHashSet::default())));
         thread::spawn ( move || {
-            if do_restore {
+            if !hidden_hwnds.read().unwrap().is_empty() { // will do toggle based on whether anything is in the prior-hidden list
                 let hwnds = hidden_hwnds.read().unwrap().iter().copied().collect::<Vec<Hwnd>>();
                 hwnds .iter() .for_each (|&hwnd| {
                     if win_check_hwnd(hwnd) { win_activate(hwnd); }
-                    else { hidden_hwnds.write().unwrap().remove(&hwnd); }
+                    hidden_hwnds.write().unwrap().remove(&hwnd);
                 });
             } else {
                 win_get_ide_dialog_hwnds() .into_iter() .for_each (|hwnd| {
@@ -908,8 +886,7 @@ pub fn setup_krusty_board () {
                 } );
         } } );
     }
-    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear(true))) );
-    //k.cm .add_combo_af ( k.ks.cg(Numrow_9).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear(true))) );
+    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear())) );
 
 
 

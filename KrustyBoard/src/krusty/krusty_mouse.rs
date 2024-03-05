@@ -156,16 +156,6 @@ impl Mouse {
             // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
             self.capture_pre_drag_dat(ks);
         }
-        else if mk == lalt && ks.is_replacing_alt_tab.is_set() && ks.in_right_btn_scroll_state.is_set() {
-            // todo prob want to add check for switche in fgnd as we'd like clicking outside to take us out of the state
-            // some special handling for alt-tab replacment
-            ks.in_right_btn_scroll_state.clear();
-            let switche_af = ks.mod_keys.lalt.inactive_action ( ks.mod_keys.lctrl.active_on_key(Key::F18));
-            //switche_af.as_ref()();
-            //thread::sleep (time::Duration::from_millis(50));
-            switche_af.as_ref()();
-        }
-
     }
 
 }
@@ -437,8 +427,7 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         // wheel support for scrolling in windows native alt-tab task-switching screen
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
-        if ksr.is_replacing_alt_tab.is_set() && ksr.in_right_btn_scroll_state.is_set() {
-            ksr.mod_keys.lalt.ensure_inactive();    // we cant have alt-tab go out as thatd trigger the actual alt-tab
+        if ksr.in_right_btn_scroll_state.is_set() || get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
             handle_alt_tab_wheel(incr);
         } else {
             let fgnd_class = get_fgnd_win_class();

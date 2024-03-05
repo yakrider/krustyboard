@@ -9,7 +9,10 @@ use derive_deref::Deref;
 use once_cell::sync::OnceCell;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HINSTANCE;
-use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, HCURSOR, HICON, IDC_ARROW, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENWSE, IDC_WAIT, LoadCursorW, SetSystemCursor, SYSTEM_CURSOR_ID};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CopyIcon, HCURSOR, HICON, IDC_ARROW, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENWSE, IDC_WAIT,
+    LoadCursorW, SetSystemCursor, SYSTEM_CURSOR_ID
+};
 
 use crate::*;
 
@@ -186,8 +189,6 @@ pub struct _KrustyState {
     pub in_ctrl_tab_scroll_state: Flag,
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
     pub in_right_btn_scroll_state: Flag,
-    // we'll track whether we're set to replace alt-tab or not .. (should be togglable via hotkey, and not in combo maps)
-    pub is_replacing_alt_tab: Flag,
 
 }
 
@@ -215,8 +216,6 @@ pub struct Krusty {
 
 
 
-pub const ALT_TAB_REPL_DEFAULT_STATE : bool = true;
-
 /// impl for Krusty-State
 impl KrustyState {
 
@@ -235,7 +234,6 @@ impl KrustyState {
                 in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
-                is_replacing_alt_tab       : Flag::new(ALT_TAB_REPL_DEFAULT_STATE),
             } ) )
         ) .clone()
     }
@@ -253,15 +251,8 @@ impl KrustyState {
            &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
 
-        self.is_replacing_alt_tab.store(ALT_TAB_REPL_DEFAULT_STATE);
-
         // lets send a delayed Esc for any context menus etc that show up
         thread::spawn (|| { thread::sleep (Duration::from_millis(300)); key_utils::press_release(Key::Escape) } );
-    }
-
-    pub fn toggle_alt_tab_replace (&self) {
-        self.is_replacing_alt_tab.store (!self.is_replacing_alt_tab.is_set());
-        //println! ("alt-tab-repl-state: {:?}", (self.is_replacing_alt_tab.is_set()))
     }
 
     /// Utlity function to create a new Combo-generator (for combo-specification) <br>
