@@ -28,8 +28,8 @@ use crate::utils::{win_set_cur_process_priority_high, win_set_thread_dpi_aware};
 // this is used for identifying the fake keypresses we insert, so we don't process them in an infinite loop
 // note that 0xFFC3D44F is from ahk, though ahk uses further complex variations on it to signal more things
 //const FAKE_EXTRA_INFO: ULONG_PTR = 0x14C;
-pub const FAKE_EXTRA_INFO: usize = 0xFFC3D44F;
-
+pub const KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO  : usize = 0xFFC3D44F;
+pub const SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO : usize = 0x5317C7EE;      // switche's own injected identifier
 
 
 # [ allow (non_camel_case_types) ]
@@ -174,7 +174,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     let kb_struct = *(l_param.0 as *const KBDLLHOOKSTRUCT);
 
     // if we injected this event ourselves, we should just bail
-    if kb_struct.dwExtraInfo == FAKE_EXTRA_INFO { return return_call() }
+    if kb_struct.dwExtraInfo == KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO { return return_call() }
 
     //_print_kbd_event (&w_param, &kb_struct);
 
@@ -191,7 +191,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let key = KbdKey::from(u64::from(kb_struct.vkCode));
         let stamp = kb_struct.time;
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
-        let event = KbdEvent { ev_t, key, vk_code: kb_struct.vkCode as u32, sc_code: kb_struct.scanCode as u32, stamp, injected };
+        //let extra_info = kb_struct.dwExtraInfo;   // can include this in event later if we ever need to use this
+
+        let event = KbdEvent { ev_t, key, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode, stamp, injected };
 
         //println! ("{:?}", event);
 
@@ -237,14 +239,14 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
 
 #[allow(non_snake_case)]
-fn HIWORD(l: u32) -> u16 { ((l >> 16) & 0xffff) as u16 }
+fn hi_word (l: u32) -> u16 { ((l >> 16) & 0xffff) as u16 }
 
 
 static LAST_STAMP: AtomicU32 = AtomicU32::new(0);
 #[allow(dead_code)]
 fn print_mouse_ev (ev:MouseEvent) {
-    let last_s = LAST_STAMP.swap(ev.get_stamp(), Ordering::Relaxed);
-    let gap_dur = ev.get_stamp() - last_s;
+    let last_s = LAST_STAMP.swap(ev.stamp, Ordering::Relaxed);
+    let gap_dur = ev.stamp - last_s;
     thread::spawn(move || println!("{:?}, {:?}", ev, gap_dur));
 }
 
@@ -265,40 +267,44 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     let mh_struct = &*(l_param.0 as *const MSLLHOOKSTRUCT);
 
-    if mh_struct.dwExtraInfo == FAKE_EXTRA_INFO {
+    if mh_struct.dwExtraInfo == KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO {
         // if we injected it ourselves, we should just bail (and call the next guy down the line)
         return return_call()
     }
+
     let stamp = mh_struct.time;
     let injected = mh_struct.flags & LLMHF_INJECTED == LLMHF_INJECTED;
+    let extra_info = mh_struct.dwExtraInfo;
 
     //println!("{:#?}", mh_struct);
-    use {MouseEvent::*, MouseBtnEvent_T::*};
-    if let Some (event) = match w_param.0 as u32 {
-        WM_LBUTTONDOWN => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnDown, stamp, injected } ),
-        WM_RBUTTONDOWN => Some ( btn_event { src_btn: RightButton,  ev_t: BtnDown, stamp, injected } ),
-        WM_MBUTTONDOWN => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnDown, stamp, injected } ),
+    use {MouseEventDat::*, MouseBtnEvent_T::*};
+    if let Some (dat) = match w_param.0 as u32 {
+        WM_LBUTTONDOWN => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnDown } ),
+        WM_RBUTTONDOWN => Some ( btn_event { src_btn: RightButton,  ev_t: BtnDown } ),
+        WM_MBUTTONDOWN => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnDown } ),
         WM_XBUTTONDOWN => {
-            match HIWORD(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnDown, stamp, injected } ),
-                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnDown, stamp, injected } ),
+            match hi_word(mh_struct.mouseData) {
+                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnDown } ),
+                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnDown } ),
                 _ => None,
         } }
-        WM_LBUTTONUP => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnUp, stamp, injected } ),
-        WM_RBUTTONUP => Some ( btn_event { src_btn: RightButton,  ev_t: BtnUp, stamp, injected } ),
-        WM_MBUTTONUP => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnUp, stamp, injected } ),
+        WM_LBUTTONUP => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnUp } ),
+        WM_RBUTTONUP => Some ( btn_event { src_btn: RightButton,  ev_t: BtnUp } ),
+        WM_MBUTTONUP => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnUp } ),
         WM_XBUTTONUP => {
-            match HIWORD(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnUp, stamp, injected } ),
-                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnUp, stamp, injected } ),
+            match hi_word(mh_struct.mouseData) {
+                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnUp } ),
+                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnUp } ),
                 _ => None,
         } }
-        WM_MOUSEWHEEL  => Some ( wheel_event { src_wheel: DefaultWheel,    delta: HIWORD(mh_struct.mouseData) as i16 as i32, stamp, injected } ),
-        WM_MOUSEHWHEEL => Some ( wheel_event { src_wheel: HorizontalWheel, delta: HIWORD(mh_struct.mouseData) as i16 as i32, stamp, injected } ),
+        WM_MOUSEWHEEL  => Some ( wheel_event { src_wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
+        WM_MOUSEHWHEEL => Some ( wheel_event { src_wheel: HorizontalWheel, delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
 
-        WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y, stamp, injected } ),
+        WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,
     } {
+
+        let event = MouseEvent { stamp, injected, extra_info, dat };
         //print_mouse_ev(event);
 
         let mut do_ev_prop = EventProp_Continue;

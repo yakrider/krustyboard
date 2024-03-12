@@ -44,11 +44,11 @@ pub enum MouseEventCbMapKeyAction {
 
 impl MouseEventCbMapKey {
     pub fn from_event (mouse_event: &MouseEvent) -> MouseEventCbMapKey {
-        use {MouseEvent::*, MouseEventCbMapKeySrc::*};
-        match mouse_event {
-            move_event  {..}                 => MouseEventCbMapKey { ev_src: pointer,           ev_action: MouseMoveCb },
-            btn_event   {src_btn, ev_t, ..}  => MouseEventCbMapKey { ev_src: btn(*src_btn),     ev_action: BtnEventCb(*ev_t) },
-            wheel_event {src_wheel, ..}      => MouseEventCbMapKey { ev_src: wheel(*src_wheel), ev_action: WheelEventCb },
+        use {MouseEventDat::*, MouseEventCbMapKeySrc::*};
+        match mouse_event.dat {
+            move_event  {..}                 => MouseEventCbMapKey { ev_src: pointer,          ev_action: MouseMoveCb },
+            btn_event   {src_btn, ev_t, ..}  => MouseEventCbMapKey { ev_src: btn(src_btn),     ev_action: BtnEventCb(ev_t) },
+            wheel_event {src_wheel, ..}      => MouseEventCbMapKey { ev_src: wheel(src_wheel), ev_action: WheelEventCb },
     }  }
 }
 

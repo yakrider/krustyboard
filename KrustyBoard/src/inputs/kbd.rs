@@ -113,7 +113,7 @@ fn send_keybd_input (key_code: u16, up_not_down:bool, sc_not_vk:bool) {
                 wScan: w_sc,
                 dwFlags: ext_key_flag | sc_flag | keyup_flag,
                 time: 0,
-                dwExtraInfo: FAKE_EXTRA_INFO,
+                dwExtraInfo: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
         } }
     } ];
 

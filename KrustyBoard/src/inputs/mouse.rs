@@ -61,30 +61,18 @@ pub enum MouseBtnEvent_T {
 
 /// Mouse event can be a btn-event, wheel-event, or pointer-move (with their associated data)
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum MouseEvent {
-    btn_event   { src_btn:MouseButton, ev_t:MouseBtnEvent_T, stamp:u32, injected:bool },
-    wheel_event { src_wheel:MouseWheel, delta:i32, stamp:u32, injected:bool },
-    move_event  { x_pos:i32, y_pos:i32, stamp:u32, injected:bool },
+pub enum MouseEventDat {
+    btn_event   { src_btn:MouseButton, ev_t:MouseBtnEvent_T },
+    wheel_event { src_wheel:MouseWheel, delta:i32 },
+    move_event  { x_pos:i32, y_pos:i32 },
 }
-impl MouseEvent {
-    pub fn get_stamp(&self) -> u32 {
-        use MouseEvent::*;
-        match self {
-            btn_event   {stamp, ..} => *stamp,
-            wheel_event {stamp, ..} => *stamp,
-            move_event  {stamp, ..} => *stamp,
-        }
-    }
-    pub fn check_injected (&self) -> bool {
-        use MouseEvent::*;
-        match self {
-            btn_event   {injected, ..} => *injected,
-            wheel_event {injected, ..} => *injected,
-            move_event  {injected, ..} => *injected,
-        }
-    }
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub struct MouseEvent {
+    pub stamp : u32,
+    pub injected : bool,
+    pub extra_info : usize,
+    pub dat : MouseEventDat,
 }
-
 
 
 
@@ -211,7 +199,7 @@ fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
                 mouseData: data,
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: FAKE_EXTRA_INFO
+                dwExtraInfo: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO
         } }
     } ];
 

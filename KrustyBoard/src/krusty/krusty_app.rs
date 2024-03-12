@@ -447,17 +447,11 @@ pub fn setup_krusty_board () {
     //k.cm .add_combo_af ( k.ks.cg(Numrow_2).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume(-1))) );
     //k.cm .add_combo_af ( k.ks.cg(Numrow_3).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume( 1))) );
 
-    // for now we'll use win-alt-F1 as mute .. we'll see if makes sense to keep it that way
-    k.cm .add_combo ( k.ks.cg(F1).m(lwin).m(lalt),  k.ks.ag (VolumeMute) );
-
-
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
-    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15) );                   // switche invoke/next
-    //k.cm .add_combo_af ( k.ks.cg(F1),          k.ks.ag_af (Arc::new (|| switche_next_w_taskbar_pop())) );                   // switche next
-    //k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F17) );                 // switche prev
-    k.cm .add_combo ( k.ks.cg(F1).m(shift), k.ks.ag(F16).m(shift) );          // switche prev (passthrough shift-F16 instead of F17 is more efficient)
-    k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F19).m(alt).m(ctrl) );    // switche no-popup next switch
-    k.cm .add_combo ( k.ks.cg(F1).m(ralt),  k.ks.ag(F1) );
+    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15).m(ctrl) );          // switche invoke/next
+    k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F19).m(alt).m(ctrl) );   // switche no-popup next switch
+    k.cm .add_combo ( k.ks.cg(F1).m(ralt),  k.ks.ag(F1) );                   // this allows actual F1 use (if we disable F1 in swi configs)
+
     k.cm .add_combo ( k.ks.cg(F1).m(caps),  k.ks.ag(VolumeMute) );
     //k.cm .add_combo ( k.ks.cg(F1).m(lwin),  k.ks.ag(MediaPlayPause) );
     // ^^ media keys seems to get captured by elev apps in fgnd (e.g. switche) and not pass to musicbee .. so we'll setup alts
@@ -518,8 +512,9 @@ pub fn setup_krusty_board () {
     // note that in the above, although we're using win-combos, we dont have to wrap in win-action guards anymore as win is now as TMK_dbl
 
     // win-f2 for next with some initial skip
-    k.cm .add_combo_af ( k.ks.cg(F2).m(lwin),          k.ks.ag_af (media_next_action (&k.ks, true )) );
-    k.cm .add_combo_af ( k.ks.cg(F2).m(lwin).m(caps),  k.ks.ag_af (media_next_action (&k.ks, false)) );
+    k.cm .add_combo_af ( k.ks.cg(F2).m(lwin),           k.ks.ag_af (media_next_action (&k.ks, true )) );
+    k.cm .add_combo_af ( k.ks.cg(F2).m(lwin).m(caps),   k.ks.ag_af (media_next_action (&k.ks, false)) );
+    k.cm .add_combo_af ( k.ks.cg(F2).m(lwin).m(shift),  k.ks.ag_af (media_next_action (&k.ks, false)) );
 
     // win-f3 for skip forward a bit (w/ caps for rewind)
     k.cm .add_combo_af ( k.ks.cg(F3).m(lwin),           k.ks.ag_af (media_skips_action (1, &k.ks, true )) );
@@ -734,10 +729,11 @@ pub fn setup_krusty_board () {
 
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
     // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
-    // so instead, we'll layer that on k itself with lalt, (and use alt-end for activation instead)
-    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt).s(word), k.ks.ag(End).m(alt) );
-    // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via Tab)
-    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt).s(word), k.ks.ag(Tab) );
+    // so instead, we'll layer that on lalt instead (and use alt-end for activation instead)
+    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt),  k.ks.ag(End).m(alt) );
+    // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via ctrl-alt-end)
+    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt),  k.ks.ag(End).m(alt).m(ctrl) );
+    //k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt),  k.ks.ag(Tab).mkg_nw() ); // no guard as alt is down, but w caps, so itll be inactive
 
 
 

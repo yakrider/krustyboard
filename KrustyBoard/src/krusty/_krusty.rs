@@ -187,7 +187,9 @@ pub struct _KrustyState {
     pub in_managed_ctrl_down_state: Flag,
     // and since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
     pub in_ctrl_tab_scroll_state: Flag,
+
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
+    // note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
     pub in_right_btn_scroll_state: Flag,
 
 }

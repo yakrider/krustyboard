@@ -191,7 +191,7 @@ pub fn setup_mouse_left_btn_handling (k:&Krusty) {
 fn handle_mouse_left_btn_down (ks:&KrustyState, ev:MouseEvent) {
     use ModeState_T::*;
     ks.mouse.lbtn.down.set();
-    update_stamp_mouse_dbl_click (ev.get_stamp(), &ks.mouse.lbtn.stamp, &ks.mouse.lbtn.dbl_tap);
+    update_stamp_mouse_dbl_click (ev.stamp, &ks.mouse.lbtn.stamp, &ks.mouse.lbtn.dbl_tap);
     //ks.mouse.capture_pre_drag_dat();   // to avoid unnecessary processing, we'll only do this when win down
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.lbtn.btn);
     if ks.mod_keys.lwin.down.is_set() {
@@ -255,17 +255,26 @@ pub fn setup_mouse_right_btn_handling (k:&Krusty) {
         cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| handle_mouse_right_btn_down(&ks,ev) ) )
     } );
 
+    /* NOTE: typically, we'd have this be queued like most others, and if we need to let the event through, we'd reinject in the stream,
+        .. but rbtn up has the peculiar situation where to support switche, when swi injects an rbtn-up to start rbtn-scroll mode,
+        .. we cant just reinject the rbtn-up, as switche would then reprocess it in a feedback loop since it doesnt have is own extra-info..
+        .. So instead, we handle it inline so we can let it through in that special case
+       Note ofc, that inline and queued will both remain in seq order ..
+        .. the queued just lets us do longer proc w/o spawning and still keep event-stream fast
+        .. even doing mostly inline w spawning for heavy tasks would introduce out-of-seq possibility .. so queueing is a bit better ..
+        .. though ofc for real heavy tasks, and where sequencing is less essential, we should spawn from queue proc thread too
+     */
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_btn_event ( RightButton, BtnEventCb(BtnUp), MouseEventCallbackEntry {
-        event_prop_directive: EventProp_Stop,
-        cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev:MouseEvent| handle_mouse_right_btn_up(&ks,ev) ) )
+        event_prop_directive: EventProp_Undetermined,
+        cb : MouseEvCbFn_InlineCallback ( Arc::new ( move |ev:MouseEvent| handle_mouse_right_btn_up (&ks, ev) ) )
     } );
 }
 
 fn handle_mouse_right_btn_down (ks:&KrustyState, ev:MouseEvent) {
     use ModeState_T::*;
     ks.mouse.rbtn.down.set();
-    update_stamp_mouse_dbl_click (ev.get_stamp(), &ks.mouse.rbtn.stamp, &ks.mouse.rbtn.dbl_tap);
+    update_stamp_mouse_dbl_click (ev.stamp, &ks.mouse.rbtn.stamp, &ks.mouse.rbtn.dbl_tap);
     //ks.mouse.capture_pre_drag_dat(); // we dont enable drag/resize on right btn anymore
     ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.rbtn.btn);
     if ks.mod_keys.lwin.down.is_set() {
@@ -281,25 +290,36 @@ fn handle_mouse_right_btn_down (ks:&KrustyState, ev:MouseEvent) {
     MouseButton::RightButton.press();
 }
 
-fn handle_mouse_right_btn_up (ks:&KrustyState, _ev:MouseEvent) {
+fn handle_mouse_right_btn_up (ks:&KrustyState, ev:MouseEvent) -> EventPropagationDirective {
+    // ^^ also see comment in setup-handling section re details on why this callback is inline for switche support
+    if ev.extra_info == SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO {
+        ks.mouse.rbtn.active.clear(); ks.mouse.rbtn.down.clear();
+        // ^^ note that we'll even clear down state now, even though its not phys rbtn-up, as switche might block the phys rbtn-up
+        // (mostly in case swi is before krusty in hook chain .. else we'd hear the phys rbtn-up before swi anyway)
+        return EventProp_Continue;
+    }
+    // the rest we'll treat as physical events (even if its from other unrecognized injections)
     ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
     ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.rbtn.btn);
 
     if ks.in_right_btn_scroll_state.is_set() {
         ks.in_right_btn_scroll_state.clear();
-        // Ctrl-F18 is the exit hotkey for switche if we were doing right-btn-scroll
-        ks.mod_keys.lctrl.active_on_key(Key::F18)();
-        ks.mouse.rbtn.consumed.clear();
-        if ks.mouse.rbtn.active.is_set() { ks.mouse.rbtn.active.clear(); mouse_rbtn_release_masked(); }
-    } else  if ks.mouse.rbtn.active.is_clear() {
-        // if it is inactive we didnt send a report out, so nothing to release
-    } else  if ks.mouse.rbtn.consumed.is_set() { // ie. active and consumed are both set
+        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
+        // ^^ we used to drive switche rbtn-scrl from here, but switche now has native impl for it ..
+        // .. however, we still want to track it and let it pass through w/o triggering other stuff like brighness-wheel
+        return EventProp_Continue; // gotta let this through in case krusty hooks are before switche hooks (so swi can act on phy rbtn-up)
+    }
+    if ks.mouse.rbtn.active.is_set() && ks.mouse.rbtn.consumed.is_set() {
         ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
         mouse_rbtn_release_masked();
-    } else {
-        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
-        MouseButton::RightButton.release();
+        return EventProp_Stop;
+        // ^^ this was mostly for switche while we drove it from here .. swi now has native impl and does its own masking ..
+        // .. but we might as well leave the masking mechanism here in case we ever have other uses for rbtn and need to avoid context menu popups
     }
+    ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
+    EventProp_Continue
+    // ^^ everything else we can just let them through .. it should be mostly harmless (other than for swi that we deal w above)
+    // note: this includes cases where we thought it was inactive already .. as we dont want to risk affecting anyone behind us in hook chain
 }
 
 fn mouse_rbtn_release_masked () {
@@ -345,7 +365,7 @@ pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
 
 fn handle_mouse_middle_btn_down (ks:&KrustyState, ev:MouseEvent, mbs:&MouseBtnState) {
     mbs.down.set();
-    update_stamp_mouse_dbl_click (ev.get_stamp(), &mbs.stamp, &mbs.dbl_tap);
+    update_stamp_mouse_dbl_click (ev.stamp, &mbs.stamp, &mbs.dbl_tap);
     if ks.mod_keys.lwin.down.is_set() {
         ks.mod_keys.lwin.consumed.set();
         let pointed_hwnd = win_get_hwnd_from_pointer();
@@ -381,12 +401,14 @@ fn handle_mouse_middle_btn_up (ks:&KrustyState, _ev:MouseEvent, mbs:&MouseBtnSta
 
 /// sets up mouse wheel with various overloaded modes incl brightness, volume, tab-switching, caps-as-ctrl etc
 pub fn setup_mouse_wheel_handling (k:&Krusty) {
-    use crate::{MouseEvent::*, MouseWheel::*};
+    use crate::{MouseEventDat::*, MouseWheel::*};
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_wheel_event ( DefaultWheel, MouseEventCallbackEntry {
         event_prop_directive: EventProp_Stop,
         cb : MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
-            if let wheel_event {delta, ..} = ev { handle_wheel_guarded (delta, &ks) }
+            if let wheel_event {delta, ..} = ev.dat {
+                handle_wheel_guarded (delta, &ks)
+            }
         } ) ),
     } );
 }
@@ -413,22 +435,17 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
     use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
     let incr = delta / WHEEL_DELTA as i32;
     if ksr.mouse.rbtn.down.is_set() {
-        // right-mouse-btn-wheel support for switche task switching
+        // we used to have drive switche scroll from here before, but now w native swi impl, we still want to track it ..
+        // .. mostly so we can avoid triggering krusty behavior (e.g. brightness-wheel) while switche is active
         ksr.in_right_btn_scroll_state.set();
-        //if ksr.mouse.rbtn.consumed.is_clear() { ksr.mouse.rbtn.active.clear(); ksr.mouse.rbtn.btn.release(); }
-        if ksr.mouse.rbtn.consumed.is_clear() { ksr.mouse.rbtn.active.clear(); mouse_rbtn_release_masked(); }
-        // ^^ to avoid having mouse events keep going to old window while rbtn is held down, we'll send an external release here
-        ksr.mouse.rbtn.consumed.set();
-        let key = if incr.is_positive() { Key::F17 } else { Key::F16 };
-        //ksr.mod_keys.lalt.active_action(base_action(key))();       // not usable due to masking keys (so changed in hotkey switche)
-        //ksr.mod_keys.lctrl.active_action(base_action(key))();      // not ideal as even non-masked wrapping causes slower/choppy switche scroll
-        press_release(key);                                 // we'd rather use direct press hotkeys for best perf
+        MouseWheel::DefaultWheel.scroll(delta);     // we gotta let it go through in case krusty is ahead of swi in hook chain
+        // (note that if swi is ahead, rbtn-scrolls never get past it to here, so our reinjections dont cause doubled events for swi)
     } else  if ksr.mod_keys.lalt.down.is_set() {
-        // wheel support for scrolling in windows native alt-tab task-switching screen
+        // wheel support for scrolling in windows native alt-tab task-switching screen, and avoiding brightness when swi is working
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
         if ksr.in_right_btn_scroll_state.is_set() || get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
-            handle_alt_tab_wheel(incr);
+            MouseWheel::DefaultWheel.scroll(delta);    // again, we put back an eqv for switche use in case our hook is ahead of swi hook
         } else {
             let fgnd_class = get_fgnd_win_class();
             if fgnd_class == "XamlExplorerHostIslandWindow" || fgnd_class == "MultitaskingViewFrame" {  //dbg!(task_switching_state);
@@ -500,14 +517,14 @@ fn handle_horiz_scroll_wheel (_incr:i32) {
 
 
 pub fn setup_mouse_move_handling (k:&Krusty) {
-    use crate::{MouseEvent::*};
+    use crate::MouseEventDat::*;
     let ks = k.ks.clone();
     k.iproc.mouse_bindings .bind_pointer_event ( MouseEventCallbackEntry {
         event_prop_directive: EventProp_Continue,
         cb: MouseEvCbFn_QueuedCallback ( Arc::new ( move |ev| {
             if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 ks.mod_keys.lwin.consumed.set();
-                if let move_event { x_pos, y_pos, .. } = ev {
+                if let move_event { x_pos, y_pos, .. } = ev.dat {
                     handle_pointer_move (x_pos, y_pos, &ks)
             } }
         } ) ),

@@ -324,7 +324,7 @@ impl ModKeys {
 
 
     pub fn proc_notice__mouse_btn_down (&self, _mbtn:MouseButton) {
-        self.lwin.consumed.set();  // its just a consumed flag, doesnt matter, we can set it for any mouse btn
+        //self.lwin.consumed.set();  // its just a consumed flag, doesnt matter, we can set it for any mouse btn
         // ^^ leftover from when lwin was SMK instead of TMK_D .. we'll let it be to allow quick lwin TMK/SMK switch
     }
     pub fn proc_notice__mouse_btn_up (&self, _mbtn:MouseButton) {
@@ -663,7 +663,7 @@ impl UnifModKey {
         // masking w an unassigned key helps avoid/reduce focus loss to menu etc for alt/win
         self.active.clear();
         if !self.is_rel_masking() || !self.consumed.is_set() { self.modkey.key().release(); }
-        else { self.mask().press(); self.modkey.key().release(); self.mask().release(); }
+        else { self.mask().release(); self.modkey.key().release(); }
     }
 
     fn reactivate        (&self) { self.active.set(); self.modkey.key().press(); }
