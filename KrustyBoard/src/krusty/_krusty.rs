@@ -47,6 +47,8 @@ impl Flag {
 }
 
 
+
+
 # [ derive (Debug, Clone) ]
 pub struct TimeStamp (Arc<RwLock<Instant>>);
 
@@ -68,6 +70,7 @@ impl TimeStamp {
 }
 
 
+
 # [ derive (Debug, Clone) ]
 pub struct EventStamp (Arc<RwLock<u32>>);
 
@@ -79,6 +82,8 @@ impl EventStamp {
     pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
     pub fn get (&self) -> u32 { *self.0.read().unwrap() }
 }
+
+
 
 
 
@@ -113,6 +118,9 @@ fn jiggle_cursor() {
     } );
 }
 
+
+
+
 # [ derive (Debug, Clone) ]
 struct Cursor (Option<HICON>);
 impl Cursor {
@@ -132,6 +140,8 @@ impl Cursor {
         } );
     } }
 }
+
+
 
 # [ derive (Debug, Clone) ]
 pub struct _Cursors {
@@ -159,6 +169,12 @@ impl Cursors {
         ) .clone()
     }
 }
+
+
+
+
+
+
 
 
 
@@ -214,6 +230,8 @@ pub struct Krusty {
     pub cm : CombosMap,
     // we have the InputProcessor itself, which will hold the kbd/mouse bindings, combo-processing-af, the side-thread-queues
     pub iproc : InputProcessor,
+    // we'll also (optionally) listen to window-events like fgnd-win or fgnd-win-title change (to have fngd-win details pre-fetched)
+    pub wel : WinEventsListener,
 }
 
 
@@ -285,6 +303,7 @@ impl Krusty {
             ks    : KrustyState::instance(),
             cm    : CombosMap::instance(),
             iproc : InputProcessor::instance(),
+            wel   : WinEventsListener::instance(),
         }
     }
 

@@ -304,9 +304,10 @@ pub fn setup_krusty_board () {
     // (we'll do it by escaping it first (via space then ctrl rel), then invoking the searchable switcher)
     fn gen_ide_switcher_switch_af (k:&Krusty, key:Key) -> AF {
         let ks = k.ks.clone();
+        let wel = k.wel.clone();
         let ctrl_key_af = k.ks.mod_keys.lctrl.active_on_key(key);
         Arc::new ( move || {
-            if ks.in_ctrl_tab_scroll_state.is_set() && get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() {
+            if ks.in_ctrl_tab_scroll_state.is_set() && wel.fgnd_info.read().unwrap().exe == "idea64.exe" {
                 // space defocuses from list so we wont actually switch tabs when we release the ctrl
                 press_release(Space);
                 // now release the ctrl so the transient-switcher popup goes away
@@ -473,9 +474,11 @@ pub fn setup_krusty_board () {
         Arc::new ( move || { line_sel(); line_repl_send(); caret_sel_start(); caret_line_start() } )
     }
     fn gen_f2_action(k:&Krusty) -> AF {
+        let wel = k.wel.clone();
         let af = gen_line_to_repl_action(k);
         Arc::new ( move || {
-            if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() { af() }
+            //if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() { af() }
+            if wel.fgnd_info.read().unwrap().exe == "idea64.exe" { af() }
             else { press_release(F2) }
         } )
     }
@@ -536,8 +539,8 @@ pub fn setup_krusty_board () {
 
 
     // escape is just escape, but we want it to do press-release immediately (so switche is faster)
-    k.cm .add_combo ( k.ks.cg(Escape),                                          k.ks.ag(Escape) );
-    k.cm .add_combo ( k.ks.cg(Escape).m(caps),                                  k.ks.ag(Escape) );
+    k.cm .add_combo ( k.ks.cg(Escape),          k.ks.ag(Escape) );
+    k.cm .add_combo ( k.ks.cg(Escape).m(caps),  k.ks.ag(Escape) );
 
     // use the apps key to send shift-escape ..
     k.cm .add_combo ( k.ks.cg(Apps),            k.ks.ag(Escape).m(shift) );
@@ -548,10 +551,15 @@ pub fn setup_krusty_board () {
     // note: any alt release (eg for bare Esc) will disrupt alt-tab, and any alt-esc variation will trigger windows, hence a dedicated hotkey
     let swi_alt_esc_af = k.ks.ag(F18).m(alt).m(ctrl).gen_af();
     let switche_next_af = k.ks.ag(F19).m(alt).m(ctrl).gen_af();
+    let wel = k.wel.clone();
     let alt_esc_action = Arc::new ( move || {
-        let h = win_get_fgnd();
-        if get_exe_by_hwnd(h).is_some_and(|s| s == "switche.exe") { swi_alt_esc_af(); }
-        else { switche_next_af(); win_send_to_back(h); }
+        if wel.fgnd_info.read().unwrap().exe == "switche.exe" {
+            swi_alt_esc_af();
+        } else {
+            let hwnd_to_back = wel.fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
+            switche_next_af();
+            win_send_to_back (hwnd_to_back);
+        }
     } );
     k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (alt_esc_action) );
 
@@ -936,7 +944,10 @@ pub fn start_krusty_board () {
     // setup everything to for the krusty keyboard configuration
     setup_krusty_board();
 
-    // then start handling inputs
+    // we'll first start the windows-events listener
+    WinEventsListener::instance().setup_win_event_hooks();
+
+    // then start handling inputs .. THIS WILL NOT RETURN !!!
     InputProcessor::instance().begin_input_processing();
 
 }

@@ -444,11 +444,10 @@ fn handle_wheel_action (delta:i32, ksr:&KrustyState) {
         // wheel support for scrolling in windows native alt-tab task-switching screen, and avoiding brightness when swi is working
         // .. we could consider spawning this part out, but meh we're in side-thread queue, its prob ok
         ksr.mod_keys.lalt.consumed.set();
-        if ksr.in_right_btn_scroll_state.is_set() || get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
+        if ksr.in_right_btn_scroll_state.is_set() || check_switche_fgnd() {
             MouseWheel::DefaultWheel.scroll(delta);    // again, we put back an eqv for switche use in case our hook is ahead of swi hook
         } else {
-            let fgnd_class = get_fgnd_win_class();
-            if fgnd_class == "XamlExplorerHostIslandWindow" || fgnd_class == "MultitaskingViewFrame" {  //dbg!(task_switching_state);
+            if check_alt_tab_fgnd() {  //dbg!(task_switching_state);
                 ksr.mod_keys.lalt.ensure_active();    // we're already down but just in case its down/inactive
                 handle_alt_tab_wheel(incr)
             } else {
@@ -513,6 +512,15 @@ fn handle_horiz_scroll_wheel (_incr:i32) {
     // todo we could in theory impl this overriding the native horiz scroll behavior
 }
 
+
+fn check_switche_fgnd () -> bool {
+    WinEventsListener::instance().fgnd_info.read().unwrap().exe == "switche.exe"
+}
+fn check_alt_tab_fgnd () -> bool {
+    let wel = WinEventsListener::instance();
+    let fi = wel.fgnd_info.read().unwrap();
+    fi.class == "XamlExplorerHostIslandWindow" || fi.class == "MultitaskingViewFrame"
+}
 
 
 

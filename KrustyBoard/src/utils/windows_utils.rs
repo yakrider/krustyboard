@@ -282,19 +282,26 @@ pub fn get_win_class_by_hwnd (hwnd:Hwnd) -> String { unsafe {
 } }
 
 
-pub fn get_fgnd_win_exe () -> Option<String> { unsafe {
-    get_exe_by_hwnd (GetForegroundWindow().into())
-} }
-pub fn get_exe_by_hwnd (hwnd:Hwnd) -> Option<String> { unsafe {
-    let mut pid = 0u32;
-    let _ = GetWindowThreadProcessId (hwnd, Some(&mut pid));
+pub fn get_fgnd_win_exe () -> Option<String> {
+    get_exe_by_hwnd ( win_get_fgnd() )
+}
+pub fn get_exe_by_hwnd (hwnd:Hwnd) -> Option<String> {
+    get_exe_by_pid ( get_pid_by_hwnd (hwnd))
+}
+pub fn get_exe_by_pid (pid:u32) -> Option<String> { unsafe {
     let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid);
     let mut lpstr: [u8; 256] = [0; 256];
     let mut lpdwsize = 256u32;
     if handle.is_err() { return None }
     let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
     handle.iter().for_each ( |h| { CloseHandle(*h); } );
-    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten()
+    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten() .into()
+} }
+
+pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {
+    let mut pid = 0u32;
+    let _ = GetWindowThreadProcessId (hwnd, Some(&mut pid));
+    pid
 } }
 
 

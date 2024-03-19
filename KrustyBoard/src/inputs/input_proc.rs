@@ -124,12 +124,25 @@ impl InputProcessor {
 
     /// Starts listening for bound input events.
     pub fn begin_input_processing (&self) {
+
+        let mut hook_was_set = false;
+
         if !self.kbd_bindings.read().unwrap().is_empty() || self.combos_processor.read().unwrap().is_some() {
-            self.set_kbd_hook();
+            if self.kbd_hook.load(Ordering::Relaxed).is_null() {
+                self.set_kbd_hook();
+                hook_was_set = true;
+            }
         };
         if !self.mouse_bindings.read().unwrap().is_empty() {
-            self.set_mouse_hook();
+            if self.mouse_hook.load(Ordering::Relaxed).is_null() {
+                self.set_mouse_hook();
+                hook_was_set = true;
+            }
         };
+
+        // if we didnt set any hooks, we should bail without starting the forever-loop waiting for events
+        if !hook_was_set { return }
+
         // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
         win_set_thread_dpi_aware();
 
@@ -141,8 +154,8 @@ impl InputProcessor {
         // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)
         let mut msg: MSG = unsafe { MaybeUninit::zeroed().assume_init() };
         unsafe { GetMessageW (&mut msg, HWND(0), 0, 0) };
-    }
 
+    }
 
 }
 

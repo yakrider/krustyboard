@@ -620,7 +620,8 @@ impl UnifModKey {
             self.consumed.set();
             let umk = self.clone();
             thread::spawn ( move || {
-                if !utils::get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
+                //if !utils::get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
+                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "switche.exe" {
                     umk.release_w_masking()   // this will update flags too
                 }
             } );

@@ -89,14 +89,14 @@ fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
     if ks.mode_states.qks1.down.is_set() { win_grp_move_mirrored (dx + dx_snap, dy + dy_snap, ks) }
 }
 fn win_grp_move_mirrored (dx:i32, dy:i32, ks:&KrustyState) {     //println!("{:?}",(dx,dy));
-    let pad = ks.mouse.pre_drag_dat.read().unwrap().padding.clone();
-    ks.mouse.pre_drag_dat.read().unwrap().grp_rects .iter() .for_each (|(&hwnd,&rect)| {
+    let pdd = ks.mouse.pre_drag_dat.read().unwrap();
+    pdd.grp_rects .iter() .for_each (|(&hwnd,&rect)| {
         win_move_to (
             hwnd,
-            rect.left + dx - pad.left,
-            rect.top  + dy - pad.top,
-            rect.right - rect.left + pad.left + pad.right,
-            rect.bottom - rect.top + pad.top + pad.bottom,
+            rect.left + dx - pdd.padding.left,
+            rect.top  + dy - pdd.padding.top,
+            rect.right  - rect.left + pdd.padding.left + pdd.padding.right,
+            rect.bottom - rect.top  + pdd.padding.top  + pdd.padding.bottom,
         );
     } )
 }
@@ -138,7 +138,7 @@ pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
 
 
 pub fn handle_pointer_action_cancel (ks:&KrustyState) {
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap().clone();
+    let pdd = ks.mouse.pre_drag_dat.read().unwrap();
     win_move_to (
         pdd.hwnd,  pdd.rect.left,  pdd.rect.top,
         pdd.rect.right - pdd.rect.left,
