@@ -2,6 +2,7 @@
 
 use std::mem::size_of;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use derive_deref::Deref;
 use once_cell::sync::OnceCell;
@@ -43,6 +44,52 @@ pub struct Combo {
 
 
 
+/// represents arc wrapped condition fn to trigger combo .. should return true if combo trigger condition is satisfied
+pub type ComboCond = Arc < dyn Fn(&KrustyState) -> bool + Send + Sync + 'static >;
+
+
+# [ derive () ]
+/// ComboValue is the 'value' part of the combos_map entry that holds the AF, the combo creation time, and the optional trigger condition
+pub struct ComboValue {
+    _private  : (),
+    pub stamp : Instant,
+    pub cond  : Option <ComboCond>,
+    pub af    : AF,
+}
+
+impl ComboValue {
+    pub fn new (af:AF) -> ComboValue {
+        ComboValue::new_w_cond (af, None)
+    }
+    pub fn new_w_cond (af:AF, cond:Option<ComboCond>) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), cond, af }
+    }
+}
+
+
+
+
+
+# [ derive () ]
+/// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
+pub struct _CombosMap {
+    _private : (),
+    // the combos map itself, mapping key+mod-key+mode-state combos to actions
+    combos_map : Arc <RwLock <FxHashMap <Combo, Vec<ComboValue>>>>,
+    // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
+    l2_keys_map : Arc <RwLock <FxHashMap <Key, Key>>>,
+    // and we'll hold a registry for keys that only need default/fallback bindings
+    default_bind_keys : Arc <RwLock <FxHashSet <Key>>>,
+}
+# [ derive (Clone, Deref) ]
+pub struct CombosMap ( Arc <_CombosMap> );
+
+
+
+
+
+
+
 // The following generators comprise the Combo and Action Generation fluent api structs, with Key or with supplied AF
 // .. once populated they can be used for generation of either a combo or a (possibly guarded) action
 
@@ -53,6 +100,7 @@ pub struct ComboGen<'a> {
     key   : Key,                // combo-trigger key
     mks   : Vec<ModKey>,        // modifier keys that should be down to trigger this combo
     modes : Vec<ModeState_T>,   // mode-states that should match for this combo to trigger
+    cond  : Option<ComboCond>,  // optional condition to check before triggering this combo
     // the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
     mod_key_no_consume  : bool,
     // the mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released
@@ -79,26 +127,6 @@ pub struct ActionGen_wAF<'a> {
     // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
     wrap_mod_key_guard : bool,
 }
-
-
-
-
-
-# [ derive () ]
-/// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
-pub struct _CombosMap {
-    _private : (),
-    // the combos map itself, mapping key+mod-key+mode-state combos to actions
-    combos_map : Arc <RwLock <FxHashMap <Combo, AF>>>,
-    // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
-    l2_keys_map : Arc <RwLock <FxHashMap <Key, Key>>>,
-    // and we'll hold a registry for keys that only need default/fallback bindings
-    default_bind_keys : Arc <RwLock <FxHashSet <Key>>>,
-}
-# [ derive (Clone, Deref) ]
-pub struct CombosMap ( Arc <_CombosMap> );
-
-
 
 
 
@@ -241,7 +269,7 @@ impl Combo {
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 impl<'a> ComboGen<'a> {
     pub fn new (key:Key, ks:&KrustyState) -> ComboGen {
-        ComboGen { ks, key, mks:Vec::new(), modes:Vec::new(), mod_key_no_consume:false, mode_kdn_no_consume:false }
+        ComboGen { ks, key, mks:Vec::new(), modes:Vec::new(), cond:None, mod_key_no_consume:false, mode_kdn_no_consume:false }
     }
     /// Add a modifier key to the combo
     pub fn m (mut self, mk:ModKey) -> ComboGen<'a> {
@@ -250,6 +278,21 @@ impl<'a> ComboGen<'a> {
     /// Add a mode-state to the combo
     pub fn s (mut self, md: ModeState_T) -> ComboGen<'a> {
         self.modes.push(md); self
+    }
+    /// Add a condition to the combo
+    pub fn c (mut self, cond:ComboCond) -> ComboGen<'a> {
+        if self.cond.is_none() {
+            self.cond = Some(cond);
+        } else {
+            let cond_old = self.cond.take().unwrap();
+            self.cond = Some ( Arc::new ( move |ks| cond_old(ks) && cond(ks) ) );
+        }
+        self
+    }
+    /// Add a fgnd-exe condition to the combo
+    pub fn fg (self, exe:&str) -> ComboGen<'a> {
+        let exe = exe.to_string();
+        self.c ( Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().is_ok_and(|fi| fi.exe == exe) ) )
     }
     /// Disable consuming mod-key key-downs for this combo. <br>
     /// (The default is to consume (i.e. do masking when releasing modkey) any modkey kdn on registered combos)
@@ -276,11 +319,17 @@ impl<'a> ComboGen<'a> {
         }
         afc
     }
-    /// Generate one or more combos from this ComboGen w/ key-dwn consuming behavior as specified during construction
-    pub fn gen_combos (&self) -> Vec<Combo> {
-        Combo::gen_combos (&self.mks, &self.modes, self.key, self.ks)
+
+    /// Generate one or more combos/combo-value entries from this ComboGen w/ key-dwn consuming behavior as specified during construction
+    pub fn gen_combo_entries (&self, af:AF) -> Vec<(Combo, ComboValue)> {
+        Combo::gen_combos (&self.mks, &self.modes, self.key, self.ks) .into_iter() .map ( |c|
+            (c, ComboValue::new_w_cond (af.clone(), self.cond.clone()))
+        ) .collect()
     }
+
 }
+
+
 
 
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
@@ -302,6 +351,7 @@ impl<'a> ActionGen_wKey<'a> {
         Combo::gen_af (&self.mks, base_action(self.key), self.wrap_mod_key_guard, self.ks)
     }
 }
+
 
 
 /// Combo-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
@@ -357,18 +407,30 @@ impl CombosMap {
     /// use this fn to register combos that will output other keys/combos
     pub fn add_combo (&self, cg:ComboGen, ag:ActionGen_wKey) {
         let af = cg.kdn_consume_wrap (ag.gen_af());
-        for c in cg.gen_combos() {
+        for (c, cv) in cg.gen_combo_entries(af) {
             //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> k:{:?} mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.key, ag.mks );
-            self.combos_map.write().unwrap() .insert (c, af.clone());
+            self.add_to_combos_map (c, cv);
     } }
 
     /// use this fn to register combos that will trigger the supplied action
     pub fn add_combo_af (&self, cg:ComboGen, ag:ActionGen_wAF) {
         let af = cg.kdn_consume_wrap (ag.gen_af());
-        for c in cg.gen_combos() {
+        for (c, cv) in cg.gen_combo_entries(af) {
             //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> AF, mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.mks );
-            self.combos_map.write().unwrap() .insert (c, af.clone());
+            self.add_to_combos_map (c, cv);
     } }
+
+    fn add_to_combos_map (&self, c:Combo, cv:ComboValue) {
+        let mut cm = self.combos_map.write().unwrap();
+        //self.combos_map.write().unwrap() .insert (c, cv);
+        if let Some(cvs) = cm.get_mut(&c) {
+            cvs.push(cv);
+            cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.stamp));
+            // ^^ we want to sort such that conditionals are up top sorted by timestamp .. (hence the boolean supplied as cond.is_none())
+        } else {
+            cm.insert (c, vec![cv]);
+        }
+    }
 
 
 
@@ -406,18 +468,42 @@ impl CombosMap {
         af();
     }
 
+    /// applies applicable combo-actions (that meet conditional requirements if any), returns whether any combo AF was executed
+    fn process_combo_afs (&self, ks:&KrustyState, cvs:&Vec<ComboValue>) -> bool {
+        // note that we have previously ordered combo-values for each combo such that conditional ones are up top sorted by timestamp
+        // this ensures determinism, and since the non-conditional af is at the end, allows us to only run that if no conditions matched
+        let mut cond_matched = false;
+        cvs.iter() .for_each ( |cv| {
+            if cv.cond.as_ref() .is_some_and (|c| c(ks)) || (cv.cond.is_none() && !cond_matched) {
+                cond_matched = true;
+                (cv.af)();
+            }
+        } );
+        cond_matched
+    }
+
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
     pub fn combo_maps_handle_key_down (&self, key:Key, ks:&KrustyState) {
         //println!("key press : {:?}", key);
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
+
         let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (key, &ks);
-        if let Some(cmaf) = self.combos_map.read().unwrap() .get(&combo_w_latch) {
-            cmaf()  // if we find a combo w latch active, that overrides everything else
-        } else if let Some(cmaf) = self.combos_map.read().unwrap() .get(&combo_no_latch) {
-            cmaf()  // else we're now ok w just a combo ignoring latches
-        } else if ks.mod_keys.caps.dbl_tap.is_set() {     //println!("{:?}",("dbl-caps!"));
+        let mut combo_triggered = false;
+
+        if let Some(cvs) = self.combos_map.read().unwrap() .get(&combo_w_latch) {
+            // if we find a combo w latch active, that overrides everything else
+            combo_triggered = self.process_combo_afs (ks, &cvs);
+        } else if let Some(cvs) = self.combos_map.read().unwrap() .get(&combo_no_latch) {
+            // else we're now ok w just a combo ignoring latches
+            combo_triggered = self.process_combo_afs (ks, &cvs);
+        }
+        if combo_triggered { return }
+        // ^^ if either of those actually had registered combos with either a matching conditional, or an un-conditional one, we're done
+
+        // fallback processing ..
+        if ks.mod_keys.caps.dbl_tap.is_set() {     //println!("{:?}",("dbl-caps!"));
             // no fallback for double-tap combos that arent explicitly registered
             // in the few cases (like maybe caps/ctrl-f etc) we can set them individually in code ourselves
         } else if ks.mod_keys.caps.down.is_set() {

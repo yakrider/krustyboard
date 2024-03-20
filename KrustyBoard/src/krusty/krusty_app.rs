@@ -35,16 +35,18 @@ pub mod special_keys_setups {
         // Note again that when we do direct binding here, anything via combomaps for the key will be overwritten
 
         let ks = k.ks.clone();
-        let epd_passthrough = KbdEvProcDirectives { event_prop_d: EventProp_Continue, combo_proc_d: ComboProc_Disable };
         k.iproc .kbd_bindings .bind_kbd_event (Key::Insert, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-            event_proc_d: epd_passthrough,
+            event_proc_d: KbdEvProcDirectives { event_prop_d: EventProp_Undetermined, combo_proc_d: ComboProc_Disable },
             cb: KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
-                if ks.mod_keys.caps.dbl_tap.is_set() { ks.unstick_all() }
-                epd_passthrough
+                let (mut event_prop_d, combo_proc_d) = (EventProp_Continue, ComboProc_Disable);
+                if ks.mod_keys.caps.dbl_tap.is_set() {
+                    ks.unstick_all();
+                    event_prop_d = EventProp_Stop;
+                }
+                KbdEvProcDirectives { event_prop_d, combo_proc_d }
             } ) ),
         } )
-        // wont need a key-up for this as the keydown is pasthrough anyway
-
+        // we'll let key-up just be natural passthrough .. any extra when after when we did unstick-all should be harmless
 
     }
 
@@ -71,6 +73,14 @@ pub fn setup_krusty_board () {
     // mouse setup incl lbtn/rbtn/mbtn/x1btn/x2btn and the scroll wheels
     k.ks.mouse.setup_mouse(&k);
 
+
+    // we'll define some common combo-conds that can be reused later
+    fn intellij_fgnd() -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "idea64.exe" ) }
+    fn switche_fgnd()  -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "switche.exe" ) }
+    //fn chrome_fgnd()   -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "chrome.exe" ) }
+    fn browser_fgnd()  -> ComboCond { Arc::new ( move |_| {
+        WinEventsListener::instance().fgnd_info.read() .is_ok_and (|fi| fi.exe == "chrome.exe" || fi.exe == "msedge.exe" )
+    } ) }
 
 
     // we'll setup most keys via key-combo action maps that we'll compose into relevant callbacks after all mapping is registered
@@ -304,10 +314,9 @@ pub fn setup_krusty_board () {
     // (we'll do it by escaping it first (via space then ctrl rel), then invoking the searchable switcher)
     fn gen_ide_switcher_switch_af (k:&Krusty, key:Key) -> AF {
         let ks = k.ks.clone();
-        let wel = k.wel.clone();
         let ctrl_key_af = k.ks.mod_keys.lctrl.active_on_key(key);
         Arc::new ( move || {
-            if ks.in_ctrl_tab_scroll_state.is_set() && wel.fgnd_info.read().unwrap().exe == "idea64.exe" {
+            if ks.in_ctrl_tab_scroll_state.is_set() {
                 // space defocuses from list so we wont actually switch tabs when we release the ctrl
                 press_release(Space);
                 // now release the ctrl so the transient-switcher popup goes away
@@ -323,9 +332,7 @@ pub fn setup_krusty_board () {
             } else { ctrl_key_af() }
         } )
     }
-    k.cm .add_combo_af ( k.ks.cg(Space).m(caps),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
-    //k.cm .add_combo_af ( k.ks.cg(Space).m(caps).s(mngd_ctrl_dn),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
-    //k.cm .add_combo_af ( k.ks.cg(Space).m(caps).s(mngd_ctrl_dn).s(ctrl_tab_scrl),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
+    k.cm .add_combo_af ( k.ks.cg(Space).m(caps).c(intellij_fgnd()),  k.ks.ag_af(gen_ide_switcher_switch_af(&k, Space)) );
 
 
 
@@ -419,7 +426,13 @@ pub fn setup_krusty_board () {
         let hk_tray_focus = k.ks.clone().ag(B).m(lwin).gen_af();
         let af_shift_tab  = k.ks.clone().ag(Tab).m(lshift).gen_af();
         let af_ext_down   = k.ks.clone().ag(ExtDown).gen_af();
-        Arc::new ( move || { hk_tray_focus(); af_shift_tab(); af_shift_tab(); af_ext_down(); af_ext_down(); } )
+        Arc::new ( move || {
+            let (hk_tray_focus, af_shift_tab, af_ext_down) = (hk_tray_focus.clone(), af_shift_tab.clone(), af_ext_down.clone());
+            thread::spawn ( move ||  {
+                fn sleep() { thread::sleep(time::Duration::from_millis(100)) }   // win masked-release is delayed, so we wanna spread these out
+                hk_tray_focus(); sleep(); af_shift_tab(); sleep(); af_shift_tab(); sleep(); af_ext_down(); sleep(); af_ext_down();
+            } );
+        } )
     };
     k.cm .add_combo_af ( k.ks.cg(Numrow_1).m(lwin), k.ks.ag_af(cb_focus_yak_tools_bar) );
 
@@ -473,19 +486,10 @@ pub fn setup_krusty_board () {
         let caret_line_start = k.ks.ag(ExtHome).gen_af();                  // caret to beginning of first word in line
         Arc::new ( move || { line_sel(); line_repl_send(); caret_sel_start(); caret_line_start() } )
     }
-    fn gen_f2_action(k:&Krusty) -> AF {
-        let wel = k.wel.clone();
-        let af = gen_line_to_repl_action(k);
-        Arc::new ( move || {
-            //if get_fgnd_win_exe().filter(|s| s == "idea64.exe").is_some() { af() }
-            if wel.fgnd_info.read().unwrap().exe == "idea64.exe" { af() }
-            else { press_release(F2) }
-        } )
-    }
-    k.cm .add_combo_af ( k.ks.cg(F2),  k.ks.ag_af(gen_f2_action(&k)) );
+    k.cm .add_combo_af ( k.ks.cg(F2).c(intellij_fgnd()),   k.ks.ag_af(gen_line_to_repl_action(&k)) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
-    k.cm .add_combo ( k.ks.cg(F2).m(caps),  k.ks.ag(End).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(F2).m(caps).c(intellij_fgnd()),   k.ks.ag(End).m(alt).m(shift) );
 
 
 
@@ -549,19 +553,14 @@ pub fn setup_krusty_board () {
     // .. if switche not in fgnd, we'll switch to next window in switche and send cur to back
     //  .. and if switche is fgnd, we send a switche hotkey so the swiche window is simply dismissed instead
     // note: any alt release (eg for bare Esc) will disrupt alt-tab, and any alt-esc variation will trigger windows, hence a dedicated hotkey
-    let swi_alt_esc_af = k.ks.ag(F18).m(alt).m(ctrl).gen_af();
     let switche_next_af = k.ks.ag(F19).m(alt).m(ctrl).gen_af();
-    let wel = k.wel.clone();
     let alt_esc_action = Arc::new ( move || {
-        if wel.fgnd_info.read().unwrap().exe == "switche.exe" {
-            swi_alt_esc_af();
-        } else {
-            let hwnd_to_back = wel.fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
-            switche_next_af();
-            win_send_to_back (hwnd_to_back);
-        }
+        let hwnd_to_back = WinEventsListener::instance().fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
+        switche_next_af();
+        win_send_to_back (hwnd_to_back);
     } );
-    k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),  k.ks.ag_af (alt_esc_action) );
+    k.cm .add_combo    ( k.ks.cg(Escape).m(lalt).c(switche_fgnd()),  k.ks.ag(F18).m(alt).m(ctrl) );     // switche alt-esc
+    k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),                    k.ks.ag_af (alt_esc_action) );
 
 
     // we have win-mouse window drag/resize .. we'd like to cancel any in-progress action via escape
@@ -731,6 +730,7 @@ pub fn setup_krusty_board () {
     // the I and Comma both do toggle but its better to have both for muscle memory on shift-move up/down
     k.cm .add_combo ( k.ks.cg(I       ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
     k.cm .add_combo ( k.ks.cg(Comma   ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Comma   ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
     k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),          k.ks.ag(C).m(alt).m(shift) );
 
 
@@ -738,9 +738,9 @@ pub fn setup_krusty_board () {
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
     // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
     // so instead, we'll layer that on lalt instead (and use alt-end for activation instead)
-    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt),  k.ks.ag(End).m(alt) );
+    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt) );
     // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via ctrl-alt-end)
-    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt),  k.ks.ag(End).m(alt).m(ctrl) );
+    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt).m(ctrl) );
     //k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt),  k.ks.ag(Tab).mkg_nw() ); // no guard as alt is down, but w caps, so itll be inactive
 
 
@@ -809,6 +809,8 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(K).m(caps).s(qks2),  k.ks.ag(F11).m(shift) );
 
 
+
+
     // but for switche-hotkeys, instead of caps, we'll do on lalt, and on qks1
     k.cm .add_combo ( k.ks.cg(L).m(lalt).s(qks1),  k.ks.ag(F19).m(alt).m(ctrl) );   // L switches to last
     k.cm .add_combo ( k.ks.cg(O).m(lalt).s(qks1),  k.ks.ag(F20).m(alt).m(ctrl) );   // O switches to TabsOutliner
@@ -818,7 +820,8 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(B).m(lalt).s(qks1),  k.ks.ag(F24).m(alt).m(ctrl) );   // B switches to first browser window
 
 
-
+    // chrome/browser specific combos
+    k.cm .add_combo ( k.ks.cg(T).m(lalt).m(caps).c(browser_fgnd()),  k.ks.ag(A).m(ctrl).m(shift) );   // caps-alt-t --> ctrl-shift-a (tabs search popup)
 
 
 
@@ -849,40 +852,19 @@ pub fn setup_krusty_board () {
 
 
     // this one is a hack around intellij not giving a shortcut action to hide floating tool windows
-    fn _ide_float_tools_clear (ks:&KrustyState) {
-        let ks = ks.clone();
-        thread::spawn ( move || {  //println!("---");
-            let mut n_trials = 10;  // how many times do we want to keep finding and escaping matching windows
-            while {
-                let hwnd = win_find_by_win_class ("SunAwtDialog");
-                // ^^ Note that if the found window does not close on escape, that same fgnd window might keep being retried ignoring others
-                if hwnd.0 != 0 {
-                    win_set_fgnd(hwnd);
-                    let mut n_wait = 10;  // how many times to wait <t>ms for the set fgnd to work
-                    while {
-                        thread::sleep(time::Duration::from_millis(10)); //print!("{:?}",'.');
-                        n_wait -= 1;
-                        hwnd != win_get_fgnd() && n_wait > 0
-                    } { }
-                    ks.mod_keys.lalt.inactive_action(base_action(Escape))();
-                    ks.mod_keys.lalt.inactive_action(shift_action(Escape))();
-                    // ^^ ugh turns out theres a bug in IntelliJ where if the tool window has a 'split' it doesnt close by Esc .. wth!
-                    thread::sleep(time::Duration::from_millis(50));
-                }
-                n_trials -= 1;
-                hwnd.0 != 0  && n_trials > 0
-            } { }
-        } );
-    }
     fn ide_float_tools_clear () {
         static hidden_hwnds : Lazy <Arc <RwLock <FxHashSet <Hwnd>>>> = Lazy::new (|| Arc::new (RwLock::new (FxHashSet::default())));
         thread::spawn ( move || {
             if !hidden_hwnds.read().unwrap().is_empty() { // will do toggle based on whether anything is in the prior-hidden list
+                let fgnd_hwnd = WinEventsListener::instance().fgnd_info.read().unwrap().hwnd;
                 let hwnds = hidden_hwnds.read().unwrap().iter().copied().collect::<Vec<Hwnd>>();
                 hwnds .iter() .for_each (|&hwnd| {
                     if win_check_hwnd(hwnd) { win_activate(hwnd); }
                     hidden_hwnds.write().unwrap().remove(&hwnd);
                 });
+                thread::sleep(time::Duration::from_millis(100));
+                win_activate(fgnd_hwnd);
+                // ^^ when multiple IDEs had hidden windows, this helps keep the one that was in fgnd remain that way
             } else {
                 win_get_ide_dialog_hwnds() .into_iter() .for_each (|hwnd| {
                     win_hide(hwnd);
@@ -890,7 +872,7 @@ pub fn setup_krusty_board () {
                 } );
         } } );
     }
-    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt), k.ks.ag_af (Arc::new (move || ide_float_tools_clear())) );
+    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt).c(intellij_fgnd()),  k.ks.ag_af (Arc::new (move || ide_float_tools_clear())) );
 
 
 

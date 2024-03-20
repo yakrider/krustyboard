@@ -306,6 +306,8 @@ impl ModKeys {
     pub fn unstick_all (&self) {
         // all modkey states .. we'll do two loops to interleave them so they dont activate e.g. start-menu
         self.mod_umk_pairs() .iter() .for_each (|(_,umk)| umk.modkey.key().press() );
+        // but since ctrl-alt-shift-win press-rel triggers ms-365, we'll insert a dummy key as well
+        Key::OtherKey(0x9A).release();
         self.mod_umk_pairs() .iter() .for_each (|(_, umk)| {
             umk.modkey.key().release(); umk.down.clear(); umk.active.clear(); umk.dbl_tap.clear();
         });
@@ -507,12 +509,14 @@ impl KeyHandling for ModKey_Managed {
         self.epds_blocked()
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        if !bmk.active.is_set() || ks.mod_keys.caps.down.is_set() {
-            // if inactive or caps-down we just suppress this keyup
+        if !bmk.active.is_set() { //|| ks.mod_keys.caps.down.is_set() {
+            // ^^ since caps-dn releases mod-keys, we dont need to check that here ..
+            //  .. EXCEPT for alt when switche is fgnd, in which case, we'd want to release it even w caps down anyway
+            // if inactive (usually due to caps-down) we just suppress this keyup
         } else {
             if bmk.is_keyup_unified() && bmk.paired_down() {
                 // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
@@ -620,7 +624,7 @@ impl UnifModKey {
             self.consumed.set();
             let umk = self.clone();
             thread::spawn ( move || {
-                //if !utils::get_fgnd_win_exe().is_some_and(|s| s == "switche.exe") {
+                // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
                 if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "switche.exe" {
                     umk.release_w_masking()   // this will update flags too
                 }

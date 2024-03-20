@@ -58,6 +58,9 @@ pub fn check_window_cloaked (hwnd:Hwnd) -> bool { unsafe {
     cloaked_state != 0
 } }
 
+pub fn check_if_app_window (hwnd:Hwnd) -> bool { unsafe {
+    GetWindowLongW (hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW.0 as i32 != 0
+} }
 pub fn check_if_tool_window (hwnd:Hwnd) -> bool { unsafe {
     GetWindowLongW (hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 as i32 != 0
 } }

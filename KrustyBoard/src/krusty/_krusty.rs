@@ -110,7 +110,7 @@ fn update_stamp_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag, thresh_ms:
     dbl_flag .store (is_double_tap);
     is_double_tap
 }
-fn jiggle_cursor() {
+pub fn jiggle_cursor() {
     thread::spawn (|| {
         MousePointer::move_rel(5,5);
         thread::sleep(Duration::from_millis(100));
@@ -264,15 +264,18 @@ impl KrustyState {
         self.mod_keys.unstick_all();
 
         use MouseButton::*;
-        LeftButton.release(); RightButton.release(); MiddleButton.release();
-        X1Button.release(); X2Button.release();
+        RightButton.press(); LeftButton.press(); RightButton.release(); LeftButton.release();
+        // ^^ interleaving these helps minimize effect of a direct right-btn release (e.g context menus)
+        MiddleButton.release(); X1Button.release(); X2Button.release();
 
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
            &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
 
+        jiggle_cursor();
+
         // lets send a delayed Esc for any context menus etc that show up
-        thread::spawn (|| { thread::sleep (Duration::from_millis(300)); key_utils::press_release(Key::Escape) } );
+        thread::spawn (|| { thread::sleep (Duration::from_millis(100)); key_utils::press_release(Key::Escape) } );
     }
 
     /// Utlity function to create a new Combo-generator (for combo-specification) <br>

@@ -3,7 +3,6 @@
 
 use std::sync::{Arc, RwLock, Mutex};
 
-use grouping_by::GroupingBy;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use rustc_hash::FxHashMap;
@@ -180,7 +179,7 @@ pub fn capture_pre_drag_dat (ks:&KrustyState) -> PreDragDat {    //println!("{:?
     let snap_thresh = ((wa.bottom - wa.top) / 50) as u32;
     rects.push ((Hwnd(0), wa));
     // lets finally calculate our visible edges lists
-    let edge_lists = rects_to_viz_edgelists (&rects);
+    let edge_lists = rects_to_viz_edgelists (&mut rects);
 
     // and thats it, can store it all away so the actual pointer-move callbacks can be fast!
     PreDragDat { hwnd, rect, padding, snap_thresh, pointer: point, edge_lists, grp_rects }
@@ -214,15 +213,17 @@ fn _rects_to_edgelists (rects: &Vec <RECT>) -> RectEdgeLists {
     RectEdgeLists { vert: reduce_edge_sects(&mut rels.vert), horiz: reduce_edge_sects(&mut rels.horiz)}
 }
 
-
-fn rects_to_viz_edgelists (rects: &Vec<(Hwnd, RECT)>) -> RectEdgeLists {
+fn rects_to_viz_edgelists (rects: &mut Vec<(Hwnd, RECT)>) -> RectEdgeLists {
     // Note: we rely on the assumption here that the rects are straight from win-enum call and are therefore in z-order
     let mut viz_edge_lists = RectEdgeLists::new_w_capacity (2 * rects.len()); // x2 because we make horiz/vert vecs each w 2 edges per rect
-    rects .iter() .enumerate() .for_each ( |(i,(_,rect))| {
-        let rect_edges = rect_to_edges(rect);
-        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (vec![rect_edges.left, rect_edges.right ], true,  &rects[.. i]) );
-        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (vec![rect_edges.top,  rect_edges.bottom], false, &rects[.. i]) );
-    });
+    for i in 0 .. rects.len() {
+        let rect_edges = rect_to_edges(&rects[i].1);
+        rects[..i] .sort_unstable_by_key ( |(_,r)| -1 * (r.right - r.left) * (r.bottom - r.top) );
+        // ^^ sorting by decreasing area ensures we check the largest windows first (as they're most likely to occlude)
+        // .. (and since we only need to re-sort the section before our cur iteration location, it's safe to do in place!)
+        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (vec![rect_edges.left, rect_edges.right ], true,  &rects[..i]) );
+        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (vec![rect_edges.top,  rect_edges.bottom], false, &rects[..i]) );
+    };
     viz_edge_lists.vert  = reduce_edge_sects (&mut viz_edge_lists.vert);
     viz_edge_lists.horiz = reduce_edge_sects (&mut viz_edge_lists.horiz);
     //println!("\n{:#?}\n",(&viz_edge_lists.vert));
@@ -265,30 +266,32 @@ fn calc_edge_viz_sects_for_bounds (edge:&Edge, bounds:&Bounds) -> Vec<Edge> {
     edges
 }
 
-fn reduce_edge_sects (edges: &mut Vec<Edge>) -> Vec<Edge> {
-    // Note that this only works for edges of the same type (cant mix horiz and vert edges!)
-    // Our goal is to make only a single pass through groups of edges at the same displacmeent sorted by linear dim (x for vert, y for horiz)
-    // .. then we can start going through the sorted list combining edges where possible or else starting new sections
-    edges .iter() .grouping_by (|e| e.xy) .iter_mut() .map ( |(_xy, edges)| {
-        // we'll sort the (mut iter'd) groups in place first, then start folding through
-        edges .sort_by (|a,b| a.tl.partial_cmp(&b.tl).unwrap());
-        edges .iter() .fold (vec![**edges.iter().next().unwrap()], |mut r_edges, edge| {
-            let last = r_edges.last().unwrap().to_owned();
-            if edge.tl > last.br {
-                // insert new section as it starts after cur last ends
-                r_edges .push (Edge {xy:last.xy, tl:edge.tl, br:edge.br,});
-            } else if edge.br > last.br {
-                // elongate the cur last edge
-                let last_idx = r_edges.len()-1;
-                *r_edges.get_mut(last_idx).unwrap() = Edge {xy:last.xy, tl:last.tl, br:edge.br};
-            } else {
-                // this edge is completely within our accumulated last edge .. do nothing
-            }
-            r_edges
-        } )
-    } ) .flatten().collect::<Vec<Edge>>()
-}
 
+fn reduce_edge_sects(edges: &mut Vec<Edge>) -> Vec<Edge> {
+     use itertools::Itertools;      // for group_by trait
+    // Note that this only works for edges of the same type (cant mix horiz and vert edges)
+    // Our goal is to make only a single pass through groups of edges at the same displacement sorted by linear dim (x for vert, y for horiz)
+    // .. then we can start going through the sorted list combining edges where possible or else starting new sections
+    let mut reduced = Vec::new();
+    edges .sort_unstable_by_key (|e| (e.xy, e.tl));
+    // ^^ sorting by displacement first, then by start of section means we can do everything in one pass
+    edges.iter() .group_by (|e| e.xy) .into_iter() .for_each ( |(_xy, mut grp)| {
+        // for each grp, we seed its portion of reduced edge-list with its first edge
+        // (we'll maintain the invariant that the last edge in reduced list is the leftmost/topmost edge for cur group)
+        reduced .push (*grp.next().unwrap());
+        // ^^ this unwrap should be safe as otherwise there wouldnt be this group in the first place
+        grp .for_each (|e| {
+            let r_last = reduced.last_mut().unwrap();
+            // edges in a grp are tl-sorted, so we'll have e.tl >= r_last.tl, so we need only check against r_last.br
+            if r_last.br < e.tl {         // i.e. there's a gap between last edge in reduced list and cur edge
+                reduced.push(*e);         //   .. so insert it as new segment
+            } else if r_last.br < e.br {  // i.e. there's overlap between last edge in reduced list and cur edge
+                r_last.br = e.br;         //   .. so elongate the last segment in reduced list
+            } else { }                    // i.e. this edge is completely within our last reduced edge .. so do nothing
+        } );
+    } );
+    reduced
+}
 
 fn snap_to_edge_rect_delta (wr:&RECT, pdd:&PreDragDat) -> RECT {
     let wres = rect_to_edges(wr);
@@ -306,8 +309,8 @@ fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&Vec<Edge>,
     let delta = edges .iter() .fold ( i32::MAX,  |delta_acc, edge| {
         let delta_e = edge.xy - win_edge.xy - pad_v;
         if { delta_e.abs() < delta_acc.abs()
-            && edge.br > win_edge.tl
-            && edge.tl < win_edge.br
+            && edge.br >= win_edge.tl
+            && edge.tl <= win_edge.br
         } { delta_e } else { delta_acc }
     } );
     if delta.abs() < thresh as i32 { delta } else { 0 }
@@ -336,10 +339,14 @@ pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, pdd_hwnd:LPARAM)
     let retval = BOOL (true as i32);
 
     if  pdd_hwnd.0 == hwnd.0           { return retval }        // ignore self window for snap calcs
+
     if !check_window_visible   (hwnd.into())  { return retval }
     if  check_window_cloaked   (hwnd.into())  { return retval }
-    if  check_window_has_owner (hwnd.into())  { return retval }
-    if  check_if_tool_window   (hwnd.into())  { return retval }
+
+    if !check_if_app_window (hwnd.into()) {
+        if  check_window_has_owner (hwnd.into())  { return retval }
+        if  check_if_tool_window   (hwnd.into())  { return retval }
+    }
 
     let frame = win_get_window_frame (hwnd.into());
 
