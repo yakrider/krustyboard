@@ -230,28 +230,35 @@ impl Combo {
         Combo::fan_lr(mksc) .iter() .map(|mv| {Combo::new (key, mv, &modes)}) .collect::<Vec<Combo>>()
     }
 
-    fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState) -> AF {
+    fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState, cgo:Option<&ComboGen>) -> AF {
         // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
         // note-4: reminder that e.g. we have ralt blocked, and lalt managed .. and its still ok to specify ralt in combo-gen (sending out)
+        fn triplet_contains (mks:&Vec<ModKey>, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
+            mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk)
+        }
         let mut af = af;
         ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
             ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
                 // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
-                if mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk) {
+                if triplet_contains (mks, lrmk, lmk, rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
                     // so if this is managed mk and the wrapping flag is set, we'll wrap in active action, else just direct action
                     if umk.handling.is_managed() && wrap_mod_key_guard {
-                        af = umk.active_action(af.clone())
+                        af = umk.active_action (af.clone())
                     } else {
-                        af = umk.bare_action(af.clone())
+                        af = umk.bare_action (af.clone())
                     }
                 } else {
                     // we're in a triplet where neither of lr/l/r is in the modkeys set for this combo
-                    // so if this is managed mk, we will wrap an inactive action around it .. else it can be as is
-                    if umk.handling.is_managed() && wrap_mod_key_guard { af =
-                        umk.inactive_action(af.clone())
+                    if umk.handling.is_managed() && wrap_mod_key_guard {
+                        af = umk.inactive_action(af.clone())
+                        // ^^ for managed mk, as this mod-key was not in the list, we wrap inactive action around it
+                    } else if umk.handling.is_doubled() && wrap_mod_key_guard && cgo.is_some_and (|cg| triplet_contains (&cg.mks, lrmk, lmk, rmk) ) {
+                        af = umk.masked_released_action (af.clone())
+                        // ^^ for doubled-mk (e.g. lwin) specified in combo-gen mks but not in action mks, we'll do a masked release here for robustness
+                        // .. in theory, we shouldnt need it, but the OS might have gotten at the held key earlier than our hook, so this helps
                     }
                 }
             })
@@ -348,7 +355,7 @@ impl<'a> ActionGen_wKey<'a> {
     }
     /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
     pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, base_action(self.key), self.wrap_mod_key_guard, self.ks)
+        Combo::gen_af (&self.mks, base_action(self.key), self.wrap_mod_key_guard, self.ks, None)
     }
 }
 
@@ -369,7 +376,7 @@ impl<'a> ActionGen_wAF<'a> {
     }
     /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
     pub fn gen_af (&self) -> AF {
-        Combo::gen_af (&self.mks, self.af.clone(), self.wrap_mod_key_guard, self.ks)
+        Combo::gen_af (&self.mks, self.af.clone(), self.wrap_mod_key_guard, self.ks, None)
     }
 }
 
@@ -406,7 +413,10 @@ impl CombosMap {
 
     /// use this fn to register combos that will output other keys/combos
     pub fn add_combo (&self, cg:ComboGen, ag:ActionGen_wKey) {
-        let af = cg.kdn_consume_wrap (ag.gen_af());
+        // instead of calling ag.gen_af() directly (which would call Combo::gen_af), we'll ourselves call Combo:gen_af while passing in CG as well
+        // .. this will be useful in case we need trigger-specific wrapping (e.g. for mk_dbl present in combo but not in AF)
+        let af = Combo::gen_af (&ag.mks, base_action(ag.key), ag.wrap_mod_key_guard, cg.ks, Some(&cg));
+        let af = cg.kdn_consume_wrap (af);
         for (c, cv) in cg.gen_combo_entries(af) {
             //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> k:{:?} mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.key, ag.mks );
             self.add_to_combos_map (c, cv);
@@ -414,7 +424,8 @@ impl CombosMap {
 
     /// use this fn to register combos that will trigger the supplied action
     pub fn add_combo_af (&self, cg:ComboGen, ag:ActionGen_wAF) {
-        let af = cg.kdn_consume_wrap (ag.gen_af());
+        let af = Combo::gen_af (&ag.mks, ag.af, ag.wrap_mod_key_guard, cg.ks, Some(&cg));
+        let af = cg.kdn_consume_wrap (af);
         for (c, cv) in cg.gen_combo_entries(af) {
             //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> AF, mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.mks );
             self.add_to_combos_map (c, cv);

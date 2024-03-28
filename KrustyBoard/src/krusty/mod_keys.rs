@@ -106,21 +106,26 @@ pub struct CapsModKey ( Arc <_ModKey> );
 
 /// Unified-Modifier-Key is now used for all modkeys regardless of ModKey_Mgmt behavior variation (other than for the capslock key)
 // (for reference, we used to have a SyncedModKey for the fully managed type, and a TrackedModKey for all the others)
-//# [ derive (Debug, Clone, Deref) ]
-//pub struct UnifModKey <T:KeyHandling> ( Arc <_ModKey<T>> );
-
-
-/// the setups for managed mod keys come in four flavors ..
-// - passthrough .. simply monitors the state and lets the key events pass through (e.g. none currently)
-// - blocked     .. the key events are blocked at this level and never make it out externally (e.g. ralt )
-// - doubled     .. when double-tapped, they behave like single tapped, whereas single tapped are monitored but blocked (e.g. win)
-// - managed     .. full management .. track both physical and logical states
-
-// note that we wont need any data in the variant objects, they are simply used as types to associate the behavior
-
 # [ derive (Debug, Clone, Deref) ]
 pub struct UnifModKey ( Arc <_ModKey> );
 
+
+
+/// ModKey_Mgmt type determines how the particular modkey is internally managed
+/// - passthrough .. simply monitors the state and lets the key events pass through (e.g. none currently)
+/// - blocked     .. the key events are blocked at this level and never make it out externally (e.g. ralt )
+/// - doubled     .. when double-tapped, they behave like single tapped, whereas single tapped are monitored but blocked (e.g. win)
+/// - managed     .. full management .. track both physical and logical states
+# [ allow (non_camel_case_types) ]
+# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+pub enum ModKey_Mgmt {
+    MK_Mgmt_Passthrough,
+    MK_Mgmt_Blocked,
+    MK_Mgmt_Doubled,
+    MK_Mgmt_Managed,
+}
+
+// note that we wont need any data in the variant objects, they are simply used as types to associate the behavior
 
 
 # [ derive (Debug) ]
@@ -139,6 +144,9 @@ pub struct ModKey_Managed;
 /// KeyHandling behavior variants
 /// .. note that these only handle the external logical state management .. some common physical etc mgmt is in the UnifModKey itself
 pub trait KeyHandling : Debug {
+
+    fn handling_type (&self) -> ModKey_Mgmt ;
+
     fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
     fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
 
@@ -152,7 +160,9 @@ pub trait KeyHandling : Debug {
     fn epds_continue     (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Continue) }
     fn epds_undetermined (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Undetermined) }
 
-    fn is_managed (&self) -> bool { false }
+    fn is_managed (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Managed }
+    fn is_doubled (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Doubled }
+
 }
 
 
@@ -428,6 +438,8 @@ impl CapsModKey {
 /// passthrough keyhandling only tracks state with no other management
 impl KeyHandling for ModKey_Passthrough {
 
+    fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Passthrough }
+
     fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
         bmk.active.set();
         self.epds_continue()
@@ -444,6 +456,8 @@ impl KeyHandling for ModKey_Passthrough {
 /// blocked modkey handling simply stops all propagation (physical states are tracked, but it should never be logically active)
 impl KeyHandling for ModKey_Blocked {
 
+    fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Blocked }
+
     fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
         self.epds_blocked()
     }
@@ -457,6 +471,8 @@ impl KeyHandling for ModKey_Blocked {
 
 /// doubled modkeys behave like regular when double-tapped, but single taps are monitored but blocked
 impl KeyHandling for ModKey_Doubled {
+
+    fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Doubled }
 
     fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
         if bmk.dbl_tap.is_set() {
@@ -495,6 +511,8 @@ impl KeyHandling for ModKey_Managed {
     //  .. as well as restoring them when either caps/alt gets released etc
     // (plus, if we're down and caps goes down, we'll get notification below so we're enforcing the disabled state from both sides)
 
+    fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Managed }
+
     fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives {
         // we should clear the consumed flag, but not if mouse btns are down, so we'll just put mouse-btns state there
         //self.consumed.clear();
@@ -532,9 +550,6 @@ impl KeyHandling for ModKey_Managed {
         }  }
         self.epds_blocked()
     }
-
-    // for other mgmt types, its false by default, but for managed, we'll explicitly override it to true
-    fn is_managed (&self) -> bool { true }
 
 }
 
@@ -664,7 +679,7 @@ impl UnifModKey {
     fn paired_active   (&self) -> bool { self.paired() .iter() .any (|p| p.active.is_set()) }
     fn pair_any_active (&self) -> bool { self.active.is_set() || self.paired_active() }
 
-    fn release_w_masking(&self) {
+    pub fn release_w_masking(&self) {
         // masking w an unassigned key helps avoid/reduce focus loss to menu etc for alt/win
         self.active.clear();
         if !self.is_rel_masking() || !self.consumed.is_set() { self.modkey.key().release(); }
@@ -719,6 +734,12 @@ impl UnifModKey {
     pub fn active_on_key (&self, key:Key) -> AF { self.active_action (key_utils::base_action(key)) }
     // ^^ some sugar to make common things simpler
 
+
+    /// Use this for a forced masked-release to be sent before this action .. can be usedful for doubled-keys for robustness etc
+    pub fn masked_released_action (&self, af:AF) -> AF {
+        let smk = self.clone();
+        Arc::new ( move || { smk.consumed.set(); smk.release_w_masking(); af(); } )
+    }
 
 
     /// Use this to wrap actions ONLY when setting combos with this mod key itself AND we want the mod-key to be INACTIVE in the combo.
