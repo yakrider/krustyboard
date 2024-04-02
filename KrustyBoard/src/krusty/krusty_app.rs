@@ -255,8 +255,8 @@ pub fn setup_krusty_board () {
     // win is now dbled modkey (and so not full-managed), and so ensure-active doesnt make sense for it
 
 
-    // we'll set dbl-caps-p to bring up process explorer (via ctrl-shift-esc)
-    k.cm .add_combo ( k.ks.cg(P).m(caps_dbl),  k.ks.ag(Escape).m(lctrl).m(lshift) );
+    // we'll set caps-alt-p to bring up process explorer (via ctrl-shift-esc)
+    k.cm .add_combo ( k.ks.cg(P).m(caps).m(lalt),  k.ks.ag(Escape).m(lctrl).m(lshift) );
 
 
 
@@ -738,10 +738,13 @@ pub fn setup_krusty_board () {
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
     // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
     // so instead, we'll layer that on lalt instead (and use alt-end for activation instead)
-    k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt) );
+    //k.cm .add_combo ( k.ks.cg(K).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt) );
+    // ^^ nah, that conflicts w the natural l2 alt-left, alt-right, which we also make use of in IDE already for last loc nav
     // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via ctrl-alt-end)
-    k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt).m(ctrl) );
+    //k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt).c(intellij_fgnd()),  k.ks.ag(End).m(alt).m(ctrl) );
     //k.cm .add_combo ( k.ks.cg(L).m(caps).m(lalt),  k.ks.ag(Tab).mkg_nw() ); // no guard as alt is down, but w caps, so itll be inactive
+    //
+    // instead, we'll just use alt-k for next-line and alt-l for full multiline suggestion (along w tab too)
 
 
 
@@ -929,8 +932,11 @@ pub fn start_krusty_board () {
     // we'll first start the windows-events listener
     WinEventsListener::instance().setup_win_event_hooks();
 
-    // then start handling inputs .. THIS WILL NOT RETURN !!!
+    // then start handling inputs
     InputProcessor::instance().begin_input_processing();
+
+    // and finally start the system tray monitor event-loop .. (which will NOT return)
+    start_system_tray_monitor();
 
 }
 

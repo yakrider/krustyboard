@@ -260,6 +260,7 @@ impl KrustyState {
 
     pub fn unstick_all (&self) {
         println! ("WARNING: Attempting to UNSTICK_ALL !!");
+
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
 
@@ -275,7 +276,13 @@ impl KrustyState {
         jiggle_cursor();
 
         // lets send a delayed Esc for any context menus etc that show up
-        thread::spawn (|| { thread::sleep (Duration::from_millis(100)); key_utils::press_release(Key::Escape) } );
+        thread::spawn ( || {
+            thread::sleep (Duration::from_millis(100));
+            key_utils::press_release(Key::Escape);
+            thread::sleep (Duration::from_millis(100));
+            InputProcessor::instance().re_set_hooks();
+        } );
+
     }
 
     /// Utlity function to create a new Combo-generator (for combo-specification) <br>

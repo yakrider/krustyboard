@@ -348,10 +348,9 @@ pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, pdd_hwnd:LPARAM)
         if  check_if_tool_window   (hwnd.into())  { return retval }
     }
 
-    let frame = win_get_window_frame (hwnd.into());
+    if win_check_minimized(hwnd.into()) { return retval }
 
-    // minimized windows have left/top at -32000 (and frame is same as rect for top (only) .. we'll exclude those)
-    if frame.top == -32000  { return retval }
+    let frame = win_get_window_frame (hwnd.into());
 
     // note: the WDADesktopService.exe ghost window still gets here, similar to seen in switche ..
     // .. dont think its worthwhile trying to filter that by querying exe/class etc ..

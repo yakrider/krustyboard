@@ -531,7 +531,7 @@ impl KeyHandling for ModKey_Managed {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
-        if !bmk.active.is_set() { //|| ks.mod_keys.caps.down.is_set() {
+        if bmk.active.is_clear() { //|| ks.mod_keys.caps.down.is_set() {
             // ^^ since caps-dn releases mod-keys, we dont need to check that here ..
             //  .. EXCEPT for alt when switche is fgnd, in which case, we'd want to release it even w caps down anyway
             // if inactive (usually due to caps-down) we just suppress this keyup

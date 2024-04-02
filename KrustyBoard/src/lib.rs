@@ -54,6 +54,7 @@ pub mod krusty {
     pub mod win_snaps;
     pub mod win_groups;
     pub mod win_hooks;
+    pub mod system_tray;
     pub mod krusty_app;
 
     // and our (selective or wholesale) sub-module re-exports
@@ -64,6 +65,7 @@ pub mod krusty {
     pub use self::win_snaps::*;
     pub use self::win_groups::*;
     pub use self::win_hooks::*;
+    pub use self::system_tray::*;
     pub use self::krusty_app::*;
 
 }

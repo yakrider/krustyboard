@@ -1,20 +1,15 @@
 
 
-use std::{
-    mem::MaybeUninit,
-    ptr::null_mut,
-    thread,
-    sync::{Arc, RwLock},
-    sync::atomic::{Ordering, AtomicPtr, AtomicU32},
-    sync::mpsc::{sync_channel, SyncSender},
-    os::raw::c_int,
-};
+use std::sync::{Arc, RwLock};
+use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize};
+use std::sync::mpsc::{sync_channel, SyncSender};
+use std::os::raw::c_int;
+use std::thread;
+
 use derive_deref::Deref;
 
-use windows::Win32::{
-    Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
-    UI::WindowsAndMessaging::*,
-};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, BOOL, GetLastError};
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 use once_cell::sync::{OnceCell};
 
@@ -22,7 +17,6 @@ use crate::{
     *, MouseButton::*, MouseWheel::*, EventPropagationDirective::*,
     KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*, MouseEventCallbackFnType::*,
 };
-use crate::utils::{win_set_cur_process_priority_high, win_set_thread_dpi_aware};
 
 
 // this is used for identifying the fake keypresses we insert, so we don't process them in an infinite loop
@@ -31,6 +25,7 @@ use crate::utils::{win_set_cur_process_priority_high, win_set_thread_dpi_aware};
 pub const KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO  : usize = 0xFFC3D44F;
 pub const SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO : usize = 0x5317C7EE;      // switche's own injected identifier
 
+pub const MSG_LOOP_KILL_MSG: u32 = WM_USER + 1;
 
 # [ allow (non_camel_case_types) ]
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
@@ -44,8 +39,9 @@ pub enum EventPropagationDirective {
 
 pub struct _InputProcessor {
     // we hold handles returned by OS to the lower level kbd/mouse hooks we set (needed to unhook them later)
-    kbd_hook   : AtomicPtr <HHOOK>,
-    mouse_hook : AtomicPtr <HHOOK>,
+    kbd_hook     : AtomicIsize,
+    mouse_hook   : AtomicIsize,
+    iproc_thread : AtomicU32,
     // the kbd/mouse bindings hold mapping for keys/buttons events to bound actions
     pub kbd_bindings     : KbdBindings,
     pub mouse_bindings   : MouseBindings,
@@ -73,12 +69,13 @@ impl InputProcessor {
             let (kbd_queue_sender,   kbd_queue_receiver)   = sync_channel::<(KbdEvCbFn_OffThreadCb_T, KbdEvent)>(20);
             let (mouse_queue_sender, mouse_queue_receiver) = sync_channel::<(MouseEvCbFn_OffThreadCb_T, MouseEvent)>(100);
             // lets get them going too
-            thread::spawn (move || { win_set_thread_dpi_aware(); while let Ok((af,ev)) = kbd_queue_receiver.recv()   { af(ev) } });
-            thread::spawn (move || { win_set_thread_dpi_aware(); while let Ok((af,ev)) = mouse_queue_receiver.recv() { af(ev) } });
+            thread::spawn (move || { utils::win_set_thread_dpi_aware(); while let Ok((af,ev)) = kbd_queue_receiver.recv()   { af(ev) } });
+            thread::spawn (move || { utils::win_set_thread_dpi_aware(); while let Ok((af,ev)) = mouse_queue_receiver.recv() { af(ev) } });
             // the processor will hold the senders to these queues for everyone to clone/use
             InputProcessor ( Arc::new ( _InputProcessor {
-                kbd_hook   : AtomicPtr::default(),
-                mouse_hook : AtomicPtr::default(),
+                kbd_hook     : AtomicIsize::default(),
+                mouse_hook   : AtomicIsize::default(),
+                iproc_thread : AtomicU32::default(),
                 kbd_bindings     : KbdBindings::instance(),
                 mouse_bindings   : MouseBindings::instance(),
                 combos_processor : Arc::new ( RwLock::new ( None) ),
@@ -97,63 +94,96 @@ impl InputProcessor {
     }
 
 
+
+
     fn set_hook (
         hook_id: WINDOWS_HOOK_ID,
-        hook_ptr: &AtomicPtr<HHOOK>,
+        hhook: &AtomicIsize,
         hook_proc: unsafe extern "system" fn (c_int, WPARAM, LPARAM) -> LRESULT,
-    ) {
-        let mut hook_handle = unsafe { SetWindowsHookExW (hook_id, Some(hook_proc), HINSTANCE(0), 0) };
-        hook_handle .iter_mut() .for_each (|hh| hook_ptr.store (hh, Ordering::Relaxed));
-    }
+    ) { unsafe {
+        SetWindowsHookExW (hook_id, Some(hook_proc), HINSTANCE(0), 0) .iter() .for_each ( |hh| {
+            println! ("hooking attempt .. succeeded!");
+            hhook.store (hh.0, Ordering::SeqCst);
+        } );
+    } }
     fn set_kbd_hook   (&self) { InputProcessor::set_hook (WH_KEYBOARD_LL, &self.kbd_hook,   kbd_proc); }
     fn set_mouse_hook (&self) { InputProcessor::set_hook (WH_MOUSE_LL,    &self.mouse_hook, mouse_proc); }
 
 
-    fn unset_hook (hook_ptr: &AtomicPtr<HHOOK>) {
-        if !hook_ptr .load (Ordering::Relaxed) .is_null() {
-            let _ = unsafe { UnhookWindowsHookEx ( * hook_ptr .load (Ordering::Relaxed) ) };
-            hook_ptr .store (null_mut(), Ordering::Relaxed);
+    fn unset_hook (hhook: &AtomicIsize) -> bool {
+        if HHOOK (hhook.load (Ordering::SeqCst)) != HHOOK::default() {
+            if true == unsafe { UnhookWindowsHookEx ( HHOOK (hhook.load(Ordering::SeqCst)) ) } {
+                hhook.store (HHOOK::default().0, Ordering::SeqCst);
+                println!("unhooking attempt .. succeeded!");
+                return true
+            }
+            eprintln!("unhooking attempt .. failed .. error code : {:?} !!", unsafe { GetLastError() });
+        } else {
+            println!("unhooking attempt .. no prior hook found !!");
         }
+        return false
     }
-    #[allow(dead_code)]
-    fn unset_kbd_hook   (&self) { InputProcessor::unset_hook (&self.kbd_hook) }
+    pub fn unset_kbd_hook   (&self) -> bool { InputProcessor::unset_hook (&self.kbd_hook) }
+    pub fn unset_mouse_hook (&self) -> bool { InputProcessor::unset_hook (&self.mouse_hook) }
 
-    #[allow(dead_code)]
-    fn unset_mouse_hook (&self) { InputProcessor::unset_hook (&self.mouse_hook) }
+
+    pub fn re_set_hooks (&self) {
+        self.stop_input_processing();
+        self.begin_input_processing();
+    }
+
+    pub fn are_hooks_set (&self) -> bool {
+        HHOOK (self.kbd_hook.load(Ordering::Relaxed)) != HHOOK::default()
+            || HHOOK (self.mouse_hook.load(Ordering::Relaxed)) != HHOOK::default()
+    }
+
+    pub fn stop_input_processing (&self) { unsafe {
+        // we'll unhook any prior hooks and signal prior input-processing thread to terminate
+        self.unset_kbd_hook();
+        self.unset_mouse_hook();
+        PostThreadMessageW (self.iproc_thread.load(Ordering::Relaxed), MSG_LOOP_KILL_MSG, WPARAM::default(), LPARAM::default());
+    } }
 
 
     /// Starts listening for bound input events.
     pub fn begin_input_processing (&self) {
 
-        let mut hook_was_set = false;
+        let iproc = self.clone();
 
-        if !self.kbd_bindings.read().unwrap().is_empty() || self.combos_processor.read().unwrap().is_some() {
-            if self.kbd_hook.load(Ordering::Relaxed).is_null() {
-                self.set_kbd_hook();
-                hook_was_set = true;
+        thread::spawn ( move || unsafe {
+
+            let mut hook_was_set = false;
+
+            if !iproc.kbd_bindings.read().unwrap().is_empty() || iproc.combos_processor.read().unwrap().is_some() {
+                iproc.set_kbd_hook(); hook_was_set = true;
+            };
+            if !iproc.mouse_bindings.read().unwrap().is_empty() {
+                iproc.set_mouse_hook(); hook_was_set = true;
+            };
+
+            // if we didnt set any hooks, we should bail without starting the forever-loop waiting for events
+            if !hook_was_set { return }
+
+            // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
+            utils::win_set_thread_dpi_aware();
+
+            // also, we might as well set the whole process higher priority, as we dont want lag in basic input processing
+            let _ = utils::win_set_cur_process_priority_high();
+            // todo : ^^ check if can get away w simply increasing our thread priority
+            // (^^ although, note that the hook callback is called in the context of the thread that set the hook)
+
+            // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
+            //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop
+            // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)
+            let mut msg: MSG = MSG::default();
+            while BOOL(0) != GetMessageW (&mut msg, HWND(0), 0, 0) {
+                if msg.message == MSG_LOOP_KILL_MSG {
+                    println! ("received kill-msg in input-processing thread .. terminating thread ..");
+                    break
+                }
             }
-        };
-        if !self.mouse_bindings.read().unwrap().is_empty() {
-            if self.mouse_hook.load(Ordering::Relaxed).is_null() {
-                self.set_mouse_hook();
-                hook_was_set = true;
-            }
-        };
 
-        // if we didnt set any hooks, we should bail without starting the forever-loop waiting for events
-        if !hook_was_set { return }
-
-        // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
-        win_set_thread_dpi_aware();
-
-        // also, we might as well set the whole process higher priority, as we dont want lag in basic input processing
-        let _ = win_set_cur_process_priority_high();
-
-        // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
-        //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop
-        // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)
-        let mut msg: MSG = unsafe { MaybeUninit::zeroed().assume_init() };
-        unsafe { GetMessageW (&mut msg, HWND(0), 0, 0) };
+        } );
 
     }
 

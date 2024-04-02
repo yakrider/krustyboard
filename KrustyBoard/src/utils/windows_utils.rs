@@ -124,9 +124,7 @@ pub fn win_get_work_area () -> RECT { unsafe {
 pub fn win_activate (hwnd:Hwnd) { unsafe {     //println!("winapi activate {:?}",hwnd);
     //ShowWindowAsync (hwnd, SW_NORMAL);
     // ^^ this will cause minimized/maximized windows to be restored
-    let mut win_state =  WINDOWPLACEMENT::default();
-    GetWindowPlacement (hwnd, &mut win_state);
-    if win_state.showCmd == SW_SHOWMINIMIZED {
+    if win_check_minimized (hwnd) {
         ShowWindowAsync (hwnd, SW_RESTORE);
     } else {
         ShowWindowAsync (hwnd, SW_SHOW);
@@ -145,6 +143,9 @@ pub fn win_close (hwnd:Hwnd) { unsafe {     //println!("winapi close {:?}",hwnd)
     //CloseWindow(hwnd);
     // note ^^ that the u32 'CloseWindow' cmd actually minimizes it, to close, send it a WM_CLOSE msg
     PostMessageA (hwnd, WM_CLOSE, WPARAM::default(), LPARAM::default());
+} }
+pub fn win_check_minimized (hwnd:Hwnd) -> bool { unsafe {
+    IsIconic (hwnd).as_bool()
 } }
 pub fn win_minimize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MINIMIZE);
