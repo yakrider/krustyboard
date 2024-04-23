@@ -435,6 +435,11 @@ impl CombosMap {
         let mut cm = self.combos_map.write().unwrap();
         //self.combos_map.write().unwrap() .insert (c, cv);
         if let Some(cvs) = cm.get_mut(&c) {
+            // if we already had combo-values for this combo, we can add new conditional, but must replace any prior non-conditional AF entries
+            if cv.cond.is_none() {
+                if let Some(idx) = cvs.iter().position (|cv| cv.cond.is_none()) {
+                    let _ = cvs.remove(idx);
+            }  }
             cvs.push(cv);
             cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.stamp));
             // ^^ we want to sort such that conditionals are up top sorted by timestamp .. (hence the boolean supplied as cond.is_none())
