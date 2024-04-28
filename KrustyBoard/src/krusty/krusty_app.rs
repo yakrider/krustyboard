@@ -2,9 +2,6 @@
 
 
 use std::{ time, thread, sync::Arc, };
-use std::sync::RwLock;
-use once_cell::sync::Lazy;
-use rustc_hash::FxHashSet;
 
 use crate::{*, KbdKey::*, key_utils::*, ModKey::*, ModeState_T::*};
 
@@ -76,11 +73,14 @@ pub fn setup_krusty_board () {
 
     // we'll define some common combo-conds that can be reused later
     fn intellij_fgnd() -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "idea64.exe" ) }
-    fn switche_fgnd()  -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "switche.exe" ) }
     //fn chrome_fgnd()   -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "chrome.exe" ) }
     fn browser_fgnd()  -> ComboCond { Arc::new ( move |_| {
         WinEventsListener::instance().fgnd_info.read() .is_ok_and (|fi| fi.exe == "chrome.exe" || fi.exe == "msedge.exe" )
     } ) }
+
+    # [ allow (dead_code) ]
+    fn switche_fgnd()     -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe == "Switche.exe" ) }
+    fn switche_not_fgnd() -> ComboCond { Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" ) }
 
 
     // we'll setup most keys via key-combo action maps that we'll compose into relevant callbacks after all mapping is registered
@@ -361,6 +361,9 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt),  k.ks.ag(Enter).m(lalt) );          // caps-lalt-space  -> alt-enter
     k.cm .add_combo ( k.ks.cg(Space).m(caps).s(qks),   k.ks.ag(Enter).m(ctrl) );          // caps-q-space     -> ctrl-enter
 
+    k.cm .add_combo ( k.ks.cg(Space).m(lalt).c(switche_not_fgnd()),  k.ks.ag(Enter) );
+    k.cm .add_combo ( k.ks.cg(Space).m(lalt_dbl),                    k.ks.ag(Space).m(alt) );
+
 
     fn compose_seq_actions (af_a:AF, af_b:AF) -> AF {
         Arc::new ( move || { af_a(); af_b(); } )
@@ -462,8 +465,8 @@ pub fn setup_krusty_board () {
     //k.cm .add_combo_af ( k.ks.cg(Numrow_3).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume( 1))) );
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
-    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15).m(ctrl) );          // switche invoke/next
-    k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F19).m(alt).m(ctrl) );   // switche no-popup next switch
+    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15).m(alt).m(ctrl) );   // switche invoke/next
+    k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F16).m(alt).m(ctrl) );   // switche no-popup next switch
     k.cm .add_combo ( k.ks.cg(F1).m(ralt),  k.ks.ag(F1) );                   // this allows actual F1 use (if we disable F1 in swi configs)
 
     k.cm .add_combo ( k.ks.cg(F1).m(caps),  k.ks.ag(VolumeMute) );
@@ -553,14 +556,17 @@ pub fn setup_krusty_board () {
     // .. if switche not in fgnd, we'll switch to next window in switche and send cur to back
     //  .. and if switche is fgnd, we send a switche hotkey so the swiche window is simply dismissed instead
     // note: any alt release (eg for bare Esc) will disrupt alt-tab, and any alt-esc variation will trigger windows, hence a dedicated hotkey
-    let switche_next_af = k.ks.ag(F19).m(alt).m(ctrl).gen_af();
+    let switche_next_af = k.ks.ag(F16).m(alt).m(ctrl).gen_af();
     let alt_esc_action = Arc::new ( move || {
         let hwnd_to_back = WinEventsListener::instance().fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
         switche_next_af();
         win_send_to_back (hwnd_to_back);
     } );
-    k.cm .add_combo    ( k.ks.cg(Escape).m(lalt).c(switche_fgnd()),  k.ks.ag(F18).m(alt).m(ctrl) );     // switche alt-esc
-    k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt),                    k.ks.ag_af (alt_esc_action) );
+    //k.cm .add_combo    ( k.ks.cg(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag(F18).m(alt).m(ctrl) );   // switche alt-esc
+    // ^^ disabled since swi now does auto-hide-on-fgnd-lost, and that mostly does the dismiss/esc anyway .. so natural alt-esc is fine
+    //k.cm .add_combo    ( k.ks.cg(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag(Escape) );               // switche alt-esc
+    //k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag_af (no_action()) );      // switche alt-esc
+    k.cm .add_combo_af ( k.ks.cg(Escape).m(lalt).c(switche_not_fgnd()),  k.ks.ag_af (alt_esc_action) );
 
 
     // we have win-mouse window drag/resize .. we'd like to cancel any in-progress action via escape
@@ -815,7 +821,7 @@ pub fn setup_krusty_board () {
 
 
     // but for switche-hotkeys, instead of caps, we'll do on lalt, and on qks1
-    k.cm .add_combo ( k.ks.cg(L).m(lalt).s(qks1),  k.ks.ag(F19).m(alt).m(ctrl) );   // L switches to last
+    k.cm .add_combo ( k.ks.cg(L).m(lalt).s(qks1),  k.ks.ag(F16).m(alt).m(ctrl) );   // L switches to last
     k.cm .add_combo ( k.ks.cg(O).m(lalt).s(qks1),  k.ks.ag(F20).m(alt).m(ctrl) );   // O switches to TabsOutliner
     k.cm .add_combo ( k.ks.cg(N).m(lalt).s(qks1),  k.ks.ag(F21).m(alt).m(ctrl) );   // N switches to Notepad++
     k.cm .add_combo ( k.ks.cg(I).m(lalt).s(qks1),  k.ks.ag(F22).m(alt).m(ctrl) );   // I switches to first IDEA window
@@ -855,27 +861,26 @@ pub fn setup_krusty_board () {
 
 
     // this one is a hack around intellij not giving a shortcut action to hide floating tool windows
-    fn ide_float_tools_clear () {
-        static hidden_hwnds : Lazy <Arc <RwLock <FxHashSet <Hwnd>>>> = Lazy::new (|| Arc::new (RwLock::new (FxHashSet::default())));
+    fn ide_float_tools_toggle() {
+        // note that for the enum query for this, we've disabled filtering out hidden windows
         thread::spawn ( move || {
-            if !hidden_hwnds.read().unwrap().is_empty() { // will do toggle based on whether anything is in the prior-hidden list
-                let fgnd_hwnd = WinEventsListener::instance().fgnd_info.read().unwrap().hwnd;
-                let hwnds = hidden_hwnds.read().unwrap().iter().copied().collect::<Vec<Hwnd>>();
-                hwnds .iter() .for_each (|&hwnd| {
-                    if win_check_hwnd(hwnd) { win_activate(hwnd); }
-                    hidden_hwnds.write().unwrap().remove(&hwnd);
-                });
-                thread::sleep(time::Duration::from_millis(100));
-                win_activate(fgnd_hwnd);
-                // ^^ when multiple IDEs had hidden windows, this helps keep the one that was in fgnd remain that way
+            let hwnds = win_get_ide_dialog_hwnds();
+            if hwnds .iter() .any (|hwnd| check_window_visible (*hwnd)) {
+                // found at least one visible popup hwnd, so we'll hide everything
+                hwnds .iter() .for_each (|hwnd| win_hide (*hwnd));
             } else {
-                win_get_ide_dialog_hwnds() .into_iter() .for_each (|hwnd| {
-                    win_hide(hwnd);
-                    hidden_hwnds.write().unwrap().insert(hwnd);
-                } );
-        } } );
+                // no visible windows, so we'll try and toggle them back (if any)
+                hwnds .iter() .for_each (|hwnd| win_show_no_activate (*hwnd));
+            }
+        } );
     }
-    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt).c(intellij_fgnd()),  k.ks.ag_af (Arc::new (move || ide_float_tools_clear())) );
+    fn ide_float_tools_clear() {
+        thread::spawn ( move || {
+            win_get_ide_dialog_hwnds() .into_iter() .for_each ( |hwnd| { win_close (hwnd) } );
+        } );
+    }
+    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt)        .c(intellij_fgnd()),  k.ks.ag_af (Arc::new (move || ide_float_tools_toggle())) );
+    k.cm .add_combo_af ( k.ks.cg(Numrow_0).m(lalt).m(caps).c(intellij_fgnd()),  k.ks.ag_af (Arc::new (move || ide_float_tools_clear ())) );
 
 
 

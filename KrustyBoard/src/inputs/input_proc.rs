@@ -1,10 +1,11 @@
 
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
 use std::thread;
+use atomic_refcell::AtomicRefCell;
 
 use derive_deref::Deref;
 
@@ -46,7 +47,7 @@ pub struct _InputProcessor {
     pub kbd_bindings     : KbdBindings,
     pub mouse_bindings   : MouseBindings,
     // the combos processor, if present, is called after any bindings callbacks are processed
-    pub combos_processor : Arc <RwLock <Option <KbdEvCbFn_ComboProc_T>>>,
+    pub combos_processor : AtomicRefCell <Option <KbdEvCbFn_ComboProc_T>>,
     // for queued callback types, we'll hold senders of the kbd/mouse events channels
     pub kbd_af_queue     : SyncSender <( KbdEvCbFn_OffThreadCb_T, KbdEvent )>,
     pub mouse_af_queue   : SyncSender <( MouseEvCbFn_OffThreadCb_T, MouseEvent )>,
@@ -76,9 +77,9 @@ impl InputProcessor {
                 kbd_hook     : AtomicIsize::default(),
                 mouse_hook   : AtomicIsize::default(),
                 iproc_thread : AtomicU32::default(),
-                kbd_bindings     : KbdBindings::instance(),
-                mouse_bindings   : MouseBindings::instance(),
-                combos_processor : Arc::new ( RwLock::new ( None) ),
+                kbd_bindings     : KbdBindings::new(),
+                mouse_bindings   : MouseBindings::new(),
+                combos_processor : AtomicRefCell::new (None),
                 kbd_af_queue     : kbd_queue_sender,
                 mouse_af_queue   : mouse_queue_sender,
             } ) )
@@ -87,10 +88,12 @@ impl InputProcessor {
 
 
     pub fn set_combo_processor (&self, cb:KbdEvCbFn_ComboProc_T) {
-        *self.combos_processor.write().unwrap() = Some(cb);
+        *self.combos_processor.borrow_mut() = Some(cb);
     }
     pub fn clear_combo_processor (&self) {
-        *self.combos_processor.write().unwrap() = None;
+        // Note that this is not really intended to be called at runtime ..
+        // if we do want this to be dyanmic behavior, we should replace AtomicRefCell with RwLock in the CombosMap struct for robustness
+        *self.combos_processor.borrow_mut() = None;
     }
 
 
@@ -154,10 +157,10 @@ impl InputProcessor {
 
             let mut hook_was_set = false;
 
-            if !iproc.kbd_bindings.read().unwrap().is_empty() || iproc.combos_processor.read().unwrap().is_some() {
+            if !iproc.kbd_bindings.borrow().is_empty() || iproc.combos_processor.borrow().is_some() {
                 iproc.set_kbd_hook(); hook_was_set = true;
             };
-            if !iproc.mouse_bindings.read().unwrap().is_empty() {
+            if !iproc.mouse_bindings.borrow().is_empty() {
                 iproc.set_mouse_hook(); hook_was_set = true;
             };
 
@@ -241,7 +244,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         //println! ("{:?}", event);
 
         // first route it through any per-key registered callbacks
-        if let Some(cbe) = iproc.kbd_bindings .read().unwrap() .get (&KbdEventCbMapKey::from_event(&event)) .as_ref() {
+        //if let Some(cbe) = iproc.kbd_bindings .borrow() .get (&KbdEventCbMapKey::from_event(&event)) {
+        if let Some(cbe) = unsafe { & *iproc.kbd_bindings.as_ptr() } .get (&KbdEventCbMapKey::from_event(&event)) {
+            // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
             event_proc_d = cbe.event_proc_d;
             match &cbe.cb {
                 KbdEvCbFn_InlineCallback (cb)  => {
@@ -262,7 +267,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         // now lets call the bulk defaults/combos processor if its available, and if combo_proc for this event not disabled from above
         if event_proc_d.combo_proc_d == ComboProc_Enable {
             let mut event_prop_d = EventProp_Continue;
-            if let Some (cb) = iproc.combos_processor.read().unwrap().as_ref() {
+            //if let Some (cb) = iproc.combos_processor.borrow().as_ref() {
+            if let Some (cb) = unsafe { (*iproc.combos_processor.as_ptr()).as_ref() } {
+                // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
                 event_prop_d = cb(event)
             }
             if event_prop_d == EventProp_Stop {
@@ -352,7 +359,9 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
         let mut do_ev_prop = EventProp_Continue;
 
-        if let Some(cbe) = iproc.mouse_bindings .read().unwrap() .get (&MouseEventCbMapKey::from_event(&event)) .as_ref() {
+        //if let Some(cbe) = iproc.mouse_bindings .borrow() .get (&MouseEventCbMapKey::from_event(&event)) {
+        if let Some(cbe) = unsafe { & *iproc.mouse_bindings.as_ptr() } .get (&MouseEventCbMapKey::from_event(&event)) {
+            // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
             do_ev_prop = cbe.event_prop_directive;
             match &cbe.cb {
                 MouseEvCbFn_InlineCallback (cb)  => {

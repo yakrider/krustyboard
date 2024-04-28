@@ -3,20 +3,14 @@
 #![allow(non_camel_case_types)]
 
 
-use std::{
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
+use atomic_refcell::AtomicRefCell;
 use derive_deref::Deref;
-
-use once_cell::sync::OnceCell;
 use rustc_hash::FxHashMap;
 
 
 use crate::{*, KbdEventCbMapKeyType::*};
 
-
-/// Keyboard bindings map type : the map-key has the key and event-type, the map-value is the callback entry
-pub type KbdEventCbMap = FxHashMap <KbdEventCbMapKey, KbdEventCallbackEntry>;
 
 
 /// The bindings-map key type for any key can be key-down or key-up .. (no press-rel, hold, dbl-click etc)
@@ -101,30 +95,38 @@ pub struct KbdEventCallbackEntry {
 
 
 
-/// The key-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads
-# [ derive (Clone, Deref) ]
-pub struct KbdBindings ( Arc <RwLock <KbdEventCbMap>> );
+/// The key-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads.
+/// The map-key has the key and event-type, the map-value is the callback entry
+//# [ derive (Clone, Deref) ]
+//pub struct KbdBindings ( Arc <RwLock <FxHashMap <KbdEventCbMapKey, KbdEventCallbackEntry>>> )
+
+# [ derive (Deref) ]
+pub struct KbdBindings (
+    //Arc <RwLock <KbdEventCbMap>>
+    AtomicRefCell <FxHashMap <KbdEventCbMapKey, KbdEventCallbackEntry>>
+    // ^^ note that we use AtomicRefCell instead of RwLock as we dont ever write to it at runtime (and it is faster)
+    // .. so if want to support dynamic binding/unbinding at runtime, we should switch back to RwLock
+);
 
 
 
 
 impl KbdBindings {
 
-    pub fn instance() -> KbdBindings {
-        static INSTANCE: OnceCell <KbdBindings> = OnceCell::new();
-        INSTANCE .get_or_init ( ||
-            KbdBindings ( Arc::new ( RwLock::new ( FxHashMap::default() ) ) )
-        ) .clone()
+    pub fn new() -> KbdBindings {
+        KbdBindings ( AtomicRefCell::new ( FxHashMap::default() ) )
     }
 
     pub fn bind_kbd_event (&self, key:Key, map_key_t: KbdEventCbMapKeyType, cb_entry: KbdEventCallbackEntry ) {
         let map_key = KbdEventCbMapKey { key, map_key_t };
-        self .write().unwrap() .insert (map_key, cb_entry);
+        self .borrow_mut() .insert (map_key, cb_entry);
     }
 
     pub fn unbind_kbd_event (&self, key:Key, map_key_t: KbdEventCbMapKeyType) {
+        // NOTE that this is NOT intended to be called at runtime as we're using AtomicRefCell instead of RwLock
+        // if we want to enable dynamic binding/unbinding at runtime, we should switch bindings back to RwLock
         let map_key = KbdEventCbMapKey { key, map_key_t };
-        self .write().unwrap() .remove (&map_key);
+        self .borrow_mut() .remove (&map_key);
     }
 
 }

@@ -76,7 +76,7 @@ impl MouseWheelState {
 }
 
 # [ derive (Debug) ]
-pub struct _Mouse {
+pub struct Mouse {
     _private  : (),
     pub lbtn  : MouseBtnState,
     pub rbtn  : MouseBtnState,
@@ -88,18 +88,16 @@ pub struct _Mouse {
     pub vwheel : MouseWheelState,
     //pub hwheel : MouseWheelState,
 
-    pub pre_drag_dat : Arc <RwLock <PreDragDat>>,
+    pub pre_drag_dat : RwLock <PreDragDat>,
 }
 
-# [ derive (Debug, Clone, Deref) ]
-pub struct Mouse ( Arc <_Mouse> );
 
 
 impl Mouse {
 
     pub fn new() -> Mouse {
         use crate::{MouseButton::*, MouseWheel::*};
-        Mouse ( Arc::new ( _Mouse {
+        Mouse {
             _private: (),
             lbtn   : MouseBtnState::new(LeftButton),
             rbtn   : MouseBtnState::new(RightButton),
@@ -109,8 +107,8 @@ impl Mouse {
             vwheel : MouseWheelState::new(DefaultWheel),
             //hwheel : MouseWheelState::new(HorizontalWheel),
             //pointer: MousePointerState::default(),
-            pre_drag_dat : Arc::new (RwLock::new (PreDragDat::default()))
-        } ) )
+            pre_drag_dat : RwLock::new (PreDragDat::default())
+        }
     }
 
     pub fn setup_mouse (&self, k:&Krusty) {
@@ -514,7 +512,7 @@ fn handle_horiz_scroll_wheel (_incr:i32) {
 
 
 fn check_switche_fgnd () -> bool {
-    WinEventsListener::instance().fgnd_info.read().unwrap().exe == "switche.exe"
+    WinEventsListener::instance().fgnd_info.read().unwrap().exe == "Switche.exe"
 }
 fn check_alt_tab_fgnd () -> bool {
     let wel = WinEventsListener::instance();

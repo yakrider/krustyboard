@@ -4,6 +4,7 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use std::ops::Not;
 
 use derive_deref::Deref;
 use rustc_hash::FxHashSet;
@@ -49,131 +50,156 @@ impl From <WinGroups_E> for ModeState_T {
 
 
 
-# [ derive (Debug, Default, Clone) ]
+# [ derive (Debug, Default) ]
 // Note: this is intended as quick throwaway grouping and set that we'd rather replace than update
-pub struct WinGroup {
+pub struct _WinGroup {
     grp     : Vec <Hwnd>,
     grp_set : FxHashSet <Hwnd>,
     topmost : Flag,
 }
+# [ derive (Debug, Clone, Deref) ]
+pub struct WinGroup ( Arc < RwLock <_WinGroup>> );
 
 
-# [ derive (Debug, Clone) ]
-pub struct _WinGroups {
+
+# [ derive (Debug) ]
+pub struct WinGroups {
     grps: [WinGroup; NUM_WIN_GROUPS],
 }
 
-# [ derive (Debug, Clone, Deref) ]
-pub struct WinGroups ( Arc <RwLock <_WinGroups>> );
 
 
-impl WinGroups {
 
-    pub fn new() -> WinGroups {
-        WinGroups ( Arc::new ( RwLock::new ( _WinGroups {
-            grps : [ WinGroup::default(), WinGroup::default(), WinGroup::default() ]
-        } ) ) )
+
+
+impl WinGroup {
+
+    fn new() -> WinGroup {
+        WinGroup ( Arc::new ( RwLock::new ( _WinGroup::default() ) ) )
     }
 
-
-    pub fn check_win_group (&self, hwnd:Hwnd) -> Option <WinGroups_E> {
-        self.read().unwrap() .grps .iter() .enumerate() .into_iter()
-            .find (|&(_,g)| g.grp.contains(&hwnd.into())) .and_then (|(idx,_)| idx.try_into().ok())
+    fn get_hwnds (&self) -> Vec<Hwnd> {
+        self.read().unwrap().grp.iter().copied().collect()
     }
-    pub fn get_grp_hwnds (&self, grp_e:WinGroups_E) -> Vec<Hwnd> {
-        self.read().unwrap() .grps[grp_e.idx()] .grp .iter() .copied() .collect()
+    pub fn check (&self, hwnd:&Hwnd) -> bool {
+        self.read().unwrap().grp_set.contains(hwnd)
     }
-
-    pub fn add_to_group (&self, grp_e: WinGroups_E, hwnd:Hwnd) {
-        let grps = &mut self.write().unwrap().grps;
-        let mut grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .map(|i| *i) .collect::<Vec<_>>();
-        grp.push(hwnd);
-        let grp_set = grp .iter() .copied() .collect::<FxHashSet<_>>();
-        let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
-        grps[grp_e.idx()] = WinGroup {grp, grp_set, topmost};
+    fn add (&self, hwnd:&Hwnd) {
+        let wg = &mut self.write().unwrap();
+        wg.grp .retain (|&h| h != *hwnd);
+        wg.grp .push (*hwnd);
+        wg.grp_set .insert (*hwnd);
     }
-
-    pub fn remove_from_group (&self, grp_e:WinGroups_E, hwnd:Hwnd) {
-        let grps = &mut self.write().unwrap().grps;
-        if grps [grp_e.idx()] .grp_set .contains(&hwnd) {
-            let grp = grps[grp_e.idx()] .grp .iter() .filter(|v| **v != hwnd) .copied() .collect::<Vec<_>>();
-            let grp_set = grp .iter() .map(|i| *i) .collect::<FxHashSet<_>>();
-            let topmost = Flag::new (grps [grp_e.idx()] .topmost .is_set());
-            grps [grp_e.idx()] = WinGroup {grp, grp_set, topmost};
-    } }
-
-    fn clear_dead_grp_hwnds (&self, wg:WinGroups_E, hwnds:&Vec<Hwnd>) {
-        let hwnds_set = hwnds .iter() .copied() .collect::<FxHashSet<_>>();
-        let grp_hwnds = self.read().unwrap() .grps[wg.idx()] .grp .iter()
-            .filter (|h| !hwnds_set.contains(h)) .copied().collect::<Vec<_>>();
-        // ^^ we want to have a local copy of this so we're not extending read lock context into the remove calls
-        grp_hwnds .into_iter() .for_each (|hwnd| self.remove_from_group(wg,hwnd))
+    fn remove (&self, hwnd:&Hwnd) {
+        let wg = &mut self.write().unwrap();
+        wg.grp .retain (|h| *h != *hwnd);
+        wg.grp_set .remove (hwnd);
+    }
+    fn clear_dead (&self, hwnds:&Vec<Hwnd>) {
+        let wg = &mut self.write().unwrap();
+        let hset = hwnds.iter().copied().collect::<FxHashSet<_>>();
+        wg.grp .retain (|h| hset.contains(h));
+        wg.grp_set .retain (|h| hset.contains(h));
     }
 
-    pub fn activate_win_group (&self, grp_e:WinGroups_E) {
-        let grp = &self.read().unwrap() .grps[grp_e.idx()];
-        let topmost = grp.topmost.is_set();
-        grp.grp .iter() .enumerate() .for_each ( |(i, &hwnd)| {
-            // api calls causing focus change seem to need some delay .. lowering the delay below starts giving unreliable activation
-            thread::spawn (move || {
-                thread::sleep (Duration::from_millis((i as u64 + 0) * 30));
+    fn set_always_on_top (&self) {
+        self.write().unwrap().topmost.set();
+        for &hwnd in &self.read().unwrap().grp { win_set_always_on_top (hwnd) }
+    }
+    fn unset_always_on_top (&self) {
+        self.write().unwrap().topmost.clear();
+        for &hwnd in &self.read().unwrap().grp { win_unset_always_on_top (hwnd) }
+    }
+    fn toggle_always_on_top (&self) {
+        let mut are_grp_wins_topmost = true;
+        for &hwnd in &self.read().unwrap().grp {
+            if !win_check_if_topmost(hwnd) {
+                are_grp_wins_topmost = false; break
+        } }
+        if are_grp_wins_topmost { self.unset_always_on_top() } else { self.set_always_on_top() }
+    }
+
+    fn activate (&self) {
+        let wg = self.clone();
+        thread::spawn ( move || {
+            let topmost = wg.read().unwrap().topmost.is_set();
+            wg.get_hwnds().iter().for_each (|&hwnd| {
+                // api calls causing focus change seem to need some delay .. lowering the delay below starts giving unreliable activation
+                thread::sleep (Duration::from_millis(30));
                 win_activate (hwnd);
                 if topmost { win_set_always_on_top(hwnd) };
-            } );
+            });
         } );
     }
-    pub fn toggle_grp_activation (&self, wg:WinGroups_E) {
-        let grp_size = self.read().unwrap() .grps[wg.idx()] .grp.len();
-        if grp_size == 0 { return }
-        let wgs = self.clone();
+
+    fn toggle_activation (&self) {
+        if self.read().unwrap().grp.len() == 0 { return }
+        let wg = self.clone();
         // this could take long enough that we should get off the events queue thread that called us
         thread::spawn ( move || {
             // to toggle, we need to find out z order of grp windows, so we'll do a win-enum call
             // .. which is a good time to cleanup dead-hwnds from our groups too
             let mut grp_ztops_count : usize = 0;
+            let grp_len = wg.read().unwrap().grp.len();
             let hwnds = win_get_switcher_filt_hwnds();
-            wgs.clear_dead_grp_hwnds (wg, &hwnds);
-            let grp_set = &wgs.read().unwrap() .grps[wg.idx()] .grp_set;
+            wg.clear_dead(&hwnds);
             for &hwnd in &hwnds {
-                if grp_set.contains(&hwnd) {
+                if wg.read().unwrap().grp_set.contains(&hwnd) {
                     grp_ztops_count += 1;
-                    if grp_ztops_count == grp_size {
+                    if grp_ztops_count == grp_len {
                         // we found all grp windows at top z-order, means we're active, so send grp back to toggle it
-                        //but first, lets activate the next-in-line hwnd so active windwo focus transfers seamlessly
-                        hwnds .iter() .find (|h| !grp_set.contains(h)) .map (|&h| win_activate(h));
+                        //but first, lets activate the next-in-line hwnd so active window focus transfers seamlessly
+                        hwnds .iter() .find (|h| wg.read().unwrap().grp_set.contains(h).not()) .map (|&h| win_activate(h));
                         // now we can send our grp hwnds back
-                        grp_set .iter() .for_each (|&h| win_send_to_back(h));
+                        wg.read().unwrap().grp_set .iter() .for_each (|&h| win_send_to_back(h));
                         break;
                 } } else if !win_check_if_topmost(hwnd) {
                     // finding any non-topmost non-grp window before we're done means grp is not activated
-                    wgs.activate_win_group(wg);
+                    wg.activate();
                     break;
                 } else { /* can ignore topmost non-grp windows */ }
             }
         } );
     }
 
-    pub fn set_grp_always_on_top (&self, wg:WinGroups_E) {
-        let grp = &self.read().unwrap() .grps[wg.idx()];
-        grp.topmost.set();
-        for &hwnd in &grp.grp { win_set_always_on_top (hwnd) }
+    fn close (&self) {
+        self.read().unwrap().grp.iter().for_each (|&hwnd| win_close(hwnd))
     }
-    pub fn unset_grp_always_on_top (&self, wg:WinGroups_E) {
-        let grp = &self.read().unwrap() .grps[wg.idx()];
-        grp.topmost.clear();
-        for &hwnd in &grp.grp { win_unset_always_on_top (hwnd) }
+}
+
+
+
+
+
+impl WinGroups {
+
+    pub fn new() -> WinGroups {
+        WinGroups { grps : [ WinGroup::new(), WinGroup::new(), WinGroup::new() ] }
+    }
+    pub fn check_win_group (&self, hwnd:Hwnd) -> Option <WinGroups_E> {
+        self .grps .iter() .enumerate() .into_iter()
+            .find (|&(_,g)| g.check(&hwnd)) .and_then (|(idx,_)| idx.try_into().ok())
+    }
+    pub fn get_grp_hwnds (&self, wg:WinGroups_E) -> Vec<Hwnd> {
+        self .grps [wg.idx()] .get_hwnds()
+    }
+    pub fn add_to_group (&self, wg: WinGroups_E, hwnd:Hwnd) {
+        self .grps [wg.idx()] .add(&hwnd);
+    }
+    pub fn remove_from_group (&self, wg:WinGroups_E, hwnd:Hwnd) {
+        self .grps [wg.idx()] .remove(&hwnd);
     }
     pub fn toggle_grp_always_on_top (&self, wg:WinGroups_E) {
-        let mut are_grp_wins_topmost = true;
-        for &hwnd in &self.read().unwrap() .grps[wg.idx()] .grp {
-            if !win_check_if_topmost(hwnd) {
-                are_grp_wins_topmost = false; break;
-        } }
-        if are_grp_wins_topmost { self.unset_grp_always_on_top(wg) } else { self.set_grp_always_on_top(wg) }
+        self .grps [wg.idx()] .toggle_always_on_top();
     }
-
+    pub fn activate_win_group (&self, wg:WinGroups_E) {
+        self .grps [wg.idx()] .activate();
+    }
+    pub fn toggle_grp_activation (&self, wg:WinGroups_E) {
+        self .grps [wg.idx()] .toggle_activation();
+    }
     pub fn close_grp_windows (&self, wg:WinGroups_E) {
-        self.read().unwrap() .grps[wg.idx()] .grp .iter() .for_each (|hwnd| win_close(*hwnd))
+        self .grps [wg.idx()] .close();
     }
 
 }

@@ -139,6 +139,12 @@ pub fn win_send_to_back (hwnd:Hwnd) { unsafe {     //println!("winapi send to ba
 pub fn win_hide (hwnd:Hwnd) { unsafe {      //println!("winapi hide {:?}",hwnd);
     ShowWindow (hwnd, SW_HIDE);
 } }
+pub fn win_show (hwnd:Hwnd) { unsafe {      //println!("winapi show {:?}",hwnd);
+    ShowWindow (hwnd, SW_SHOW);
+} }
+pub fn win_show_no_activate (hwnd:Hwnd) { unsafe {      //println!("winapi show no-act {:?}",hwnd);
+    ShowWindow (hwnd, SW_SHOWNOACTIVATE);
+} }
 pub fn win_close (hwnd:Hwnd) { unsafe {     //println!("winapi close {:?}",hwnd);
     //CloseWindow(hwnd);
     // note ^^ that the u32 'CloseWindow' cmd actually minimizes it, to close, send it a WM_CLOSE msg
@@ -359,7 +365,7 @@ pub fn win_get_ide_dialog_hwnds() -> Vec<Hwnd> {
 }
 pub unsafe extern "system" fn win_enum_cb_ide_dialog_filt (hwnd:HWND, _:LPARAM) -> BOOL {
     let retval = BOOL (true as i32);
-    if !check_window_visible (hwnd.into())  { return retval }
+    //if !check_window_visible (hwnd.into())  { return retval }
     if  check_window_cloaked (hwnd.into())  { return retval }
     if  check_if_tool_window (hwnd.into())  { return retval }
     //if  check_window_has_owner (hwnd.into())  { return retval }

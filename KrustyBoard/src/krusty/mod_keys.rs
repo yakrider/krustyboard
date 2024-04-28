@@ -171,7 +171,7 @@ pub trait KeyHandling : Debug {
 
 /// Holds representation for all modifier keys together, interlinked functionality etc impld here
 # [ derive (Debug) ]
-pub struct _ModKeys {
+pub struct ModKeys {
 
     // caps will be tracked for internal reference, and we'll assume we'll ALWAYS operate with caps-lock off
     // we'll also track all mod keys as syncd-modifier-keys, where we track the phys and logical states, as well as whether to mask their release
@@ -196,10 +196,6 @@ pub struct _ModKeys {
     pub rshift : UnifModKey,
 }
 
-/// Arc wraps our collection of ModiferKeys for cheap cloning/sharing
-# [ derive (Debug, Clone, Deref) ]
-pub struct ModKeys ( Arc <_ModKeys> );
-
 
 
 
@@ -209,7 +205,7 @@ pub struct ModKeys ( Arc <_ModKeys> );
 impl ModKeys {
 
     pub fn new() -> Self {
-        Self ( Arc::new ( _ModKeys {
+        ModKeys {
             _private : (),
             // caps is a special singleton for itself
             caps   : CapsModKey::instance(),
@@ -224,7 +220,7 @@ impl ModKeys {
             rctrl  : UnifModKey::new (rctrl,  Box::new(ModKey_Managed), Some(lctrl)),
             lshift : UnifModKey::new (lshift, Box::new(ModKey_Managed), Some(rshift)),
             rshift : UnifModKey::new (rshift, Box::new(ModKey_Managed), Some(lshift)),
-        } ) )
+        }
     }
 
     pub fn get_umk (&self, mk:ModKey) -> Option<UnifModKey> {
@@ -640,7 +636,7 @@ impl UnifModKey {
             let umk = self.clone();
             thread::spawn ( move || {
                 // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
-                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "switche.exe" {
+                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" {
                     umk.release_w_masking()   // this will update flags too
                 }
             } );

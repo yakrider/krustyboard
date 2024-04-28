@@ -1,8 +1,9 @@
 #![ allow (non_camel_case_types) ]
 
 use std::mem::size_of;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
+use atomic_refcell::AtomicRefCell;
 
 use derive_deref::Deref;
 use once_cell::sync::OnceCell;
@@ -73,13 +74,15 @@ impl ComboValue {
 # [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct _CombosMap {
+    // Note that we're using AtomicRefCell instead of Arc-RwLock because we should be donig all the building before
+    //   we start running it, so there should never be a write attempted while some other thread is trying to read these
     _private : (),
     // the combos map itself, mapping key+mod-key+mode-state combos to actions
-    combos_map : Arc <RwLock <FxHashMap <Combo, Vec<ComboValue>>>>,
+    combos_map : AtomicRefCell <FxHashMap <Combo, Vec<ComboValue>>>,
     // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
-    l2_keys_map : Arc <RwLock <FxHashMap <Key, Key>>>,
+    l2_keys_map : AtomicRefCell <FxHashMap <Key, Key>>,
     // and we'll hold a registry for keys that only need default/fallback bindings
-    default_bind_keys : Arc <RwLock <FxHashSet <Key>>>,
+    default_bind_keys : AtomicRefCell <FxHashSet <Key>>,
 }
 # [ derive (Clone, Deref) ]
 pub struct CombosMap ( Arc <_CombosMap> );
@@ -394,20 +397,20 @@ impl CombosMap {
         INSTANCE .get_or_init (||
             CombosMap ( Arc::new ( _CombosMap {
                 _private : (),
-                combos_map  : Arc::new ( RwLock::new ( FxHashMap::default() ) ),
-                l2_keys_map : Arc::new ( RwLock::new ( FxHashMap::default() ) ),
-                default_bind_keys : Arc::new ( RwLock::new ( FxHashSet::default() ) ),
+                combos_map  : AtomicRefCell::new ( FxHashMap::default() ),
+                l2_keys_map : AtomicRefCell::new ( FxHashMap::default() ),
+                default_bind_keys : AtomicRefCell::new ( FxHashSet::default() )
             } ) )
         ) .clone()
     }
 
     /// registers a key for layer-2 functionality, which is used during fallback to layer any pressed mod-keys onto the l2-key
     pub fn register_l2_key (&self, key:Key, l2k:Key) {
-        self.l2_keys_map.write().unwrap() .insert (key, l2k);
+        self.l2_keys_map .borrow_mut() .insert (key, l2k);
     }
     /// registers a key for default binding (without a specific combo)
     pub fn register_default_binding_key (&self, key:Key) {
-        self.default_bind_keys .write().unwrap() .insert (key);
+        self.default_bind_keys .borrow_mut() .insert (key);
     }
 
 
@@ -432,7 +435,7 @@ impl CombosMap {
     } }
 
     fn add_to_combos_map (&self, c:Combo, cv:ComboValue) {
-        let mut cm = self.combos_map.write().unwrap();
+        let mut cm = self.combos_map.borrow_mut();
         //self.combos_map.write().unwrap() .insert (c, cv);
         if let Some(cvs) = cm.get_mut(&c) {
             // if we already had combo-values for this combo, we can add new conditional, but must replace any prior non-conditional AF entries
@@ -466,7 +469,7 @@ impl CombosMap {
         if ks.mode_states.some_combo_mode_active.is_set() && !qks1_active { return }
 
         // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
-        let l2k_opt = self.l2_keys_map.read().unwrap().get(&key).copied();
+        let l2k_opt = self.l2_keys_map.borrow().get(&key).copied();
         let fb_key = l2k_opt.unwrap_or(key);
 
         // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
@@ -508,10 +511,15 @@ impl CombosMap {
         let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (key, &ks);
         let mut combo_triggered = false;
 
-        if let Some(cvs) = self.combos_map.read().unwrap() .get(&combo_w_latch) {
+        //let cm = self.combos_map.borrow();
+        let cm = unsafe { & *self.combos_map.as_ptr() };
+        // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
+        // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
+
+        if let Some(cvs) = cm.get(&combo_w_latch) {
             // if we find a combo w latch active, that overrides everything else
             combo_triggered = self.process_combo_afs (ks, &cvs);
-        } else if let Some(cvs) = self.combos_map.read().unwrap() .get(&combo_no_latch) {
+        } else if let Some(cvs) = cm.get(&combo_no_latch) {
             // else we're now ok w just a combo ignoring latches
             combo_triggered = self.process_combo_afs (ks, &cvs);
         }
@@ -550,8 +558,8 @@ impl CombosMap {
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
         // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
         let mut handled_keys = FxHashSet::default();
-        self.combos_map .read().unwrap() .iter() .for_each ( |(c,_)| { handled_keys.insert(c.key); } );
-        self.default_bind_keys .read().unwrap() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
+        self.combos_map .borrow() .keys() .for_each ( |c| { handled_keys.insert(c.key); } );
+        self.default_bind_keys .borrow() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
         k .ks .mode_states .mode_flag_pairs()  .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
         k .ks .mode_states .latch_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
 
@@ -575,7 +583,10 @@ impl CombosMap {
         } );
         k.iproc.set_combo_processor(cb);
     }
+
     pub fn disable_combos_map_events_processor (&self, k:&Krusty) {
+        // Note that this is not really intended to be called at runtime ..
+        // if we do want this to be dyanmic behavior, we should replace AtomicRefCell with RwLock in the CombosMap struct for robustness
         k.iproc.clear_combo_processor()
     }
 

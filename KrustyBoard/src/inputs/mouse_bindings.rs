@@ -2,19 +2,14 @@
 // allow non camel-case names for this entire file
 #![allow(non_camel_case_types)]
 
-use std::{
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
+use atomic_refcell::AtomicRefCell;
 
 use derive_deref::Deref;
 use rustc_hash::FxHashMap;
-use once_cell::sync::OnceCell;
 
 use crate::{*, MouseEventCbMapKeyAction::*};
 
-
-/// Mouse-Events callback bindings map type: the map-key has event-src and-event type, the map-value is the callback entry
-pub type MouseEventCbMap = FxHashMap <MouseEventCbMapKey, MouseEventCallbackEntry>;
 
 
 /// The bindings-map event-source type can be specified button, specified wheel, or the pointer
@@ -76,9 +71,17 @@ pub struct MouseEventCallbackEntry {
 }
 
 
-/// The mouse-events-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads
-# [ derive (Clone, Deref) ]
-pub struct MouseBindings ( Arc <RwLock <MouseEventCbMap>> );
+/// The mouse-events-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads.
+/// The map-key has event-src and-event type, the map-value is the callback entry
+//# [ derive (Clone, Deref) ]
+//pub struct MouseBindings ( Arc <RwLock <MouseEventCbMap>> );
+
+# [ derive (Deref) ]
+pub struct MouseBindings (
+    AtomicRefCell <FxHashMap <MouseEventCbMapKey, MouseEventCallbackEntry>>
+    // ^^ note that we use AtomicRefCell instead of RwLock as we dont ever write to it at runtime (and it is faster at runtime)
+    // .. so if want to support dynamic binding/unbinding at runtime, we should switch back to RwLock
+);
 
 
 
@@ -86,38 +89,35 @@ pub struct MouseBindings ( Arc <RwLock <MouseEventCbMap>> );
 
 impl MouseBindings {
 
-    pub fn instance() -> MouseBindings {
-        static INSTANCE: OnceCell <MouseBindings> = OnceCell::new();
-        INSTANCE .get_or_init ( ||
-            MouseBindings ( Arc::new ( RwLock::new ( FxHashMap::default() ) ) )
-        ) .clone()
+    pub fn new() -> MouseBindings {
+        MouseBindings ( AtomicRefCell::new ( FxHashMap::default() ) )
     }
 
     pub fn bind_btn_event (&self, btn:MouseButton, btn_action: MouseEventCbMapKeyAction, cb_entry: MouseEventCallbackEntry) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::btn(btn), ev_action: btn_action };
-        self .write().unwrap() .insert (cb_map_key, cb_entry);
+        self .borrow_mut() .insert (cb_map_key, cb_entry);
     }
     pub fn bind_wheel_event (&self, wheel:MouseWheel, cb_entry: MouseEventCallbackEntry) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::wheel(wheel), ev_action: WheelEventCb };
-        self .write().unwrap() .insert (cb_map_key, cb_entry);
+        self .borrow_mut() .insert (cb_map_key, cb_entry);
     }
     pub fn bind_pointer_event (&self, cb_entry: MouseEventCallbackEntry) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::pointer, ev_action: MouseMoveCb };
-        self .write().unwrap() .insert (cb_map_key, cb_entry);
+        self .borrow_mut() .insert (cb_map_key, cb_entry);
     }
 
 
     pub fn unbind_btn_event (&self, btn:MouseButton, btn_action: MouseEventCbMapKeyAction) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::btn(btn), ev_action: btn_action };
-        self .write().unwrap() .remove (&cb_map_key);
+        self .borrow_mut() .remove (&cb_map_key);
     }
     pub fn unbind_wheel_event (&self, wheel:MouseWheel, wheel_action: MouseEventCbMapKeyAction) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::wheel(wheel), ev_action: wheel_action };
-        self .write().unwrap() .remove (&cb_map_key);
+        self .borrow_mut() .remove (&cb_map_key);
     }
     pub fn unbind_pointer_event (&self) {
         let cb_map_key = MouseEventCbMapKey { ev_src: MouseEventCbMapKeySrc::pointer, ev_action: MouseMoveCb };
-        self .write().unwrap() .remove (&cb_map_key);
+        self .borrow_mut() .remove (&cb_map_key);
     }
 
 }

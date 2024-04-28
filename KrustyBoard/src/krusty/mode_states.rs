@@ -1,7 +1,8 @@
 #![ allow (non_camel_case_types) ]
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::mem::size_of;
+use atomic_refcell::AtomicRefCell;
 
 use derive_deref::Deref;
 use rustc_hash::FxHashSet;
@@ -32,8 +33,9 @@ pub enum ModeState_T {
 /// ModeState representation for mode-flags (and any associated trigger keys they have)
 /// Note that key triggered mode-states are active ONLY while the assigned key is held down
 pub struct _ModeState {
+    // Note that we'll use AtomicRefCell instead of Arc-RwLock for the key, as runtime should have no writes to it (after initial setup)
     pub ms_t     : ModeState_T,
-        key      : Arc <RwLock <Option<KbdKey>>>,
+        key      : AtomicRefCell <Option<KbdKey>>,
     pub down     : Flag,
     pub consumed : Flag,
 }
@@ -50,7 +52,7 @@ pub struct ModeState ( Arc <_ModeState> );
 /// Note that key triggered latch-states are TOGGLED upon assigned key presses
 pub struct _LatchState {
     pub ms_t     : ModeState_T,     // we'll just add to the ModeState enum to keep usage simpler
-        key      : Arc <RwLock <Option<KbdKey>>>,
+        key      : AtomicRefCell <Option<KbdKey>>,
     pub active   : Flag,
 }
 
@@ -64,7 +66,7 @@ pub struct LatchState ( Arc <_LatchState> );
 
 # [ derive (Debug) ]
 /// Holds all the ModeStates together, common functionality is impld here
-pub struct _ModeStates {
+pub struct ModeStates {
     _private : (),
     // l2 mode states
     pub sel  : ModeState,
@@ -88,14 +90,11 @@ pub struct _ModeStates {
     //pub some_latch_state_active : Flag,
 
     // we'll also maintain a set of our registered mode-trigger-keys for quick lookup
-    mode_keys  : Arc <RwLock <FxHashSet <KbdKey>>>,
-    //latch_keys : Arc <RwLock <FxHashSet <KbdKey>>>,     // no runtime need yet to check against these
+    // NOTE: we're using AtomicRefCell instead of Arc-RwLock as there should be no writes are runtime (after initial setup)
+    mode_keys : AtomicRefCell <FxHashSet <KbdKey>>,
+    //latch_keys : AtomicRefCell <FxHashSet <KbdKey>>,     // no runtime need yet to check against these
 
 }
-
-# [ derive (Debug, Clone, Deref) ]
-/// Implements the (Arc wrapped) ModeStates-holder functionality
-pub struct ModeStates ( Arc <_ModeStates> );
 
 
 
@@ -111,7 +110,7 @@ impl ModeState {
     pub fn new (ms_t: ModeState_T) -> ModeState {
         ModeState ( Arc::new ( _ModeState {
             ms_t,
-            key      : Arc::new ( RwLock::new(None) ),
+            key      : AtomicRefCell::new(None),
             down     : Flag::default(),
             consumed : Flag::default(),
         } ) )
@@ -125,26 +124,26 @@ impl ModeState {
 
     /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
-        self.key.read().unwrap().clone()
+        self.key.borrow().clone()
     }
 
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
     fn register_key (&self, key:KbdKey) {
-        *self.key.write().unwrap() = Some(key);
+        *self.key.borrow_mut() = Some(key);
     }
 
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_mode_key_down (&self, k:&Krusty) {
         use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
-        let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
+        let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_l2_mode_active.set();  mss.some_combo_mode_active.set(); } )
+                Arc::new ( move || { ks.mode_states.some_l2_mode_active.set();  ks.mode_states.some_combo_mode_active.set(); } )
             } else if ModeStates::static_qks_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_qks_mode_active.set(); mss.some_combo_mode_active.set(); } )
+                Arc::new ( move || { ks.mode_states.some_qks_mode_active.set(); ks.mode_states.some_combo_mode_active.set(); } )
             } else if ModeStates::static_combo_modes() .contains(&self.ms_t) {
-                Arc::new ( move || { mss.some_combo_mode_active.set(); } )
+                Arc::new ( move || { ks.mode_states.some_combo_mode_active.set(); } )
             } else { Arc::new (move || { }) }
         };
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
@@ -162,11 +161,11 @@ impl ModeState {
     /// Binds mode-key-up event on registered mod-key to flag update action
     fn bind_mode_key_up (&self, k:&Krusty) {
         use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
-        let (ms, mss) = (self.clone(), k.ks.mode_states.clone());
+        let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
-            if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || mss.refresh_l2_mode_active_flag() ) }
-            else if ModeStates::static_qks_modes()   .contains(&self.ms_t) { Arc::new ( move || mss.refresh_qks_mode_active_flag() ) }
-            else if ModeStates::static_combo_modes() .contains(&self.ms_t) { Arc::new ( move || mss.refresh_caps_mode_active_flag() ) }
+            if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
+            else if ModeStates::static_qks_modes()   .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
+            else if ModeStates::static_combo_modes() .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
@@ -198,32 +197,32 @@ impl LatchState {
     pub fn new (ms_t: ModeState_T) -> LatchState {
         LatchState ( Arc::new ( _LatchState {
             ms_t,
-            key    : Arc::new ( RwLock::new(None) ),
+            key    : AtomicRefCell::new(None),
             active : Flag::default(),
         } ) )
     }
 
     /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
-        self.key.read().unwrap().clone()
+        self.key.borrow().clone()
     }
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
     fn register_key (&self, key:KbdKey) {
-        *self.key.write().unwrap() = Some(key);
+        *self.key.borrow_mut() = Some(key);
     }
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_latch_key_down(&self, k:&Krusty) {
         use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
-        let (ls, mss, caps_dbl) = (self.clone(), k.ks.mode_states.clone(), k.ks.mod_keys.caps.dbl_tap.clone());
+        let (ls, ks) = (self.clone(), k.ks.clone());
         let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
         let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
-            if caps_dbl.is_set() {
+            if ks.mod_keys.caps.dbl_tap.is_set() {
                 // note that latch keys only update latch state when the keypress is on dbl_caps
                 //ls.active.toggle();
                 // ^^ we'll instead set it so only one latch state is active at a time (for usability reasons)
                 let prior_state = ls.active.is_set();
-                mss.clear_latch_state_flags();
+                ks.mode_states.clear_latch_state_flags();
                 ls.active.store(!prior_state);
                 //mss.some_latch_state_active.store(ls.active.is_set())         // no need for this yet
             }
@@ -255,7 +254,7 @@ impl ModeStates {
         let (_qks, _qks1, _qks2, _qks3) = (ModeState::new(qks), ModeState::new(qks1), ModeState::new(qks2), ModeState::new(qks3));
         let (_l1, _l2, _l3, _l4) = (LatchState::new(latch_1), LatchState::new(latch_2), LatchState::new(latch_3), LatchState::new(latch_4));
 
-        ModeStates ( Arc::new ( _ModeStates {
+        ModeStates {
             _private : (),
 
             sel: _sel, del:  _del,  word: _word, fast: _fast,
@@ -268,9 +267,9 @@ impl ModeStates {
             some_combo_mode_active : Flag::default(),
             //some_latch_state_active: Flag::default(),     // no need for this yet
 
-            mode_keys  : Arc::new (RwLock::new (FxHashSet::default())),
-            //latch_keys : Arc::new (RwLock::new (FxHashSet::default())),   // dont really need to track these
-        } ) )
+            mode_keys  : AtomicRefCell::new (FxHashSet::default()),
+            //latch_keys : AtomicRefCell::new (FxHashSet::default()),   // dont really need to track these
+        }
     }
 
     // we'll just define all enum subsets we need rather than trying to partly/fully iterating through ModeState_T
@@ -324,19 +323,19 @@ impl ModeStates {
     pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {
         if let Some(ms) = self.get_mode_flag(ms_t) {
             ms.register_key(key);
-            self.mode_keys.write().unwrap().insert(key);
+            self.mode_keys.borrow_mut().insert(key);
         }
     }
     pub fn check_if_mode_key (&self, key:Key) -> bool {
         // this check needs to happen at runtime, so maintaining a small hashmap to do it fast rather than iterating through flags
-        self.mode_keys.read().unwrap().contains(&key)
+        self.mode_keys.borrow().contains(&key)
         // ^^ note that we're ignoring latch keys here, they have no special runtime implication
     }
     pub fn get_mode_flag (&self, mst:ModeState_T) -> Option<&ModeState> {
         self.mode_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
     }
     pub fn get_mode_t (&self, key:Key) -> Option<ModeState_T> {
-        self.mode_flag_pairs() .iter() .find (|(_, ms)| ms.key.read().unwrap().filter(|&k| k==key).is_some()) .map (|(ms_t,_)| *ms_t)
+        self.mode_flag_pairs() .iter() .find (|(_, ms)| ms.key.borrow().filter(|&k| k==key).is_some()) .map (|(ms_t,_)| *ms_t)
     }
 
     pub fn register_latch_key (&self, key:Key, ms_t:ModeState_T) {
