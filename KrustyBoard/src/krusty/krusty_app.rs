@@ -2,6 +2,7 @@
 
 
 use std::{ time, thread, sync::Arc, };
+use std::time::Duration;
 
 use crate::{*, KbdKey::*, key_utils::*, ModKey::*, ModeState_T::*};
 
@@ -19,26 +20,24 @@ pub mod special_keys_setups {
         // currently, we dont need to do it for anything .. (was more essential when mod-tracking / combo-maps mechanisms were more limited)
 
         // HOWEVER, there might be cases where it might be simpler to just do direct bindings than to populate all the combo maps etc etc
-        // ALSO, for things that require actual action in key-up callbacks, we'd do it direclty here because key-dn actions arent registered
-        // > specifically in maps and so combo-maps composed callbacks can only either set key-up to do nothing, or at most clear mode flags
+        // ALSO, for things that require actual action in key-up callbacks, we'd do it direclty here because key-up actions arent specifically
+        // .. registered in maps and so combo-maps composed callbacks can only either set key-up to do nothing, or at most clear mode flags
 
-        // IMPORTANT : note that whatever we put here, we will NOT want to include them in ANY action maps (we'll overwrite w these at the end) !!
-
+        // NOTE that since combo processing is optional and happens after direct kbd binding cbs, they can still be used despite direct bindings here
 
         // we'll use one for unstick-all ..
         // regular combo-maps are painful for this as expectation is when we want to use that any modkey/flag might be stuck for whatever reason
         // .. so we'd need to make combos to trigger that will all possible combinations of modkeys .. which quickly gets out of hand
         // hence we'll directly code that up here
-        // Note again that when we do direct binding here, anything via combomaps for the key will be overwritten
 
         let ks = k.ks.clone();
         k.iproc .kbd_bindings .bind_kbd_event (Key::Insert, KeyEventCb_KeyDown, KbdEventCallbackEntry {
-            event_proc_d: KbdEvProcDirectives { event_prop_d: EventProp_Undetermined, combo_proc_d: ComboProc_Disable },
+            event_proc_d: KbdEvProcDirectives { event_prop_d: EventProp_Undetermined, combo_proc_d: ComboProc_Undetermined },
             cb: KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
-                let (mut event_prop_d, combo_proc_d) = (EventProp_Continue, ComboProc_Disable);
+                let (mut event_prop_d, mut combo_proc_d) = (EventProp_Continue, ComboProc_Enable);
                 if ks.mod_keys.caps.dbl_tap.is_set() {
                     ks.unstick_all();
-                    event_prop_d = EventProp_Stop;
+                    event_prop_d = EventProp_Stop; combo_proc_d = ComboProc_Disable;
                 }
                 KbdEvProcDirectives { event_prop_d, combo_proc_d }
             } ) ),
@@ -119,15 +118,17 @@ pub fn setup_krusty_board () {
     // now, windows itself seems to treat shift-arrow keys as special, injecting its own logic of shift-up/dn in
     // >  the stream when it sees left/right/up/down w shift held down .. and that ofc screws up with our own handling for that
     // so instead, we'll swap those (when w shift) with the ext-left/right/up/down etc versions
-    k.cm .add_combo ( k.ks.cg(Left ).m(shift),  k.ks.ag(ExtLeft ).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(Right).m(shift),  k.ks.ag(ExtRight).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(Up   ).m(shift),  k.ks.ag(ExtUp   ).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(Down ).m(shift),  k.ks.ag(ExtDown ).m(shift)  );
-    // might as well do the same for the other similar keys (w MS special shift handling)
-    k.cm .add_combo ( k.ks.cg(Home    ).m(shift),  k.ks.ag(ExtHome).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(End     ).m(shift),  k.ks.ag(ExtEnd ).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(PageUp  ).m(shift),  k.ks.ag(ExtPgUp).m(shift)  );
-    k.cm .add_combo ( k.ks.cg(PageDown).m(shift),  k.ks.ag(ExtPgDn).m(shift)  );
+    // (and might as well do the same for the other similar keys and combos (w MS special shift handling))
+    fn ext_swap_shift_combo (k:&Krusty, key:Key, ext_key:Key) {
+        k.cm .add_combo ( k.ks.cg(key).m(shift),                k.ks.ag(ext_key).m(shift) );
+        k.cm .add_combo ( k.ks.cg(key).m(shift).m(alt),         k.ks.ag(ext_key).m(shift).m(alt) );
+        k.cm .add_combo ( k.ks.cg(key).m(shift).m(ctrl),        k.ks.ag(ext_key).m(shift).m(ctrl) );
+        k.cm .add_combo ( k.ks.cg(key).m(shift).m(alt).m(ctrl), k.ks.ag(ext_key).m(shift).m(alt).m(ctrl) );
+    }
+    vec![
+        (Left, ExtLeft),   (Right, ExtRight), (Up,     ExtUp),    (Down,     ExtDown),
+        (Home, ExtHome),   (End,   ExtEnd),   (PageUp, ExtPgUp),  (PageDown, ExtPgDn),
+    ] .into_iter() .for_each ( |(key, ext_key)| ext_swap_shift_combo ( &k, key, ext_key ) );
 
 
 
@@ -420,7 +421,9 @@ pub fn setup_krusty_board () {
 
     // and win-a to bring up the launchy popup (which is win-a in practice, but for us would only be dbl-win-a otherwise)
     // (we've assigned that to win-ctrl-shift-a to not interfere with win-a doing windows-action center by default)
-    k.cm .add_combo ( k.ks.cg(A).m(lwin),  k.ks.ag(A).m(lwin).m(lctrl).m(lshift) );
+    //k.cm .add_combo ( k.ks.cg(A).m(lwin),  k.ks.ag(A).m(lwin).m(lctrl).m(lshift) );
+    // ^^ seems to not work w elev switche fgnd .. presumably some global blockage of ctrl-hotkeys
+    k.cm .add_combo ( k.ks.cg(A).m(lwin),  k.ks.ag(A).m(lwin).m(lalt) );
 
     // we'll also setup a shortcut to pull up our taskbar shortcuts folder ...
     // (by focusing on tray btn first, then nav to our toolbar)
@@ -464,10 +467,13 @@ pub fn setup_krusty_board () {
     //k.cm .add_combo_af ( k.ks.cg(Numrow_2).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume(-1))) );
     //k.cm .add_combo_af ( k.ks.cg(Numrow_3).m(lwin).s(qks1),  k.ks.ag_af (Arc::new (|| incr_volume( 1))) );
 
-    // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke alt-F1: switche silent-switch, ralt for actual F1
-    k.cm .add_combo ( k.ks.cg(F1),          k.ks.ag(F15).m(alt).m(ctrl) );   // switche invoke/next
-    k.cm .add_combo ( k.ks.cg(F1).m(lalt),  k.ks.ag(F16).m(alt).m(ctrl) );   // switche no-popup next switch
-    k.cm .add_combo ( k.ks.cg(F1).m(ralt),  k.ks.ag(F1) );                   // this allows actual F1 use (if we disable F1 in swi configs)
+    // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke, ralt for actual F1
+    // alt-F1: switche silent-switch zidx-1, alt-dbl-F1: switche-z2, alt-dbl-F2: swtiche-z3
+    k.cm .add_combo ( k.ks.cg(F1),              k.ks.ag(F15).m(alt).m(ctrl) );   // switche invoke/next
+    k.cm .add_combo ( k.ks.cg(F1).m(lalt),      k.ks.ag(F16).m(alt).m(ctrl) );   // switche no-popup next switch (zidx-1)
+    k.cm .add_combo ( k.ks.cg(F1).m(lalt_dbl),  k.ks.ag(F17).m(alt).m(ctrl) );   // switche no-popup next switch (zidx-2)
+    k.cm .add_combo ( k.ks.cg(F2).m(lalt_dbl),  k.ks.ag(F18).m(alt).m(ctrl) );   // switche no-popup next switch (zidx-3)
+    k.cm .add_combo ( k.ks.cg(F1).m(ralt),      k.ks.ag(F1) );                   // this allows actual F1 use (if we disable F1 in swi configs)
 
     k.cm .add_combo ( k.ks.cg(F1).m(caps),  k.ks.ag(VolumeMute) );
     //k.cm .add_combo ( k.ks.cg(F1).m(lwin),  k.ks.ag(MediaPlayPause) );
@@ -480,16 +486,43 @@ pub fn setup_krusty_board () {
     // we'll set Alt-F2 to bring chrome tabs-outliner (via switche) to keep w the theme of Alt-F<n> keys for task switching
     k.cm .add_combo ( k.ks.cg(F2).m(lalt),  k.ks.ag(F20).m(alt).m(ctrl) );     // switche no-popup tabs-outliner switch
 
+
+    // some generated AFs for IDE cmds use
+    // note that its better not to specify no-modkey-guard-wrap below in case the action moves to some combo with a mod-key etc
+    fn line_sel         (k:&Krusty) -> AF { k.ks.ag(ExtHome).m(alt).m(shift).gen_af() } // IDE alt-shift-home to sel line
+    fn line_repl_send   (k:&Krusty) -> AF { k.ks.ag(ExtEnd ).m(alt).m(shift).gen_af() } // IDE alt-shift-end to send sel to repl
+    fn caret_sel_start  (k:&Krusty) -> AF { k.ks.ag(ExtLeft).gen_af()                 } // unselect the line (caret to line beginning)
+    fn caret_line_start (k:&Krusty) -> AF { k.ks.ag(ExtHome).gen_af()                 } // caret to beginning of first word in line
+    fn sel_page         (k:&Krusty) -> AF { k.ks.ag(A).m(ctrl).gen_af()               }
+    fn sel_send         (k:&Krusty) -> AF { k.ks.ag(End).m(alt).m(shift).gen_af()     }
+    fn esc_send         (k:&Krusty) -> AF { k.ks.ag(Escape).gen_af()                  }
+    fn sel_format       (k:&Krusty) -> AF { k.ks.ag(F).m(ctrl).m(shift).gen_af()      }
+    fn clear_console    (k:&Krusty) -> AF { k.ks.ag(Minus).m(alt).m(ctrl).m(shift).gen_af() }
+
     // we'll overload regular F2 with special IDE scala-console action if IDEA window is foreground
     fn gen_line_to_repl_action (k:&Krusty) -> AF {
-        // note that its better not to specify no-modkey-guard-wrap below in case the action moves from F2 to some combo with a mod-key
-        let line_sel         = k.ks.ag(ExtHome).m(alt).m(shift).gen_af();  // IDE alt-shift-home to sel line
-        let line_repl_send   = k.ks.ag(ExtEnd ).m(alt).m(shift).gen_af();  // IDE alt-shift-end to send sel to repl
-        let caret_sel_start  = k.ks.ag(ExtLeft).gen_af();                  // unselect the line (caret to line beginning)
-        let caret_line_start = k.ks.ag(ExtHome).gen_af();                  // caret to beginning of first word in line
-        Arc::new ( move || { line_sel(); line_repl_send(); caret_sel_start(); caret_line_start() } )
+        let (a,b,c,d) = (line_sel(&k), line_repl_send(&k), caret_sel_start(&k), caret_line_start(&k));
+        Arc::new ( move || { a(); b(); c(); d(); } )
     }
     k.cm .add_combo_af ( k.ks.cg(F2).c(intellij_fgnd()),   k.ks.ag_af(gen_line_to_repl_action(&k)) );
+
+    // and we'll add a full page send to repl action too .. is useful for things like lcqs
+    fn gen_page_to_repl_action (k:&Krusty) -> AF {
+        let (a,b,c) = ( sel_page(&k), sel_send(&k), esc_send(&k) );
+        Arc::new ( move || { a(); b(); c(); } )
+    }
+    k.cm .add_combo_af ( k.ks.cg(F2).m(caps).m(ralt).c(intellij_fgnd()),    k.ks.ag_af(gen_page_to_repl_action(&k)) );
+    k.cm .add_combo_af ( k.ks.cg(I ).m(caps).s(qks ).c(intellij_fgnd()),    k.ks.ag_af(gen_page_to_repl_action(&k)) );
+
+    fn gen_page_format_action (k:&Krusty) -> AF {
+        let (a,b,c) = ( sel_page(&k), sel_format(&k), esc_send(&k) );
+        Arc::new ( move || {
+            a(); b();
+            let c = c.clone();
+            thread::spawn ( move || { thread::sleep(Duration::from_millis(100)); c() } );
+        } )  // ^^ format needs some bit of time before we esc selection
+    }
+    k.cm .add_combo_af ( k.ks.cg(F).m(caps).s(qks).c(intellij_fgnd()), k.ks.ag_af(gen_page_format_action(&k)) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
     k.cm .add_combo ( k.ks.cg(F2).m(caps).c(intellij_fgnd()),   k.ks.ag(End).m(alt).m(shift) );
@@ -578,8 +611,8 @@ pub fn setup_krusty_board () {
                 handle_pointer_action_cancel (&ks);
             } else {
                 //press_release(key)
-                // ^^ hmm, instead of win-esc being just esc otherwise, we'll use it as window minimize
-                if key==Escape { win_fgnd_min() } else { press_release(key) }
+                // ^^ hmm, instead of win-esc being just esc otherwise, we'll use it as window minimize-and-back
+                if key==Escape { win_fgnd_min_and_back() } else { press_release(key) }
             }
         } )
     }
@@ -638,7 +671,8 @@ pub fn setup_krusty_board () {
         fn del_sel_afg (del_key:Key, nav_af:AF) -> AF {
             Arc::new ( move || {
                 LShift.press(); nav_af(); LShift.release(); // dont need guards for shift here.. this is deep into multi key L2
-                press_release(del_key);
+                //press_release(del_key);
+                thread::spawn ( move || { thread::sleep (Duration::from_millis(20)); press_release(del_key); } );
         } ) }
 
         let (da, dwa, dfa) = if del_via_sel {
@@ -693,9 +727,9 @@ pub fn setup_krusty_board () {
     // ^^ naah, not worthwhile as can do eqv from just caps-<del>-<arrows> .. instead we'll use that for easy 'Enter'
 
     // ralt-space for Enter was causing thumb pain, so other quick substitutes for that
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(del),         k.ks.ag(Enter) );    // caps-d-space --> Enter
     k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),        k.ks.ag(Enter) );    // caps-f-space --> Enter
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word).s(del), k.ks.ag(Enter) );    // caps-d-f-space --> Enter
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word).s(del), k.ks.ag(Enter) );    // caps-d-f-space --> Enter
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(del),         k.ks.ag(Enter) );    // caps-d-space --> Enter
 
     // (line sel/del actions are composite of move-to-line-end then sel/del-to-line-start)
     let lsa = Arc::new ( || { press_release(ExtEnd); shift_press_release(ExtHome); } );
@@ -732,12 +766,10 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(LBracket).m(caps).s(sel),  k.ks.ag(LBracket).m(alt).m(shift) );
     k.cm .add_combo ( k.ks.cg(RBracket).m(caps).s(sel),  k.ks.ag(RBracket).m(alt).m(shift) );
 
-    // also lets add an even quicker way to switche column mode during IDE edit (using the cur alt-shift-c)
-    // the I and Comma both do toggle but its better to have both for muscle memory on shift-move up/down
-    k.cm .add_combo ( k.ks.cg(I       ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
-    k.cm .add_combo ( k.ks.cg(Comma   ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
-    k.cm .add_combo ( k.ks.cg(Comma   ).m(lalt).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
-    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),          k.ks.ag(C).m(alt).m(shift) );
+    // also lets add an even quicker way to switch column mode during IDE edit (using the cur alt-shift-c)
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    // and this to help escape out of multi-col (not toggle mode, just collapse to single caret while in that mode)
+    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(sel),  k.ks.ag(Escape) );
 
 
 
@@ -820,7 +852,7 @@ pub fn setup_krusty_board () {
 
 
 
-    // but for switche-hotkeys, instead of caps, we'll do on lalt, and on qks1
+    // but for switche-hotkeys, instead of caps, we'll do on lalt, and on qks
     k.cm .add_combo ( k.ks.cg(L).m(lalt).s(qks1),  k.ks.ag(F16).m(alt).m(ctrl) );   // L switches to last
     k.cm .add_combo ( k.ks.cg(O).m(lalt).s(qks1),  k.ks.ag(F20).m(alt).m(ctrl) );   // O switches to TabsOutliner
     k.cm .add_combo ( k.ks.cg(N).m(lalt).s(qks1),  k.ks.ag(F21).m(alt).m(ctrl) );   // N switches to Notepad++
@@ -855,6 +887,49 @@ pub fn setup_krusty_board () {
     set_win_grp_af_combos ( &k, Some(T), |ks,wg| ks.win_groups.toggle_grp_always_on_top(wg) );
     set_win_grp_af_combos ( &k, Some(W), |ks,wg| ks.win_groups.close_grp_windows(wg) );
 
+
+
+    // we'll also setup special mode for dbl-caps-q + other keys .. intended to use to drive more complex hotkeys for IDE use etc
+    k.cm .add_combo_af ( k.ks.cg(Q).s(qks).m(caps_dbl),  k.ks.ag_af(no_action()) );
+
+    // we'll setup system to output Fn[13-24] keys so we can use them to program in IDE
+    fn setup_caps_dbl_fn_keys (k:&Krusty, k1:Key, k2:Key) {
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl),                           k.ks.ag(k2) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(ctrl),                  k.ks.ag(k2).m(ctrl) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(alt),                   k.ks.ag(k2).m(alt) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(shift),                 k.ks.ag(k2).m(shift) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(ctrl) .m(alt),          k.ks.ag(k2).m(ctrl).m(alt) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(ctrl) .m(shift),        k.ks.ag(k2).m(ctrl).m(shift) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(alt)  .m(shift),        k.ks.ag(k2).m(alt).m(shift) );
+        k.cm .add_combo ( k.ks.cg(k1).s(qks).m(caps_dbl) .m(ctrl) .m(alt).m(shift), k.ks.ag(k2).m(ctrl).m(alt).m(shift) );
+
+        // ^^ maybe can add here support for various modifier combos
+    }
+    [ (F1,F23), (F2,F24), (F3,F13), (F4,F14), (F5,F15), (F6,F16),
+      (F7,F17), (F8,F18), (F9,F19), (F10,F20), (F11,F21), (F12,F22)
+    ] .iter() .for_each ( |(k1,k2)| setup_caps_dbl_fn_keys (&k, *k1, *k2) );
+
+    // setting up caps-qks-L for IDE leetcode tool window (via alt-ctrl-shift-F24)
+    k.cm .add_combo ( k.ks.cg(L).s(qks).m(caps),  k.ks.ag(F24).m(alt).m(ctrl).m(shift) );
+
+    // caps-qks-M for more IDE leetcode testcases
+    k.cm .add_combo ( k.ks.cg(M).s(qks).m(caps),  k.ks.ag(F23).m(alt).m(ctrl).m(shift) );
+
+    // caps-qks-Period for IDE leetcode submission (alt-Period is set to local test)
+    //k.cm .add_combo ( k.ks.cg(Period).s(qks).m(caps),  k.ks.ag(F23).m(alt).m(ctrl).m(shift) );
+    // ^^ we'll also add action to clear console right after sending submission (console needs focus for clear to work)
+    let lc_run     = k.ks.ag(F21).m(alt).m(ctrl).m(shift).gen_af();
+    let lc_submit  = k.ks.ag(F22).m(alt).m(ctrl).m(shift).gen_af();
+    fn console_clearing_action (k:&Krusty, af:AF) -> AF {
+        let cc = clear_console(&k);
+        Arc::new ( move || {
+            af();
+            let cc = cc.clone();
+            thread::spawn ( move || { thread::sleep (Duration::from_millis(2000)); cc(); } );
+        } )
+    }
+    k.cm .add_combo_af ( k.ks.cg(Period).m(lalt),         k.ks.ag_af (console_clearing_action (&k,lc_run)) );
+    k.cm .add_combo_af ( k.ks.cg(Period).s(qks).m(caps),  k.ks.ag_af (console_clearing_action (&k,lc_submit)) );
 
 
 
@@ -905,7 +980,73 @@ pub fn setup_krusty_board () {
     // .. or add additional mode keys in l2 (caps-alt) .. although not a lot of free keys there .. maybe q .. could reuse mod keys w/ caps-win though
 
 
+    // there's finally the special-mode use latch states ..
+    // for ref, we've used latch_1 once above to map arrow keys to media actions (for use during playlist curation)
+    // we'll add one more for common use double-esc
+    //k.cm .add_combo_af ( k.ks.cg(F2).s(latch_2),   k.ks.ag_af (fast_action(Escape)) );
+    fn _gen_pointed_action(key:Key) -> AF {
+        Arc::new ( move || {
+            thread::spawn ( move || {
+                MouseButton::LeftButton.press(); MouseButton::LeftButton.release();
+                thread::sleep (Duration::from_millis(30));
+                double_press_release(key);
+            } );
+        } )
+    }
+    //k.cm .add_combo_af ( k.ks.cg(F2).s(latch_2),      k.ks.ag_af (gen_pointed_action(Escape)) );
+    //k.cm .add_combo_af ( k.ks.cg(F3).s(latch_2),      k.ks.ag_af (gen_pointed_action(Tab)) );
+    //k.cm .add_combo_af ( k.ks.cg(F12).s(latch_2),     k.ks.ag_af (gen_pointed_action(Escape)) );
+    //k.cm .add_combo_af ( k.ks.cg(Insert).s(latch_2),  k.ks.ag_af (gen_pointed_action(Tab)) );
 
+    fn s (ms:u64) { thread::sleep (Duration::from_millis(ms)); }
+    fn gen_pointed_v2 (x:i32, y:i32, key:Key) -> AF {
+        Arc::new ( move || {
+            thread::spawn ( move || {
+                MousePointer::move_abs(x,y);
+                MouseButton::LeftButton.press(); MouseButton::LeftButton.release();
+                s(20); press_release(key); s(5); press_release(key);
+            } );
+        } )
+    }
+    let (xo, xd, y) = (500, 1000, 2200);
+    let pointed_3 = { Arc::new ( move || {
+        let (a,b,c,d) = (gen_pointed_v2(xo,y,Escape), gen_pointed_v2(xo+xd,y,Escape), gen_pointed_v2(xo+2*xd,y,Escape), gen_pointed_v2(xo+3*xd,y,Escape));
+        thread::spawn ( move || { a(); s(50); b(); s(50); c(); s(50); d(); } );
+    } ) };
+    fn pc() -> ComboCond { Arc::new ( move |_| {
+        let fi = WinEventsListener::instance(); let fi = fi.fgnd_info.read().unwrap();
+        fi.exe == "chrome.exe" && fi.title.contains("Random")
+    } ) }
+    k.cm .add_combo_af ( k.ks.cg(Left  ).s(latch_2).c(pc()),  k.ks.ag_af (gen_pointed_v2 ( xo + 1 * xd, y, Escape)) );
+    k.cm .add_combo_af ( k.ks.cg(Right ).s(latch_2).c(pc()),  k.ks.ag_af (gen_pointed_v2 ( xo + 3 * xd, y, Escape)) );
+    k.cm .add_combo_af ( k.ks.cg(Down  ).s(latch_2).c(pc()),  k.ks.ag_af (gen_pointed_v2 ( xo + 2 * xd, y, Escape)) );
+    k.cm .add_combo_af ( k.ks.cg(Slash ).s(latch_2).c(pc()),  k.ks.ag_af (gen_pointed_v2 ( xo + 0 * xd, y, Escape)) );
+    k.cm .add_combo_af ( k.ks.cg(Up    ).s(latch_2).c(pc()),  k.ks.ag_af ( pointed_3 ) );
+    k.cm .add_combo_af ( k.ks.cg(Left  ).s(latch_2).c(pc()).m(caps),  k.ks.ag_af (gen_pointed_v2 ( xo + 1 * xd, y, Tab)) );
+    k.cm .add_combo_af ( k.ks.cg(Right ).s(latch_2).c(pc()).m(caps),  k.ks.ag_af (gen_pointed_v2 ( xo + 3 * xd, y, Tab)) );
+    k.cm .add_combo_af ( k.ks.cg(Down  ).s(latch_2).c(pc()).m(caps),  k.ks.ag_af (gen_pointed_v2 ( xo + 2 * xd, y, Tab)) );
+    k.cm .add_combo_af ( k.ks.cg(Slash ).s(latch_2).c(pc()).m(caps),  k.ks.ag_af (gen_pointed_v2 ( xo + 0 * xd, y, Tab)) );
+
+
+    fn og_setup () -> AF { Arc::new ( || { thread::spawn ( || {
+        // assume four sized windows are up, move them to right loc, start em up, deblur,
+        let xd = 940;
+        for i in (0 .. 4).rev() {
+            //MousePointer::move_abs (xd*0 + 240, 200);         // home btn?
+            MousePointer::move_abs (xd*0 + 600, 600);           // video btn
+            MouseButton::LeftButton.press_release(); s(50);     //
+            MousePointer::move_abs (xd*0 + 60, 410);            // unblur btn
+            MouseButton::LeftButton.press_release(); s(200); MouseButton::LeftButton.press_release();
+            win_fgnd_move_to (xd*i, 0, 940, 2400); s(500);
+        }
+    } ); } ) }
+    fn og_teardown() -> AF { Arc::new ( || { thread::spawn ( || { for i in 0 .. 4 {
+        MousePointer::move_abs (940*i + 240, 200);              // home btn
+        MouseButton::LeftButton.press_release(); s(50);
+        ctrl_press_release(W); s(50);
+    } } ); } ) }
+    k.cm .add_combo_af ( k.ks.cg(Insert).s(latch_2).m(caps),  k.ks.ag_af (og_setup()) );
+    k.cm .add_combo_af ( k.ks.cg(Delete).s(latch_2).m(caps),  k.ks.ag_af (og_teardown()) );
 
 
 

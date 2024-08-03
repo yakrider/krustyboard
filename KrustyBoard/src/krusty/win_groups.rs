@@ -151,7 +151,7 @@ impl WinGroup {
                         //but first, lets activate the next-in-line hwnd so active window focus transfers seamlessly
                         hwnds .iter() .find (|h| wg.read().unwrap().grp_set.contains(h).not()) .map (|&h| win_activate(h));
                         // now we can send our grp hwnds back
-                        wg.read().unwrap().grp_set .iter() .for_each (|&h| win_send_to_back(h));
+                        wg.read().unwrap().grp_set .iter() .for_each (|&h| { win_send_to_back(h); win_minimize(h); } );
                         break;
                 } } else if !win_check_if_topmost(hwnd) {
                     // finding any non-topmost non-grp window before we're done means grp is not activated

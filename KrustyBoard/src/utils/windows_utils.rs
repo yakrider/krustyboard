@@ -182,6 +182,7 @@ pub fn win_fgnd_move_rel (dx:i32, dy:i32) { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
     MoveWindow (hwnd, r.left + dx, r.top + dy, r.right-r.left, r.bottom-r.top, true);
 } }
+pub fn win_fgnd_move_to (x:i32, y:i32, w:i32, h:i32) { win_move_to (win_get_fgnd(), x, y, w, h) }
 pub fn win_move_to (hwnd:Hwnd, x:i32, y:i32, width:i32, height:i32) { unsafe {
     MoveWindow (hwnd, x, y, width, height, true);    // the bool param at end flags whether to repaint or not
 } }
@@ -266,7 +267,15 @@ pub fn _win_get_screen_metrics () -> (i32, i32) { unsafe {
 
 pub fn win_fgnd_min () { unsafe {
     let hwnd = GetForegroundWindow();
-    PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
+    //PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
+    //ShowWindowAsync (hwnd, SW_MINIMIZE);
+    win_minimize (Hwnd(hwnd.0));
+} }
+pub fn win_fgnd_min_and_back () { unsafe {
+    let hwnd = GetForegroundWindow();
+    //PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
+    win_minimize (Hwnd(hwnd.0));
+    win_send_to_back (Hwnd(hwnd.0));
 } }
 
 
