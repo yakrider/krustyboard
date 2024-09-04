@@ -147,18 +147,18 @@ pub trait KeyHandling : Debug {
 
     fn handling_type (&self) -> ModKey_Mgmt ;
 
-    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
-    fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives ;
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
+    fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
 
     // utility fn to make prepping these binding/processing directives less cumbersome
-    fn epds (&self, epd:EventPropagationDirective) -> KbdEvProcDirectives {
-        KbdEvProcDirectives::new (epd, KbdEvCbComboProcDirective::ComboProc_Disable)
+    fn epds (&self, epd: EvProp_D) -> EvProc_Ds {
+        EvProc_Ds::new (epd, ComboProc_D::ComboProc_Disable)
     }
     // note that the self is in params simply to allow calling w/o full impl specification
     // (and w that adding 'where Self:Sized' is no longer needed .. which otherwise we'd need for trait object associated fn )
-    fn epds_blocked      (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Stop) }
-    fn epds_continue     (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Continue) }
-    fn epds_undetermined (&self) -> KbdEvProcDirectives { self.epds (EventPropagationDirective::EventProp_Undetermined) }
+    fn epds_blocked      (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Stop) }
+    fn epds_continue     (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Continue) }
+    fn epds_undetermined (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Undet) }
 
     fn is_managed (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Managed }
     fn is_doubled (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Doubled }
@@ -366,7 +366,7 @@ impl CapsModKey {
         ) .clone()
     }
 
-    fn handle_key_down (&self, ks:&KrustyState, ev:&KbdEvent) {
+    fn handle_key_down (&self, ks:&KrustyState, ev:&Event) {
         //println!("Caps DOWN : {:?}, inj: {:?}", ev.key, ev.injected);
 
         // note that for caps, we completely block it from ever being sent up, and just manage internally
@@ -386,7 +386,7 @@ impl CapsModKey {
         }
     }
 
-    fn handle_key_up (&self, ks:&KrustyState, _ev:&KbdEvent) {
+    fn handle_key_up (&self, ks:&KrustyState, _ev:&Event) {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
@@ -406,20 +406,20 @@ impl CapsModKey {
 
     pub fn setup_tracking (&self, k:&Krusty) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
-        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, EvCbMapKey_Action::*, ComboProc_D::*, EvCbFn_T::*};
 
         if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
             key_utils::press_release (Key::CapsLock);
         }
 
         let ks = k.ks.clone();
-        let event_proc_d = KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable);
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks,&ev); event_proc_d } ) );
-        k.iproc.kbd_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+        let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
+        let cb = EvCbFn_Inline( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks, &ev); ev_proc_ds } ) );
+        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
 
         let ks = k.ks.clone();
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks,&ev); event_proc_d } ) );
-        k.iproc.kbd_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+        let cb = EvCbFn_Inline( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks, &ev); ev_proc_ds } ) );
+        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb(KeyEventCb_KeyUp), EvCbEntry { ev_proc_ds, cb } );
     }
 
 }
@@ -436,12 +436,12 @@ impl KeyHandling for ModKey_Passthrough {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Passthrough }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         bmk.active.set();
         self.epds_continue()
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         bmk.active.clear();
         self.epds_continue()
     }
@@ -454,11 +454,11 @@ impl KeyHandling for ModKey_Blocked {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Blocked }
 
-    fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         self.epds_blocked()
     }
 
-    fn handle_key_up (&self, _:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         self.epds_blocked()
     }
 
@@ -470,7 +470,7 @@ impl KeyHandling for ModKey_Doubled {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Doubled }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         if bmk.dbl_tap.is_set() {
             bmk.active.set();
             self.epds_continue()
@@ -479,7 +479,7 @@ impl KeyHandling for ModKey_Doubled {
         }
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         if bmk.active.is_set() {
             bmk.active.clear();
             self.epds_continue()
@@ -509,7 +509,7 @@ impl KeyHandling for ModKey_Managed {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Managed }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds {
         // we should clear the consumed flag, but not if mouse btns are down, so we'll just put mouse-btns state there
         //self.consumed.clear();
         bmk.consumed .store ( ks.mouse.lbtn.down.is_set() || ks.mouse.rbtn.down.is_set() );
@@ -523,7 +523,7 @@ impl KeyHandling for ModKey_Managed {
         self.epds_blocked()
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
         // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
@@ -569,7 +569,7 @@ impl UnifModKey {
     /// NOTE re injected events .. we block our own (and ahk) injections at hook level .. so anything here is external
     // so we'll want to let them through, only updating our tracking of external state (not our physical state)
 
-    fn handle_key_down (&self, ev:KbdEvent, ks:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_down (&self, ev: Event, ks:&KrustyState) -> EvProc_Ds {
         if ev.injected {
             self.active.set();
             return self.handling.epds_continue()
@@ -589,7 +589,7 @@ impl UnifModKey {
     }
 
 
-    fn handle_key_up (&self, ev:KbdEvent, ks:&KrustyState) -> KbdEvProcDirectives {
+    fn handle_key_up (&self, ev: Event, ks:&KrustyState) -> EvProc_Ds {
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
         if ev.injected {
             self.active.clear();
@@ -608,20 +608,20 @@ impl UnifModKey {
     pub fn setup_tracking (&self, k:&Krusty) {
         // the setup for these is mostly just tracking their state flags ..
         // however, we will also disable repeats, not least to ease looking at keystreams
-        use crate::{KbdEventCbMapKeyType::*, KbdEventCallbackFnType::*};
+        use crate::{KbdEvCbMapKey_T::*, EvCbMapKey_Action::*, EvCbFn_T::*};
 
         let umk = self.clone(); let ks = k.ks.clone();
-        k.iproc.kbd_bindings .bind_kbd_event (
-            self.modkey.key(), KeyEventCb_KeyDown, KbdEventCallbackEntry {
-                event_proc_d: self.handling.epds_undetermined(),
-                cb: KbdEvCbFn_InlineCallback ( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
+        k.iproc.input_bindings .bind_kbd_event (
+            self.modkey.key(), KeyEventCb(KeyEventCb_KeyDown), EvCbEntry {
+                ev_proc_ds: self.handling.epds_undetermined(),
+                cb: EvCbFn_Inline( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
         } );
 
         let umk = self.clone(); let ks = k.ks.clone();
-        k.iproc.kbd_bindings .bind_kbd_event (
-            self.modkey.key(), KeyEventCb_KeyUp, KbdEventCallbackEntry {
-                event_proc_d: self.handling.epds_undetermined(),
-                cb: KbdEvCbFn_InlineCallback ( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
+        k.iproc.input_bindings .bind_kbd_event (
+            self.modkey.key(), KeyEventCb(KeyEventCb_KeyUp), EvCbEntry {
+                ev_proc_ds: self.handling.epds_undetermined(),
+                cb: EvCbFn_Inline( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
         } );
     }
 

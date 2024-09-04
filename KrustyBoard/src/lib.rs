@@ -21,20 +21,18 @@
 
 /// inputs .. keyboard-keys, mouse-btns/wheel/pointer, and binding/processing them
 pub mod inputs {
+    // shadowed module file that we'll re-export from here
+    mod _inputs;
+    pub use self::_inputs::*;
+
     // sub-modules in module directory
-    pub mod kbd;
     pub mod kbd_codes;
-    pub mod kbd_bindings;
-    pub mod mouse;
-    pub mod mouse_bindings;
+    pub mod bindings;
     pub mod input_proc;
 
     // and our (selective or wholesale) sub-module re-exports
-    pub use self::kbd::*;
     pub use self::kbd_codes::*;
-    pub use self::kbd_bindings::*;
-    pub use self::mouse::*;
-    pub use self::mouse_bindings::*;
+    pub use self::bindings::*;
     pub use self::input_proc::*;
 }
 

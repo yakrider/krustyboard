@@ -135,7 +135,7 @@ impl ModeState {
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_mode_key_down (&self, k:&Krusty) {
-        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
         let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
@@ -147,20 +147,20 @@ impl ModeState {
             } else { Arc::new (move || { }) }
         };
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+        let cb = EvCbFn_Inline( Arc::new ( move |_| {
             ms.down.set(); mss_cba();
-            if ms.consumed.is_set() { KbdEvProcDirectives::new (EventProp_Stop, ComboProc_Disable) }
-            else { KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable) }
+            if ms.consumed.is_set() { EvProc_Ds::new (EvProp_Stop, ComboProc_Disable) }
+            else { EvProc_Ds::new (EvProp_Continue, ComboProc_Enable) }
         } ) );
-        let event_proc_d = KbdEvProcDirectives::new (EventProp_Undetermined, ComboProc_Undetermined);
+        let ev_proc_ds = EvProc_Ds::new (EvProp_Undet, ComboProc_Undet);
         if let Some(key) = self.key() {
-            k.iproc.kbd_bindings .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
         }
     }
 
     /// Binds mode-key-up event on registered mod-key to flag update action
     fn bind_mode_key_up (&self, k:&Krusty) {
-        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
         let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
             if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
@@ -168,13 +168,13 @@ impl ModeState {
             else if ModeStates::static_combo_modes() .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
-        let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+        let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
+        let cb = EvCbFn_Inline( Arc::new ( move |_| {
             ms.down.clear(); ms.consumed.clear(); mss_cba();
-            event_proc_d
+            ev_proc_ds
         } ) );
         if let Some(key) = self.key() {
-            k.iproc.kbd_bindings .bind_kbd_event ( key, KeyEventCb_KeyUp, KbdEventCallbackEntry { event_proc_d, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyUp), EvCbEntry { ev_proc_ds, cb } );
         }
     }
 
@@ -213,10 +213,10 @@ impl LatchState {
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_latch_key_down(&self, k:&Krusty) {
-        use crate::{EventPropagationDirective::*, KbdEventCbMapKeyType::*, KbdEvCbComboProcDirective::*, KbdEventCallbackFnType::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
         let (ls, ks) = (self.clone(), k.ks.clone());
-        let event_proc_d = KbdEvProcDirectives::new (EventProp_Continue, ComboProc_Enable);
-        let cb = KbdEvCbFn_InlineCallback ( Arc::new ( move |_| {
+        let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
+        let cb = EvCbFn_Inline( Arc::new ( move |_| {
             if ks.mod_keys.caps.dbl_tap.is_set() {
                 // note that latch keys only update latch state when the keypress is on dbl_caps
                 //ls.active.toggle();
@@ -226,10 +226,10 @@ impl LatchState {
                 ls.active.store(!prior_state);
                 //mss.some_latch_state_active.store(ls.active.is_set())         // no need for this yet
             }
-            event_proc_d
+            ev_proc_ds
         } ) );
         if let Some(key) = self.key() {
-            k.iproc.kbd_bindings .bind_kbd_event ( key, KeyEventCb_KeyDown, KbdEventCallbackEntry { event_proc_d, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
         }
     }
 

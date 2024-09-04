@@ -34,7 +34,7 @@ pub type ComboStatesBits_Flags   = [bool; 0];
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 pub struct Combo {
     _private:(),
-    pub key : Key,
+    pub cmk : EvCbMapKey,
     pub modkey_states : ComboStatesBits_ModKeys,
     pub mode_states   : ComboStatesBits_Modes,
     pub latch_states  : ComboStatesBits_Latches,
@@ -46,7 +46,7 @@ pub struct Combo {
 
 
 /// represents arc wrapped condition fn to trigger combo .. should return true if combo trigger condition is satisfied
-pub type ComboCond = Arc < dyn Fn(&KrustyState) -> bool + Send + Sync + 'static >;
+pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync + 'static >;
 
 
 # [ derive () ]
@@ -100,7 +100,7 @@ pub struct CombosMap ( Arc <_CombosMap> );
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 pub struct ComboGen<'a> {
     ks    : &'a KrustyState,
-    key   : Key,                // combo-trigger key
+    cmk   : EvCbMapKey,         // combo-trigger key .. the same structure as we would have as key in input bindings map
     mks   : Vec<ModKey>,        // modifier keys that should be down to trigger this combo
     modes : Vec<ModeState_T>,   // mode-states that should match for this combo to trigger
     cond  : Option<ComboCond>,  // optional condition to check before triggering this combo
@@ -139,12 +139,12 @@ pub struct ActionGen_wAF<'a> {
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 impl Combo {
 
-    pub fn new (key:Key, mod_keys:&[ModKey], modes:&[ModeState_T]) -> Combo {
+    pub fn new (cmk:EvCbMapKey, mod_keys:&[ModKey], modes:&[ModeState_T]) -> Combo {
         let modkey_states = ModKeys::make_combo_mod_keys_states_bitmap(mod_keys);
         let mode_states   = ModeStates::make_combo_mode_states_bitmap(modes);
         let latch_states  = ModeStates::make_combo_latch_states_bitmap(modes);
         let flags_states  = Combo::make_combo_flags_states_bitmap(modes);
-        Combo { _private:(), key, modkey_states, mode_states, latch_states, flags_states }
+        Combo { _private:(), cmk, modkey_states, mode_states, latch_states, flags_states }
     }
 
 
@@ -174,7 +174,7 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub fn gen_cur_combo (key:Key, ks:&KrustyState) -> (Combo, Combo) {
+    pub fn gen_cur_combo (cmk:EvCbMapKey, ks:&KrustyState) -> (Combo, Combo) {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let modkey_states = ks.mod_keys.get_cur_mod_keys_states_bitmap();
         let mode_states   = ks.mode_states.get_cur_mode_states_bitmap();
@@ -184,9 +184,9 @@ impl Combo {
         // .. this way, we can use them freely with other states .. else we'd need whole set of combos to support when mouse btn down
         // .. (which might not be a bad idea if we decide we do want to restrict down to specific combos to enable when mouse btns held!)
 
-        //println! ("{:?}", Combo { _private:(), key, mk_state, mode_state, flags_state });
-        let combo_w_latch  = Combo { _private:(), key, modkey_states, mode_states, latch_states, flags_states };
-        let combo_no_latch = Combo { _private:(), key, modkey_states, mode_states, latch_states: ComboStatesBits_Latches::default(), flags_states };
+        //println! ("{:?}", Combo { _private:(), cmk, mk_state, mode_state, flags_state });
+        let combo_w_latch  = Combo { _private:(), cmk, modkey_states, mode_states, latch_states, flags_states };
+        let combo_no_latch = Combo { _private:(), cmk, modkey_states, mode_states, latch_states: ComboStatesBits_Latches::default(), flags_states };
         (combo_w_latch, combo_no_latch)
     }
 
@@ -216,21 +216,23 @@ impl Combo {
         mvs
     }
 
-    fn gen_combos (mks:&Vec<ModKey>, modes:&Vec<ModeState_T>, key:Key, ks:&KrustyState) -> Vec<Combo> {
+    fn gen_combos (mks:&Vec<ModKey>, modes:&Vec<ModeState_T>, cmk:EvCbMapKey, _ks:&KrustyState) -> Vec<Combo> {
         // we'll auto add any mode-key's state to its own combos
         // (note however, that since this is way downstream, these additions wont have consumption guards ..)
         // (.. which actually is what we want, as that lets us avoid consumption for mode-trigger-keys by not explicitly incl their modes)
-        let mut modes = modes.clone();
-        if let Some(ms_t) = ks.mode_states.get_mode_t(key) {
-            if !modes.contains(&ms_t) { modes.push(ms_t) }
-        }
+        //let mut modes = modes.clone();
+        //if let Some(ms_t) = ks.mode_states.get_mode_t(key) {
+        //    if !modes.contains(&ms_t) { modes.push(ms_t) }
+        //}
+        // ^^ these were moved at gen-combo creation since we started supporting mbtn/wheel combos
+
         // we'll also add mod-keys to their double-tap combos too (our dbl-tap combos only fire while the second tap isnt released yet)
         let mut mksc = mks.clone();
         let dt_pairs = ModKeys::static_dbl_tap_mk_pairs();
         dt_pairs .iter() .filter (|(mk,dmk)| mks.contains(dmk) && !mks.contains(mk)) .for_each (|(mk,_dmk)| mksc.push(*mk));
 
         // we want to expand the combos for any L/R agnostic mod-keys specified
-        Combo::fan_lr(mksc) .iter() .map(|mv| {Combo::new (key, mv, &modes)}) .collect::<Vec<Combo>>()
+        Combo::fan_lr(mksc) .iter() .map(|mv| {Combo::new (cmk, mv, &modes)}) .collect::<Vec<Combo>>()
     }
 
     fn gen_af (mks:&Vec<ModKey>, af:AF, wrap_mod_key_guard:bool, ks:&KrustyState, cgo:Option<&ComboGen>) -> AF {
@@ -278,16 +280,48 @@ impl Combo {
 
 /// Combo-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)
 impl<'a> ComboGen<'a> {
-    pub fn new (key:Key, ks:&KrustyState) -> ComboGen {
-        ComboGen { ks, key, mks:Vec::new(), modes:Vec::new(), cond:None, mod_key_no_consume:false, mode_kdn_no_consume:false }
+    /// Create ComboGen around a input-event-callback-map-key
+    pub fn new (ks:&KrustyState, cmk:EvCbMapKey) -> ComboGen {
+        ComboGen { ks, cmk, mks:Vec::new(), modes:Vec::new(), cond:None, mod_key_no_consume:false, mode_kdn_no_consume:false }
+    }
+    /// Create ComboGen around a kbd-key .. (will create a kbdkey-down combo)
+    pub fn new_w_key (ks:&KrustyState, k:Key) -> ComboGen {
+        // combos are based on full combo-map-key instead of just key .. so before we gen that
+        // .. we'll also check if its a mode-registered key and auto pre-populate modes w that key
+        let mut modes : Vec<ModeState_T> = Vec::new();
+        if let Some(ms_t) = ks.mode_states.get_mode_t(k) { modes.push(ms_t) }
+        use {EvCbMapKey_Src::*, EvCbMapKey_Action::*, KbdEvCbMapKey_T::*};
+        let cmk = EvCbMapKey::new ( key(k), KeyEventCb(KeyEventCb_KeyDown) );
+        ComboGen { ks, cmk, mks:Vec::new(), modes, cond:None, mod_key_no_consume:false, mode_kdn_no_consume:false }
+    }
+    /// Create ComboGen around a mouse button .. (will create a mouse-btn-down combo)
+    pub fn new_w_mbtn (ks:&KrustyState, mbtn:MouseButton) -> ComboGen {
+        use {EvCbMapKey_Src::*, EvCbMapKey_Action::*, MouseBtnEvent_T::*};
+        ComboGen::new (ks, EvCbMapKey::new (btn(mbtn), BtnEventCb(BtnDown)) )
+    }
+    /// Create ComboGen around mouse vertical wheel
+    pub fn new_w_whl (ks:&KrustyState) -> ComboGen {
+        use {EvCbMapKey_Src::*, EvCbMapKey_Action::*};
+        ComboGen::new (ks, EvCbMapKey::new (wheel(MouseWheel::DefaultWheel), WheelEventCb) )
+    }
+
+    /// Set the combo to be for release instead of press (for a kbd-key or mouse-btn)
+    pub fn rel (mut self) -> ComboGen<'a> {
+        use {EvCbMapKey_Src::*, EvCbMapKey_Action::*, KbdEvCbMapKey_T::*, MouseBtnEvent_T::*};
+        match self.cmk.ev_src {
+            key(..) => { self.cmk.ev_action = KeyEventCb(KeyEventCb_KeyUp) }
+            btn(..) => { self.cmk.ev_action = BtnEventCb(BtnUp) }
+            _ => { }
+        }
+        self
     }
     /// Add a modifier key to the combo
     pub fn m (mut self, mk:ModKey) -> ComboGen<'a> {
-        self.mks.push(mk); self
+        if !self.mks.contains(&mk) { self.mks.push(mk) }; self
     }
     /// Add a mode-state to the combo
     pub fn s (mut self, md: ModeState_T) -> ComboGen<'a> {
-        self.modes.push(md); self
+        if !self.modes.contains(&md) { self.modes.push(md) }; self
     }
     /// Add a condition to the combo
     pub fn c (mut self, cond:ComboCond) -> ComboGen<'a> {
@@ -295,14 +329,14 @@ impl<'a> ComboGen<'a> {
             self.cond = Some(cond);
         } else {
             let cond_old = self.cond.take().unwrap();
-            self.cond = Some ( Arc::new ( move |ks| cond_old(ks) && cond(ks) ) );
+            self.cond = Some ( Arc::new ( move |ks,e| cond_old(ks,e) && cond(ks,e) ) );
         }
         self
     }
     /// Add a fgnd-exe condition to the combo
     pub fn fg (self, exe:&str) -> ComboGen<'a> {
         let exe = exe.to_string();
-        self.c ( Arc::new ( move |_| WinEventsListener::instance().fgnd_info.read().is_ok_and(|fi| fi.exe == exe) ) )
+        self.c ( Arc::new ( move |_,_| WinEventsListener::instance().fgnd_info.read().is_ok_and(|fi| fi.exe == exe) ) )
     }
     /// Disable consuming mod-key key-downs for this combo. <br>
     /// (The default is to consume (i.e. do masking when releasing modkey) any modkey kdn on registered combos)
@@ -332,7 +366,7 @@ impl<'a> ComboGen<'a> {
 
     /// Generate one or more combos/combo-value entries from this ComboGen w/ key-dwn consuming behavior as specified during construction
     pub fn gen_combo_entries (&self, af:AF) -> Vec<(Combo, ComboValue)> {
-        Combo::gen_combos (&self.mks, &self.modes, self.key, self.ks) .into_iter() .map ( |c|
+        Combo::gen_combos (&self.mks, &self.modes, self.cmk, self.ks) .into_iter() .map ( |c|
             (c, ComboValue::new_w_cond (af.clone(), self.cond.clone()))
         ) .collect()
     }
@@ -453,7 +487,8 @@ impl CombosMap {
 
 
 
-    fn handle_caps_combo_fallback (&self, key:Key, ks:&KrustyState) {   //println!("fallback: {:?}",(key));
+
+    fn handle_caps_combo_fallback (&self, fbaf:AF, e:&Event, ks:&KrustyState) {
         // - if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
         // - as to l2 keys (for l3 fallback), we want l2-key expected behavior with other mod key combos ..
@@ -461,22 +496,23 @@ impl CombosMap {
         // - and for the mode-keys, we need most caps combos to be silent, so we'll do fallback only when qks1 active, treating that as ctrl
         // (note that for mode-keys, w/o caps down we can ofc do arbitrary mix of natural ctrl/alt/shift/win etc combos)
 
-        // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when we want other l2/mode keys to do their l2-eqv modes)
-        if let Some(msk) = ks.mode_states.qks1.key() { if msk==key { return } }
-
         // if we're in some caps mode-state, but not qks1, we do nothing for fallback (i.e. only registered combos allowed)
         let qks1_active = ks.mode_states.qks1.down.is_set();
         if ks.mode_states.some_combo_mode_active.is_set() && !qks1_active { return }
 
-        // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
-        let l2k_opt = self.l2_keys_map.borrow().get(&key).copied();
-        let fb_key = l2k_opt.unwrap_or(key);
-
-        // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
-        let qks1_ctrl = ks.mode_states.check_if_mode_key(key) || l2k_opt.is_some();
-
+        // now for all non-kbd events, we can simply use the provided default action ..
+        let (mut af, mut qks1_ctrl) = (fbaf, false);
+        // .. but for kbd events, we do special handling for mode-keys
+        if let EventDat::key_event {src_key, ..} = e.dat {
+            // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when we want other l2/mode keys to do their l2-eqv modes)
+            if let Some(msk) = ks.mode_states.qks1.key() { if msk == src_key { return } }
+            // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
+            let l2k_opt = self.l2_keys_map.borrow().get(&src_key).copied();
+            af = base_action (l2k_opt.unwrap_or(src_key));
+            // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
+            qks1_ctrl = ks.mode_states.check_if_mode_key(src_key) || l2k_opt.is_some();
+        }
         // we can now start progressively wrapping the actions with the appropriate mod-key actions
-        let mut af : AF = Arc::new (move || press_release(fb_key));
         if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { af = ks.mod_keys.lctrl.active_action(af) } //CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
         // ^^ if its l2-key or mode-key (i.e qks1-ctrl), we wont ctrl wrap just from being here (unless there's actual ctrl or qks1-down)
         if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() { af = ks.mod_keys.lshift.active_action(af) }
@@ -488,12 +524,12 @@ impl CombosMap {
     }
 
     /// applies applicable combo-actions (that meet conditional requirements if any), returns whether any combo AF was executed
-    fn process_combo_afs (&self, ks:&KrustyState, cvs:&Vec<ComboValue>) -> bool {
+    fn process_combo_afs (&self, ks:&KrustyState, cvs:&Vec<ComboValue>, e:&Event) -> bool {
         // note that we have previously ordered combo-values for each combo such that conditional ones are up top sorted by timestamp
         // this ensures determinism, and since the non-conditional af is at the end, allows us to only run that if no conditions matched
         let mut cond_matched = false;
         cvs.iter() .for_each ( |cv| {
-            if cv.cond.as_ref() .is_some_and (|c| c(ks)) || (cv.cond.is_none() && !cond_matched) {
+            if cv.cond.as_ref() .is_some_and (|c| c(ks,e)) || (cv.cond.is_none() && !cond_matched) {
                 cond_matched = true;
                 (cv.af)();
             }
@@ -501,14 +537,43 @@ impl CombosMap {
         cond_matched
     }
 
+    /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
+    /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
+    /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
+    fn gen_fallback_base_af (&self, ks:KrustyState, ev:&Event) -> AF {
+        match ev.dat {
+            EventDat::key_event {src_key, ..} => {
+                Arc::new (move || src_key.press_release() )
+            }
+            EventDat::wheel_event {src_wheel, delta} => {
+                Arc::new (move || src_wheel.scroll(delta) )
+            }
+            EventDat::btn_event {src_btn, ev_t} => { match ev_t {
+                MouseBtnEvent_T::BtnDown => {
+                    Arc::new ( move || {
+                        ks.mouse.get_btn_state(src_btn) .iter().for_each (|bs| {
+                            bs.active.set(); bs.btn.press();
+                    } ) } )
+                }
+                MouseBtnEvent_T::BtnUp   => {
+                    Arc::new ( move || {
+                        ks.mouse.get_btn_state(src_btn) .iter().for_each (|bs| {
+                            if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
+                    } ) } )
+                }
+                _ => no_action()
+            } }
+            _ => no_action()
+        }
+    }
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
-    pub fn combo_maps_handle_key_down (&self, key:Key, ks:&KrustyState) {
-        //println!("key press : {:?}", key);
+    fn combo_maps_handle_input (&self, cmk:EvCbMapKey, ev:&Event, ks:&KrustyState) {
+        //println! ("combo-map-key: {:#?}", cmk);
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (key, &ks);
+        let (combo_w_latch, combo_no_latch) = Combo::gen_cur_combo (cmk, &ks);
         let mut combo_triggered = false;
 
         //let cm = self.combos_map.borrow();
@@ -518,68 +583,93 @@ impl CombosMap {
 
         if let Some(cvs) = cm.get(&combo_w_latch) {
             // if we find a combo w latch active, that overrides everything else
-            combo_triggered = self.process_combo_afs (ks, &cvs);
+            combo_triggered = self.process_combo_afs (ks, &cvs, ev);
         } else if let Some(cvs) = cm.get(&combo_no_latch) {
             // else we're now ok w just a combo ignoring latches
-            combo_triggered = self.process_combo_afs (ks, &cvs);
+            combo_triggered = self.process_combo_afs (ks, &cvs, ev);
         }
         if combo_triggered { return }
         // ^^ if either of those actually had registered combos with either a matching conditional, or an un-conditional one, we're done
 
         // fallback processing ..
-        if ks.mod_keys.caps.dbl_tap.is_set() {     //println!("{:?}",("dbl-caps!"));
+        let fbaf = self.gen_fallback_base_af (ks.clone(), &ev);
+        if ks.mod_keys.caps.dbl_tap.is_set() {
             // no fallback for double-tap combos that arent explicitly registered
             // in the few cases (like maybe caps/ctrl-f etc) we can set them individually in code ourselves
         } else if ks.mod_keys.caps.down.is_set() {
             // unregistered caps-combos have extensive fallback setups
-            self.handle_caps_combo_fallback (key, ks);
+            self.handle_caps_combo_fallback (fbaf, ev, ks);
         } else if ks.mod_keys.ralt.dbl_tap.is_set() {
             // no fallback for double-tap combos that arent explicitly registered
         } else if ks.mod_keys.ralt.down.is_set() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
-            ks.mod_keys.lshift.active_on_key(key)()
+            ks.mod_keys.lshift.active_action(fbaf)()
         } else if ks.mod_keys.some_win_dbl() {
             // we want to check this first before just win-down, but we'll let this work naturally via passthrough (as win will be active)
-            press_release(key)
+            fbaf()
         } else if ks.mod_keys.some_win_down() { // note that win is set to only be active upon dbl-tap
             // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
-            ks.mod_keys.lwin.active_on_key(key)()       // <-- temp hopefully until we get used to double-tap ??
+            ks.mod_keys.lwin.active_action(fbaf)()       // <-- temp hopefully until we get used to double-tap ??
         } else {    //println!("passthrough: {:?}",key);
             // others, incl single/double ctrl/shift/no-mod presses should all work naturally via passthrough
-            press_release(key)
+            fbaf()
         }
     }
 
 
     /// generates the full combo-maps processing AF for use by lower level events processor (which sets the processor enabled)
     pub fn enable_combos_map_events_processor (&self, k:&Krusty) {
-        use crate::{EventPropagationDirective::*, KbdEventType::*};
+        use crate::{EvProp_D::*, KbdEvent_T::*};
+
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
         // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
-        let mut handled_keys = FxHashSet::default();
-        self.combos_map .borrow() .keys() .for_each ( |c| { handled_keys.insert(c.key); } );
+
+        // and for non-key events (mouse btn/wheel/move), we want to allow combo proc only for those that have binding entries registered
+        // (this means they would have had combo-proc directives specified in the binding anyway)
+        // (this is 'friendlier' as w/o explicitly configuring the bindings, btns etc wont auto get combo-checked to potentially unpopulated table)
+
+        let mut handled_keys : FxHashSet<Key> = FxHashSet::default();
+        self.combos_map .borrow() .keys() .for_each ( |c| {
+            if let EvCbMapKey_Src::key(key) = c.cmk.ev_src { handled_keys.insert(key); }
+        } );
         self.default_bind_keys .borrow() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
         k .ks .mode_states .mode_flag_pairs()  .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
         k .ks .mode_states .latch_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
 
         // lets prep the AF to send into kbd-events-queue
         let (ks, cm) = (k.ks.clone(), self.clone());
-        let cm_cb = Arc::new ( move |e:KbdEvent| { cm.combo_maps_handle_key_down (e.key, &ks) } );
+        let cm_cb = Arc::new ( move |cmk:EvCbMapKey, e:&Event| { cm.combo_maps_handle_input (cmk, e, &ks) } );
 
         // then we'll build the actual combo-processor AF
-        let kbd_af_queue = k.iproc.kbd_af_queue.clone();
-        let cb = Arc::new ( move |e:KbdEvent| {
-            // if its not in the combo-proc handled-keys whitelist, we should just let it pass through
-            if !handled_keys.contains(&e.key) { return EventProp_Continue }
-            // we'll also just let injected events pass through (both kdn/kup) .. note that modifier keys deal w injected events separately
-            if e.injected { return EventProp_Continue }
-            // all combo proc is only on keydown and we'll queue them up (instead of spawning out) so they dont get out of sequence
-            if e.ev_t == KbdEvent_KeyDown || e.ev_t == KbdEvent_SysKeyDown {
-                let _ = kbd_af_queue.send((cm_cb.clone(), e.clone()));
+        let input_af_queue = k.iproc.input_af_queue.clone();
+        let cb = Arc::new ( move |cmk:EvCbMapKey, had_binding:bool, e:Event| {  //println! ("combo-map-key: {:#?}", cmk);
+            match e.dat {
+                EventDat::key_event {src_key, ev_t, ..} => {
+                    // we'll let injected events pass through (both kdn/kup) .. note that modifier keys deal w injected events separately
+                    if e.injected { return EvProp_Continue }
+                    // if its not in the combo-proc handled-keys whitelist, we should just let it pass through
+                    if !handled_keys.contains(&src_key) { return EvProp_Continue }
+                    // for keys, only press events get queued for combo proc (we send key press-rels, so rel-events should be suppresed)
+                    if ! (ev_t == KbdEvent_KeyDown || ev_t == KbdEvent_SysKeyDown) { return EvProp_Stop }
+                }
+                _ => {
+                    // note that we're not rejecting injected events here, as looks like x1/x2 mbtns come as injected, (at least in MX mouse)
+                    // note also, that unlike for keys we're letting both press/rel go through separately for mouse-btns here
+                    // (.. meaning, its fully upto the bindings set up to manage sensible mix between bindings and combo entries)
+                    if !had_binding { return EvProp_Continue }
+                }
             }
-            // either way, combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup)
-            return EventProp_Stop
+            // we queue all combo actions (instead of spawning out) so they dont get out of sequence
+            // todo : warning : note that we're using the same input-af-queue ..
+            // (.. and its non-ideal as some other event might have snuck in between event and its combo proc)
+            // (.. a separate queue woudlnt fix it either, but eitherway shoudlnt be a problem if queue clearance is fast enough)
+            let cm_cb = cm_cb.clone();
+            let _ = input_af_queue .send (Box::new (move || cm_cb (cmk, &e)));
+
+            // either way, combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup etc)
+            // (not least because the actual combo proc is queued for later .. so either we bail early, or we combo-proc and stop cur event)
+            EvProp_Stop
         } );
         k.iproc.set_combo_processor(cb);
     }
