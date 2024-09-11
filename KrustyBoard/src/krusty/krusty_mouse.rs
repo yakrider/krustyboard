@@ -9,8 +9,7 @@ use derive_deref::Deref;
 
 use crate::{
     *, utils::*,
-    EvProp_D::*, ComboProc_D::*,
-    EvCbFn_T::*, EvCbMapKey_Action::*,
+    EvProp_D::*, ComboProc_D::*, EvCbFn_T::*
 };
 
 
@@ -116,18 +115,26 @@ impl Mouse {
     }
 
     pub fn setup_mouse (&self, k:&Krusty) {
-        // handling for mouse left btn, mostly to allow caps-as-ctrl behavior during drag drops and clicks
-        setup_mouse_left_btn_handling (k);
 
-        // also for mouse right btn, mostly to allow switche scrolling w right-btn-wheel combo
-        setup_mouse_right_btn_handling (k);
+        // for most mouse btn actions, we can setup standard skeleton bindings, and let actual 'business-logic' be setup via combo bindings
 
-        // also setup both Xbutton srcs to act as middle btns (used for link clicks, closing tabs etc)
-        setup_middle_btn_eqv_handling (&self.mbtn,  k);
-        setup_middle_btn_eqv_handling (&self.x1btn, k);
-        setup_middle_btn_eqv_handling (&self.x2btn, k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.lbtn.clone(), k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.lbtn.clone(), k);
 
-        // setup handling for mouse wheel .. complex overloading over alt-tab, switche, volume, brightness etc !!
+        setup_standard_mbtn_press_handling   (k.ks.mouse.mbtn.clone(), k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.mbtn.clone(), k);
+
+        setup_standard_mbtn_press_handling   (k.ks.mouse.x1btn.clone(), k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.x1btn.clone(), k);
+
+        setup_standard_mbtn_press_handling   (k.ks.mouse.x2btn.clone(), k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.x2btn.clone(), k);
+
+        setup_standard_mbtn_press_handling   (k.ks.mouse.rbtn.clone(), k);
+        //setup_standard_mbtn_release_handling (k.ks.mouse.rbtn.clone(), k);
+        setup_mouse_right_btn_release_handling (k);
+        // ^^ for the mouse right-btn, we have to make small special case for switche-injected events, so we do it separately
+
         setup_mouse_wheel_handling (k);
 
         setup_mouse_move_handling (k);
@@ -178,129 +185,66 @@ impl Mouse {
 
 
 
-
-/// sets up mouse left btn for msotly pass-through eqv w tracking, but allowing caps-as-ctrl behavior for the mouse
-pub fn setup_mouse_left_btn_handling (k:&Krusty) {
-    use crate::{MouseButton::*, MouseBtnEvent_T::*};
-
-    let ks = k.ks.clone();
-    k.iproc.input_bindings .bind_btn_event (LeftButton, BtnEventCb(BtnDown), EvCbEntry {
+/// setup standard mouse btn PRESS handling expecting the actual 'business-logic' to be setup via combo mappings
+pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
+    use crate::MouseBtnEvent_T::*;
+    k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnDown, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
-        cb : EvCbFn_Inline( Arc::new ( move |ev| {
-            ks.mouse.lbtn.down.set();
-            update_stamp_mouse_dbl_click (ev.stamp, &ks.mouse.lbtn.stamp, &ks.mouse.lbtn.dbl_tap);
-            //ks.mouse.capture_pre_drag_dat();   // to avoid unnecessary processing, we'll only do this when win down
-            ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.lbtn.btn);
+        cb : EvCbFn_Inline ( Arc::new ( move |ev| {
+            mbs.down.set();
+            update_stamp_mouse_dbl_click (ev.stamp, &mbs.stamp, &mbs.dbl_tap);
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
         } ) ),
     } );
-
-    let ks = k.ks.clone();
-    k.iproc.input_bindings .bind_btn_event (LeftButton, BtnEventCb(BtnUp), EvCbEntry {
-        ev_proc_ds: EvProc_Ds::new (EvProp_Stop, ComboProc_Disable),
-        cb : EvCbFn_Queued( Arc::new ( move |ev| { handle_mouse_left_btn_up (&ks, ev) } ) ),
-    } );
-    // ^^ note: to ensure that the order of btn dn/up is preserved, we want to make btn-up have blocking queued-callback too
-    //  .. even when its not actually doing much (and otherwise couldve been allowed to pass through)
 }
 
-
-fn handle_mouse_left_btn_up (ks:&KrustyState, _:Event) {
-    ks.mouse.lbtn.down.clear(); ks.mouse.lbtn.consumed.clear(); ks.mouse.lbtn.dbl_tap.clear();
-    ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.lbtn.btn);
-    if ks.mouse.lbtn.active.is_set(){
-        ks.mouse.lbtn.active.clear();
-        MouseButton::LeftButton.release();
-    }
-    // release ctrl (when need to) only after click btn up is sent
-    if ks.in_managed_ctrl_down_state.is_set() {
-        ks.in_managed_ctrl_down_state.clear();
-        ks.mod_keys.lctrl.ensure_inactive();
-    }
-}
-
-
-
-
-
-/// sets up mouse right btn for pass-through eqv w/ tracking, but allows right-held-scroll for switche tab-switching
-// tracking right-btn-down-state is required for switche scroll (via F16/F17/Ctrl-F18)
-// note that unlike other mouse btn/wheels, the right btn UP is set to passthrough!
-pub fn setup_mouse_right_btn_handling (k:&Krusty) {
-    use crate::{MouseButton::*, MouseBtnEvent_T::*};
-
-    let ks = k.ks.clone();
-    k.iproc.input_bindings .bind_btn_event (RightButton, BtnEventCb(BtnDown), EvCbEntry {
+/// setup standard mouse btn RELEASE handling expecting the actual 'business-logic' to be setup via combo mappings
+pub fn setup_standard_mbtn_release_handling (mbs:MouseBtnState, k:&Krusty) {
+    use crate::MouseBtnEvent_T::*;
+    k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
-        cb : EvCbFn_Inline( Arc::new ( move |ev| {
-            ks.mouse.rbtn.down.set();
-            update_stamp_mouse_dbl_click (ev.stamp, &ks.mouse.rbtn.stamp, &ks.mouse.rbtn.dbl_tap);
-            //ks.mouse.capture_pre_drag_dat(); // we dont enable drag/resize on right btn anymore
-            ks.mod_keys.proc_notice__mouse_btn_down (ks.mouse.rbtn.btn);
+        cb : EvCbFn_Inline ( Arc::new ( move |_| {
+            mbs.down.clear(); mbs.dbl_tap.clear();
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
-        } ) )
+        } ) ),
     } );
+}
 
-    /* NOTE: typically, we'd have this be queued like most others, and if we need to let the event through, we'd reinject in the stream,
+
+
+/// sets up mouse right btn RELEASE with special case for to handle switche injected rbtn-ups during rbtn-held-scroll
+pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
+    /* NOTE: this has a bit of special consideration, as mostly we'd just use queued callbacks or light inline wrapper then combo-proc ..
         .. but rbtn up has the peculiar situation where to support switche, when swi injects an rbtn-up to start rbtn-scroll mode,
-        .. we cant just reinject the rbtn-up, as switche would then reprocess it in a feedback loop since it doesnt have is own extra-info..
-        .. So instead, we handle it inline so we can let it through in that special case
-       Note ofc, that inline and queued will both remain in seq order ..
-        .. the queued just lets us do longer proc w/o spawning and still keep event-stream fast
-        .. even doing mostly inline w spawning for heavy tasks would introduce out-of-seq possibility .. so queueing is a bit better ..
-        .. though ofc for real heavy tasks, and where sequencing is less essential, we should spawn from queue proc thread too
-     */
+        .. we cant just reinject the rbtn-up in combo handling, as switche would reprocess it in a feedback loop (for lack of have switche extra-info)
+        .. So instead, we check for that in the inline binding handler itself so we can let it through in that special case
+    */
+    use crate::{MouseButton::*, MouseBtnEvent_T::*};
     let ks = k.ks.clone();
-    k.iproc.input_bindings .bind_btn_event (RightButton, BtnEventCb(BtnUp), EvCbEntry {
-        ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
-        cb : EvCbFn_Inline( Arc::new ( move |ev| handle_mouse_right_btn_up (&ks, ev) ) )
+    k.iproc.input_bindings .bind_btn_event (RightButton, BtnUp, EvCbEntry {
+        ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
+        //cb : EvCbFn_Inline ( Arc::new ( move |ev| handle_mouse_right_btn_up (&ks, ev) ) )
+        cb : EvCbFn_Inline ( Arc::new ( move |ev| {
+            ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
+            if ev.extra_info == SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO {
+                ks.in_right_btn_scroll_state.set(); ks.mouse.rbtn.active.clear();
+                // ^^ note that we let even down state be cleared above, even though its not phys rbtn-up, as switche might block the phys rbtn-up
+                // (mostly in case swi is before krusty in hook chain .. else we'd hear the phys rbtn-up before swi anyway)
+                EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
+            } else {
+                // the rest we'll treat as physical events (even if its from other unrecognized injections)
+                // .. and let combo mapping handle everything else
+                EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
+            }
+        } ) ),
     } );
 }
 
-// todo : consider if theres any reasonable way to move some of this inline btn-up handling out to combos and/or app code
 
-fn handle_mouse_right_btn_up (ks:&KrustyState, ev: Event) -> EvProc_Ds {
-    // ^^ also see comment in setup-handling section re details on why this callback is inline for switche support
-    if ev.extra_info == SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO {
-        ks.mouse.rbtn.active.clear(); ks.mouse.rbtn.down.clear();
-        // ^^ note that we'll even clear down state now, even though its not phys rbtn-up, as switche might block the phys rbtn-up
-        // (mostly in case swi is before krusty in hook chain .. else we'd hear the phys rbtn-up before swi anyway)
-        return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable);
-    }
-    // the rest we'll treat as physical events (even if its from other unrecognized injections)
-    ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
-    ks.mod_keys.proc_notice__mouse_btn_up (ks.mouse.rbtn.btn);
-
-    if ks.in_right_btn_scroll_state.is_set() {
-        ks.in_right_btn_scroll_state.clear();
-        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
-        // ^^ on switche rbtn scroll, switche sends early rbtn-rel, so when we get this real one, we might be rbtn-inactive
-        // .. so catching this separately here, lets us pass this through for switche (for cases its hook is behind us)
-        // (and lower down, we can separately check just for cases w rbtn inactive coz we/krusty suppressed it, and for those, suppress release)
-        return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable);
-    }
-    if ks.mouse.rbtn.active.is_set() && ks.mouse.rbtn.consumed.is_set() {
-        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
-        mouse_rbtn_release_masked();
-        return EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
-        // ^^ this was mostly for switche while we drove it from here .. swi now has native impl and does its own masking ..
-        // .. but we might as well leave the masking mechanism here in case we ever have other uses for rbtn and need to avoid context menu popups
-    }
-    if ks.mouse.rbtn.active.is_clear() {
-        // if we arent active, we likely never sent out a press, so no need to send a release either
-        // (note that we checked switche rbtn-scroll case above, so this specifically only blocks rel whose press we also likely blocked)
-        return EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
-    }
-    ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
-    return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable);
-    // ^^ everything else we can just let them through .. it should be mostly harmless (other than for swi that we deal w above)
-    // note: this includes cases where we thought it was inactive already .. as we dont want to risk affecting anyone behind us in hook chain
-}
-
-fn mouse_rbtn_release_masked () {
-    // now we have to release the rbtn, but to avoid triggering the context menu, we'll release it at corner of screen
+pub fn mouse_rbtn_release_masked () {
+    // for cases we have to release the rbtn, but try to avoid triggering the context menu, we'll release it at corner of screen
     //MouseButton::RightButton.release_at (0xFFFF, 0xFFFF);
     // ^^ ugh this doesnt seem to actually do that .. so we'll manually move there, release, then restore
 
@@ -324,43 +268,12 @@ fn mouse_rbtn_release_masked () {
 
 
 
-
-/// x1/x2 btns can be set up to behave like they were middle btn
-pub fn setup_middle_btn_eqv_handling (mbs:&MouseBtnState, k:&Krusty) {
-    use crate::MouseBtnEvent_T::*;
-    // note that we cant make X1/X2 btns act truly like mbtn as they dont seem to send dn/up events on press/rel ..
-    // .. instead they send nothing on btn-dn and send dn/up at btn-rel .. (or nothing if held too long!)
-    let mbsc = mbs.clone();
-    k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnEventCb(BtnDown), EvCbEntry {
-        ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
-        cb : EvCbFn_Inline( Arc::new ( move |ev| {
-            mbsc.down.set();
-            update_stamp_mouse_dbl_click (ev.stamp, &mbsc.stamp, &mbsc.dbl_tap);
-            // the rest of the behavior we'll let be defined via combo mapping
-            EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
-        } ) ),
-    } );
-    let mbsc = mbs.clone();
-    k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnEventCb(BtnUp), EvCbEntry {
-        ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
-        cb : EvCbFn_Inline( Arc::new ( move |_| {
-            mbsc.down.clear(); mbsc.consumed.clear(); mbsc.dbl_tap.clear();
-            // the rest of the behavior we'll let be defined via combo mapping
-            EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
-        } ) )
-    } );
-}
-
-
-
-
-
 /// sets up mouse wheel with various overloaded modes incl brightness, volume, tab-switching, caps-as-ctrl etc
 pub fn setup_mouse_wheel_handling (k:&Krusty) {
     let ks = k.ks.clone();
     k.iproc.input_bindings .bind_wheel_event (MouseWheel::DefaultWheel, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
-        cb : EvCbFn_Inline( Arc::new ( move |ev| {
+        cb : EvCbFn_Inline ( Arc::new ( move |ev| {
             if let EventDat::wheel_event {delta, ..} = ev.dat {
                 ks.mouse.vwheel.last_delta.store (delta, Ordering::Relaxed);
             }
@@ -393,21 +306,12 @@ fn check_wheel_spaced (ksr:&KrustyState) -> bool {
 
 
 
-#[allow(dead_code)]
-fn handle_horiz_scroll_wheel (_incr:i32) {
-    // todo we could in theory impl this overriding the native horiz scroll behavior
-}
-
-
-
-
-
 pub fn setup_mouse_move_handling (k:&Krusty) {
     use crate::EventDat::*;
     let ks = k.ks.clone();
     k.iproc.input_bindings .bind_pointer_event ( EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Continue, ComboProc_Disable),
-        cb: EvCbFn_Queued( Arc::new ( move |ev| {
+        cb: EvCbFn_Queued ( Arc::new ( move |ev| {
             if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 ks.mod_keys.lwin.consumed.set();
                 if let move_event { x_pos, y_pos, .. } = ev.dat {

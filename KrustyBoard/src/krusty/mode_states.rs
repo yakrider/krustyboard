@@ -87,7 +87,7 @@ pub struct ModeStates {
     pub some_l2_mode_active     : Flag,
     pub some_qks_mode_active    : Flag,
     pub some_combo_mode_active  : Flag,
-    //pub some_latch_state_active : Flag,
+    pub some_latch_state_active : Flag,
 
     // we'll also maintain a set of our registered mode-trigger-keys for quick lookup
     // NOTE: we're using AtomicRefCell instead of Arc-RwLock as there should be no writes are runtime (after initial setup)
@@ -135,7 +135,7 @@ impl ModeState {
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_mode_key_down (&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
@@ -147,20 +147,20 @@ impl ModeState {
             } else { Arc::new (move || { }) }
         };
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
-        let cb = EvCbFn_Inline( Arc::new ( move |_| {
+        let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             ms.down.set(); mss_cba();
             if ms.consumed.is_set() { EvProc_Ds::new (EvProp_Stop, ComboProc_Disable) }
             else { EvProc_Ds::new (EvProp_Continue, ComboProc_Enable) }
         } ) );
         let ev_proc_ds = EvProc_Ds::new (EvProp_Undet, ComboProc_Undet);
         if let Some(key) = self.key() {
-            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
         }
     }
 
     /// Binds mode-key-up event on registered mod-key to flag update action
     fn bind_mode_key_up (&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         let (ms, ks) = (self.clone(), k.ks.clone());
         let mss_cba : AF = {
             if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
@@ -169,12 +169,12 @@ impl ModeState {
             else { Arc::new ( || { } ) }
         };
         let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
-        let cb = EvCbFn_Inline( Arc::new ( move |_| {
+        let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             ms.down.clear(); ms.consumed.clear(); mss_cba();
             ev_proc_ds
         } ) );
         if let Some(key) = self.key() {
-            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyUp), EvCbEntry { ev_proc_ds, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb_KeyUp, EvCbEntry { ev_proc_ds, cb } );
         }
     }
 
@@ -213,10 +213,10 @@ impl LatchState {
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_latch_key_down(&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*, EvCbMapKey_Action::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         let (ls, ks) = (self.clone(), k.ks.clone());
         let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
-        let cb = EvCbFn_Inline( Arc::new ( move |_| {
+        let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             if ks.mod_keys.caps.dbl_tap.is_set() {
                 // note that latch keys only update latch state when the keypress is on dbl_caps
                 //ls.active.toggle();
@@ -224,12 +224,12 @@ impl LatchState {
                 let prior_state = ls.active.is_set();
                 ks.mode_states.clear_latch_state_flags();
                 ls.active.store(!prior_state);
-                //mss.some_latch_state_active.store(ls.active.is_set())         // no need for this yet
+                ks.mode_states.some_latch_state_active .store (ls.active.is_set())
             }
             ev_proc_ds
         } ) );
         if let Some(key) = self.key() {
-            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
+            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
         }
     }
 
@@ -265,7 +265,7 @@ impl ModeStates {
             some_l2_mode_active    : Flag::default(),
             some_qks_mode_active   : Flag::default(),
             some_combo_mode_active : Flag::default(),
-            //some_latch_state_active: Flag::default(),     // no need for this yet
+            some_latch_state_active: Flag::default(),
 
             mode_keys  : AtomicRefCell::new (FxHashSet::default()),
             //latch_keys : AtomicRefCell::new (FxHashSet::default()),   // dont really need to track these
@@ -282,7 +282,6 @@ impl ModeStates {
         QKS_MODES
     }
     pub fn static_combo_modes() -> [ModeState_T; size_of::<ComboStatesBits_Modes>()] {
-        //static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [sel, del, word, fast, qks, qks1, qks2, qks3, mngd_ctrl_dn];
         static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [sel, del, word, fast, qks, qks1, qks2, qks3];
         COMBO_MODES
     }
@@ -303,20 +302,6 @@ impl ModeStates {
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (latch_1, &self.latch_1), (latch_2,  &self.latch_2),  (latch_3, &self.latch_3), (latch_4, &self.latch_4),
     ] }
-
-    pub fn get_cur_mode_states_bitmap (&self) -> ComboStatesBits_Modes {
-        self.mode_flag_pairs() .map (|(_,ms)| ms.down.is_set())
-    }
-    pub fn get_cur_latch_states_bitmap (&self) -> ComboStatesBits_Latches {
-        self.latch_flag_pairs() .map (|(_,ms)| ms.active.is_set())
-    }
-
-    pub fn make_combo_mode_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Modes {
-        ModeStates::static_combo_modes() .map (|ms| modes.contains(&ms))
-    }
-    pub fn make_combo_latch_states_bitmap (modes:&[ModeState_T]) -> ComboStatesBits_Latches {
-        ModeStates::static_latch_states() .map (|ms| modes.contains(&ms))
-    }
 
 
 
@@ -382,7 +367,7 @@ impl ModeStates {
         self.some_l2_mode_active.clear();
         self.some_qks_mode_active.clear();
         self.some_combo_mode_active.clear();
-        //self.some_latch_state_active.clear();
+        self.some_latch_state_active.clear();
     }
 
     pub fn bind_mode_keys_actions (&self, k:&Krusty) {

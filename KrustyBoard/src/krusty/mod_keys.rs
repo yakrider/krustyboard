@@ -12,7 +12,7 @@ use once_cell::sync::OnceCell;
 use strum_macros::EnumIter;
 
 
-use crate::{*, ModKey::*};
+use crate::{*, ModKey::*, ComboProc_D::*, EvProp_D::*};
 
 
 
@@ -150,16 +150,6 @@ pub trait KeyHandling : Debug {
     fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
     fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
 
-    // utility fn to make prepping these binding/processing directives less cumbersome
-    fn epds (&self, epd: EvProp_D) -> EvProc_Ds {
-        EvProc_Ds::new (epd, ComboProc_D::ComboProc_Disable)
-    }
-    // note that the self is in params simply to allow calling w/o full impl specification
-    // (and w that adding 'where Self:Sized' is no longer needed .. which otherwise we'd need for trait object associated fn )
-    fn epds_blocked      (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Stop) }
-    fn epds_continue     (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Continue) }
-    fn epds_undetermined (&self) -> EvProc_Ds { self.epds (EvProp_D::EvProp_Undet) }
-
     fn is_managed (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Managed }
     fn is_doubled (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Doubled }
 
@@ -288,16 +278,6 @@ impl ModKeys {
         // ^^ note again, that for the combo bitmap construction, the l/r agnostic keys should have been expanded out and eliminated
     ] }
 
-    pub fn get_cur_mod_keys_states_bitmap(&self) -> ComboStatesBits_ModKeys {
-        self.mk_flag_pairs() .map (|(_,fgo)| fgo.filter(|fg| fg.is_set()).is_some())
-    }
-    pub fn make_combo_mod_keys_states_bitmap(mod_keys:&[ModKey]) -> ComboStatesBits_ModKeys {
-        ModKeys::static_combo_bits_mod_keys() .map (|mk| mod_keys.contains(&mk))
-    }
-
-    // mouse btns notify here in case we need to do cleanup/markings for win move/resize setups
-    //pub fn process_mbtn_down (&self, mbtn:MouseButton) { self.lwin.consumed.set(); }
-    //pub fn process_mbtn_up   (&self, mbtn:MouseButton) { }
 
     pub fn some_shift_down (&self) -> bool { self.lshift.down.is_set() || self.rshift.down.is_set() }
     pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set() }
@@ -329,16 +309,6 @@ impl ModKeys {
     pub fn proc_notice__caps_up (&self) {
         self.mod_umk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_up());
     }
-
-
-    pub fn proc_notice__mouse_btn_down (&self, _mbtn:MouseButton) {
-        //self.lwin.consumed.set();  // its just a consumed flag, doesnt matter, we can set it for any mouse btn
-        // ^^ leftover from when lwin was SMK instead of TMK_D .. we'll let it be to allow quick lwin TMK/SMK switch
-    }
-    pub fn proc_notice__mouse_btn_up (&self, _mbtn:MouseButton) {
-        // nothing to do for btn-up
-    }
-
 
     pub fn setup_tracking (&self, k:&Krusty) {
         self.caps.setup_tracking (k);
@@ -406,7 +376,7 @@ impl CapsModKey {
 
     pub fn setup_tracking (&self, k:&Krusty) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, EvCbMapKey_Action::*, ComboProc_D::*, EvCbFn_T::*};
+        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
 
         if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
             key_utils::press_release (Key::CapsLock);
@@ -414,12 +384,12 @@ impl CapsModKey {
 
         let ks = k.ks.clone();
         let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
-        let cb = EvCbFn_Inline( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks, &ev); ev_proc_ds } ) );
-        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb(KeyEventCb_KeyDown), EvCbEntry { ev_proc_ds, cb } );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks, &ev); ev_proc_ds } ) );
+        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
 
         let ks = k.ks.clone();
-        let cb = EvCbFn_Inline( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks, &ev); ev_proc_ds } ) );
-        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb(KeyEventCb_KeyUp), EvCbEntry { ev_proc_ds, cb } );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks, &ev); ev_proc_ds } ) );
+        k.iproc.input_bindings .bind_kbd_event (self.modkey.key(), KeyEventCb_KeyUp, EvCbEntry { ev_proc_ds, cb } );
     }
 
 }
@@ -438,12 +408,12 @@ impl KeyHandling for ModKey_Passthrough {
 
     fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         bmk.active.set();
-        self.epds_continue()
+        EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
     }
 
     fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         bmk.active.clear();
-        self.epds_continue()
+        EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
     }
 
 }
@@ -455,11 +425,11 @@ impl KeyHandling for ModKey_Blocked {
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Blocked }
 
     fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
-        self.epds_blocked()
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
     fn handle_key_up (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
-        self.epds_blocked()
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
 }
@@ -473,18 +443,18 @@ impl KeyHandling for ModKey_Doubled {
     fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         if bmk.dbl_tap.is_set() {
             bmk.active.set();
-            self.epds_continue()
+            EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
         } else {
-            self.epds_blocked()
+            EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
         }
     }
 
     fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
         if bmk.active.is_set() {
             bmk.active.clear();
-            self.epds_continue()
+            EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
         } else {
-            self.epds_blocked()
+            EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
         }
     }
 
@@ -520,7 +490,7 @@ impl KeyHandling for ModKey_Managed {
             let key = bmk.modkey.key();
             thread::spawn (move || key.press());
         } // else if caps was down, we just block it
-        self.epds_blocked()
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
     fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
@@ -544,7 +514,7 @@ impl KeyHandling for ModKey_Managed {
                     } ) }
                 } );
         }  }
-        self.epds_blocked()
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
 }
@@ -572,10 +542,10 @@ impl UnifModKey {
     fn handle_key_down (&self, ev: Event, ks:&KrustyState) -> EvProc_Ds {
         if ev.injected {
             self.active.set();
-            return self.handling.epds_continue()
+            return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
         }
         if self.down.is_set() {     // repeats are blocked w/o further processing
-            return self.handling.epds_blocked()
+            return EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
         }
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
 
@@ -593,7 +563,7 @@ impl UnifModKey {
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
         if ev.injected {
             self.active.clear();
-            return self.handling.epds_continue()
+            return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
         }
         // lets do some common work (physical state etc) ..
         self.down.clear(); self.dbl_tap.clear();
@@ -608,20 +578,20 @@ impl UnifModKey {
     pub fn setup_tracking (&self, k:&Krusty) {
         // the setup for these is mostly just tracking their state flags ..
         // however, we will also disable repeats, not least to ease looking at keystreams
-        use crate::{KbdEvCbMapKey_T::*, EvCbMapKey_Action::*, EvCbFn_T::*};
+        use crate::{KbdEvCbMapKey_T::*, EvCbFn_T::*};
 
         let umk = self.clone(); let ks = k.ks.clone();
         k.iproc.input_bindings .bind_kbd_event (
-            self.modkey.key(), KeyEventCb(KeyEventCb_KeyDown), EvCbEntry {
-                ev_proc_ds: self.handling.epds_undetermined(),
-                cb: EvCbFn_Inline( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
+            self.modkey.key(), KeyEventCb_KeyDown, EvCbEntry {
+                ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
         } );
 
         let umk = self.clone(); let ks = k.ks.clone();
         k.iproc.input_bindings .bind_kbd_event (
-            self.modkey.key(), KeyEventCb(KeyEventCb_KeyUp), EvCbEntry {
-                ev_proc_ds: self.handling.epds_undetermined(),
-                cb: EvCbFn_Inline( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
+            self.modkey.key(), KeyEventCb_KeyUp, EvCbEntry {
+                ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
         } );
     }
 

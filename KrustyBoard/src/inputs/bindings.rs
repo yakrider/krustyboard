@@ -9,26 +9,9 @@ use derive_deref::Deref;
 use rustc_hash::FxHashMap;
 
 use crate::*;
-use {EventDat::*, EvCbMapKey_Src::*, EvCbMapKey_Action::*};
+use {EventDat::*, EvCbMapKey::*};
 
 
-
-/// The bindings-map event-source type can be specified button, specified wheel, or the pointer
-#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum EvCbMapKey_Src {
-    key   (KbdKey),
-    btn   (MouseButton),
-    wheel (MouseWheel),
-    pointer,
-}
-
-
-/// The bindings map key contains the mouse-event-source, and the event-action upon which the callback is to trigger
-#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub struct EvCbMapKey {
-    pub ev_src    : EvCbMapKey_Src,
-    pub ev_action : EvCbMapKey_Action,
-}
 
 /// The bindings-map key type for any key can be key-down or key-up .. (no sys-key-dn/up, press-rel, hold, dbl-click etc)
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
@@ -45,26 +28,25 @@ impl From<KbdEvent_T> for KbdEvCbMapKey_T {
     }  }
 }
 
-/// The bindings map mouse-event-action can be btn-down/up/dblClick, wheel-fwd/backward, or pointer-move
+
+/// The bindings map key contains the mouse-event-source, and the event-action upon which the callback is to trigger. <br>
+/// (This is defined matching the EventDat types minus the actual event-specific data)
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum EvCbMapKey_Action {
-    KeyEventCb (KbdEvCbMapKey_T),
-    BtnEventCb (MouseBtnEvent_T),
-    WheelEventCb,
-    MouseMoveCb,
+pub enum EvCbMapKey {
+    key_event_t   (KbdKey, KbdEvCbMapKey_T),
+    btn_event_t   (MouseButton, MouseBtnEvent_T),
+    wheel_event_t (MouseWheel),
+    move_event_t
 }
 
 
 impl EvCbMapKey {
-    pub fn new (ev_src: EvCbMapKey_Src, ev_action: EvCbMapKey_Action) -> EvCbMapKey {
-        EvCbMapKey {ev_src, ev_action}
-    }
     pub fn from_event (event: &Event) -> EvCbMapKey {
         match event.dat {
-            move_event  {..}                 => EvCbMapKey::new ( pointer,          MouseMoveCb             ),
-            btn_event   {src_btn, ev_t, ..}  => EvCbMapKey::new ( btn(src_btn),     BtnEventCb(ev_t)        ),
-            wheel_event {src_wheel, ..}      => EvCbMapKey::new ( wheel(src_wheel), WheelEventCb            ),
-            key_event   {src_key, ev_t, ..}  => EvCbMapKey::new ( key(src_key),     KeyEventCb(ev_t.into()) ),
+            key_event   {src_key,   ev_t, ..}  => key_event_t   (src_key, ev_t.into()),
+            btn_event   {src_btn,   ev_t, ..}  => btn_event_t   (src_btn, ev_t),
+            wheel_event {src_wheel,       ..}  => wheel_event_t (src_wheel),
+            move_event  {..}                   => move_event_t,
     }  }
 }
 
@@ -128,42 +110,34 @@ impl Bindings {
         Bindings( AtomicRefCell::new ( FxHashMap::default() ) )
     }
 
-    pub fn bind_kbd_event (&self, src_key:Key, key_action:EvCbMapKey_Action, cb_entry:EvCbEntry) {
-        let cb_map_key = EvCbMapKey::new (key(src_key), key_action);
-        self .borrow_mut() .insert (cb_map_key, cb_entry);
+    pub fn bind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( key_event_t (key, ev_t), cbe );
     }
-    pub fn bind_btn_event (&self, src_btn:MouseButton, btn_action:EvCbMapKey_Action, cb_entry:EvCbEntry) {
-        let cb_map_key = EvCbMapKey::new (btn(src_btn), btn_action);
-        self .borrow_mut() .insert (cb_map_key, cb_entry);
+    pub fn bind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEvent_T, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( btn_event_t (mbtn, ev_t), cbe );
     }
-    pub fn bind_wheel_event (&self, src_wheel:MouseWheel, cb_entry:EvCbEntry) {
-        let cb_map_key = EvCbMapKey::new (wheel(src_wheel), WheelEventCb);
-        self .borrow_mut() .insert (cb_map_key, cb_entry);
+    pub fn bind_wheel_event (&self, whl:MouseWheel, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( wheel_event_t (whl), cbe );
     }
-    pub fn bind_pointer_event (&self, cb_entry:EvCbEntry) {
-        let cb_map_key = EvCbMapKey::new (pointer, MouseMoveCb);
-        self .borrow_mut() .insert (cb_map_key, cb_entry);
+    pub fn bind_pointer_event (&self, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( move_event_t, cbe );
     }
 
 
     // NOTE that these unbinds below are NOT intended to be called at runtime as we're using AtomicRefCell instead of RwLock
     // if we want to enable dynamic binding/unbinding at runtime, we should switch bindings back to RwLock
 
-    pub fn unbind_kbd_event (&self, src_key:Key, key_action:EvCbMapKey_Action) {
-        let cb_map_key = EvCbMapKey::new (key(src_key), key_action);
-        self .borrow_mut() .remove (&cb_map_key);
+    pub fn unbind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T) {
+        self .borrow_mut() .remove ( & key_event_t (key, ev_t) );
     }
-    pub fn unbind_btn_event (&self, src_btn:MouseButton, btn_action:EvCbMapKey_Action) {
-        let cb_map_key = EvCbMapKey::new (btn(src_btn), btn_action);
-        self .borrow_mut() .remove (&cb_map_key);
+    pub fn unbind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEvent_T) {
+        self .borrow_mut() .remove ( & btn_event_t (mbtn, ev_t) );
     }
-    pub fn unbind_wheel_event (&self, src_wheel:MouseWheel, wheel_action:EvCbMapKey_Action) {
-        let cb_map_key = EvCbMapKey::new (wheel(src_wheel), wheel_action);
-        self .borrow_mut() .remove (&cb_map_key);
+    pub fn unbind_wheel_event (&self, whl:MouseWheel) {
+        self .borrow_mut() .remove ( & wheel_event_t (whl) );
     }
     pub fn unbind_pointer_event (&self) {
-        let cb_map_key = EvCbMapKey::new (pointer, MouseMoveCb);
-        self .borrow_mut() .remove (&cb_map_key);
+        self .borrow_mut() .remove ( & move_event_t );
     }
 
 }
