@@ -84,10 +84,23 @@ pub struct MousePointer;
 
 /// For the mouse-btn, event types can be btn-down, btn-up, or double-click
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum MouseBtnEvent_T {
+pub enum MouseBtnEv_T {
     BtnDown,
     BtnUp,
-    DblClick,
+    //DblClick,
+}
+
+
+/// For the mouse-wheel, event types can be wheel-forwards or wheel-backwards
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub enum MouseWheelEv_T {
+    WheelForwards,
+    WheelBackwards,
+}
+impl From<i32> for MouseWheelEv_T {
+    fn from (delta: i32) -> Self {
+        if delta > 0 { Self::WheelForwards } else { Self::WheelBackwards }
+    }
 }
 
 
@@ -96,9 +109,9 @@ pub enum MouseBtnEvent_T {
 /// Input event can be a kbd-key-event, mouse-btn-event, mouse-wheel-event, or mouse-pointer-move (with their associated data)
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EventDat {
-    key_event   { src_key:KbdKey, ev_t: KbdEvent_T, vk_code:u32, sc_code:u32 },
-    btn_event   { src_btn:MouseButton, ev_t:MouseBtnEvent_T },
-    wheel_event { src_wheel:MouseWheel, delta:i32 },
+    key_event   { key:KbdKey, ev_t: KbdEvent_T, vk_code:u32, sc_code:u32 },
+    btn_event   { btn:MouseButton, ev_t:MouseBtnEv_T },
+    wheel_event { wheel:MouseWheel, delta:i32 },
     move_event  { x_pos:i32, y_pos:i32 },
 }
 

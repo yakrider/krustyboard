@@ -89,7 +89,7 @@ pub struct Mouse {
     pub x2btn : MouseBtnState,
 
     pub vwheel : MouseWheelState,
-    //pub hwheel : MouseWheelState,
+    pub hwheel : MouseWheelState,
 
     pub pre_drag_dat : RwLock <PreDragDat>,
 }
@@ -108,7 +108,7 @@ impl Mouse {
             x1btn  : MouseBtnState::new(X1Button),
             x2btn  : MouseBtnState::new(X2Button),
             vwheel : MouseWheelState::new(DefaultWheel),
-            //hwheel : MouseWheelState::new(HorizontalWheel),
+            hwheel : MouseWheelState::new(HorizontalWheel),
             //pointer: MousePointerState::default(),
             pre_drag_dat : RwLock::new (PreDragDat::default())
         }
@@ -135,7 +135,15 @@ impl Mouse {
         setup_mouse_right_btn_release_handling (k);
         // ^^ for the mouse right-btn, we have to make small special case for switche-injected events, so we do it separately
 
-        setup_mouse_wheel_handling (k);
+
+        // for wheels, we set up uniform binding for all wheels/directions, and let combo mapping add specific behavior
+        use MouseWheelEv_T::*;
+        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel.clone(), WheelForwards );
+        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel.clone(), WheelBackwards);
+
+        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel.clone(), WheelForwards );
+        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel.clone(), WheelBackwards);
+
 
         setup_mouse_move_handling (k);
 
@@ -187,7 +195,7 @@ impl Mouse {
 
 /// setup standard mouse btn PRESS handling expecting the actual 'business-logic' to be setup via combo mappings
 pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
-    use crate::MouseBtnEvent_T::*;
+    use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnDown, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
@@ -201,7 +209,7 @@ pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
 
 /// setup standard mouse btn RELEASE handling expecting the actual 'business-logic' to be setup via combo mappings
 pub fn setup_standard_mbtn_release_handling (mbs:MouseBtnState, k:&Krusty) {
-    use crate::MouseBtnEvent_T::*;
+    use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |_| {
@@ -221,7 +229,7 @@ pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
         .. we cant just reinject the rbtn-up in combo handling, as switche would reprocess it in a feedback loop (for lack of have switche extra-info)
         .. So instead, we check for that in the inline binding handler itself so we can let it through in that special case
     */
-    use crate::{MouseButton::*, MouseBtnEvent_T::*};
+    use crate::{MouseButton::*, MouseBtnEv_T::*};
     let ks = k.ks.clone();
     k.iproc.input_bindings .bind_btn_event (RightButton, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -268,36 +276,36 @@ pub fn mouse_rbtn_release_masked () {
 
 
 
-/// sets up mouse wheel with various overloaded modes incl brightness, volume, tab-switching, caps-as-ctrl etc
-pub fn setup_mouse_wheel_handling (k:&Krusty) {
-    let ks = k.ks.clone();
-    k.iproc.input_bindings .bind_wheel_event (MouseWheel::DefaultWheel, EvCbEntry {
+/// sets up mouse wheel (vert-wheel or horiz-wheel as specified in params)
+pub fn setup_mouse_wheel_handling (k:&Krusty, whl:MouseWheelState, ev_t:MouseWheelEv_T) {
+    // we'll define a common binding AF for wheel types and direction, and let combo mapping add specific behavior
+    k.iproc.input_bindings .bind_wheel_event (whl.wheel, ev_t, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
             if let EventDat::wheel_event {delta, ..} = ev.dat {
-                ks.mouse.vwheel.last_delta.store (delta, Ordering::Relaxed);
+                whl.last_delta.store (delta, Ordering::Relaxed);
             }
-            let combo_proc_d = if check_wheel_spaced(&ks) { ComboProc_Enable } else { ComboProc_Disable };
+            let combo_proc_d = if check_wheel_spaced(&whl) { ComboProc_Enable } else { ComboProc_Disable };
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, combo_proc_d)
         } ) ),
     } );
 }
 
-fn check_wheel_spaced (ksr:&KrustyState) -> bool {
+fn check_wheel_spaced (whl:&MouseWheelState) -> bool {
     // the invalidation setup below prevents things like caps down when wheel is still unintentionally inertially spinning to trigger zooms etc
     // however, we NO-LONGER space out the super-fast inertial smooth-scroll wheel (e.g. on my MX3 mouse) for improved usability
     // so here, we suppress wheel event if wheel-spin spacing is below guard-dur AND it has already been invalidated
-    let last_stamp = ksr.mouse.vwheel.last_stamp.get();
-    ksr.mouse.vwheel.last_stamp.capture();
-    //let gap = ksr.last_wheel_stamp.read().unwrap().duration_since(last_stamp);
+    let last_stamp = whl.last_stamp.get();
+    whl.last_stamp.capture();
+    //let gap = whl.last_stamp.read().unwrap().duration_since(last_stamp);
     //println!("{:#?}", dur.as_millis());
     const GUARD_DUR_MS: u128 = 120;  // from dur printouts above, looked like max inertial gap is 120 (min 7ms, usually <100)
-    if !ksr.mouse.vwheel.spin_invalidated.is_set() {
+    if !whl.spin_invalidated.is_set() {
         return true
     }
-    if GUARD_DUR_MS < ksr.mouse.vwheel.last_stamp.get().duration_since(last_stamp).as_millis() {
-        ksr.mouse.vwheel.spin_invalidated.clear();
+    if GUARD_DUR_MS < whl.last_stamp.get().duration_since(last_stamp).as_millis() {
+        whl.spin_invalidated.clear();
         return true
     }
     false

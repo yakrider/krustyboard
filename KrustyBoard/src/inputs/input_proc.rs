@@ -289,12 +289,12 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         WM_SYSKEYUP     => Some (KbdEvent_SysKeyUp),
         _               => None,
     } {
-        let src_key = KbdKey::from(u64::from(kb_struct.vkCode));
+        let key = KbdKey::from(u64::from(kb_struct.vkCode));
         let stamp = kb_struct.time;
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
         let extra_info = kb_struct.dwExtraInfo;
 
-        let dat = EventDat::key_event { src_key, ev_t, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
+        let dat = EventDat::key_event { key, ev_t, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
         let event = Event { stamp, injected, extra_info, dat };
 
         //println! ("{:?}", event);
@@ -351,28 +351,28 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     let extra_info = mh_struct.dwExtraInfo;
 
     //println!("{:#?}", mh_struct);
-    use {EventDat::*, MouseBtnEvent_T::*};
+    use {EventDat::*, MouseBtnEv_T::*};
     if let Some (dat) = match w_param.0 as u32 {
-        WM_LBUTTONDOWN => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnDown } ),
-        WM_RBUTTONDOWN => Some ( btn_event { src_btn: RightButton,  ev_t: BtnDown } ),
-        WM_MBUTTONDOWN => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnDown } ),
+        WM_LBUTTONDOWN => Some ( btn_event { btn: LeftButton,   ev_t: BtnDown } ),
+        WM_RBUTTONDOWN => Some ( btn_event { btn: RightButton,  ev_t: BtnDown } ),
+        WM_MBUTTONDOWN => Some ( btn_event { btn: MiddleButton, ev_t: BtnDown } ),
         WM_XBUTTONDOWN => {
             match hi_word(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnDown } ),
-                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnDown } ),
+                XBUTTON1 => Some ( btn_event { btn: X1Button, ev_t: BtnDown } ),
+                XBUTTON2 => Some ( btn_event { btn: X2Button, ev_t: BtnDown } ),
                 _ => None,
         } }
-        WM_LBUTTONUP => Some ( btn_event { src_btn: LeftButton,   ev_t: BtnUp } ),
-        WM_RBUTTONUP => Some ( btn_event { src_btn: RightButton,  ev_t: BtnUp } ),
-        WM_MBUTTONUP => Some ( btn_event { src_btn: MiddleButton, ev_t: BtnUp } ),
+        WM_LBUTTONUP => Some ( btn_event { btn: LeftButton,   ev_t: BtnUp } ),
+        WM_RBUTTONUP => Some ( btn_event { btn: RightButton,  ev_t: BtnUp } ),
+        WM_MBUTTONUP => Some ( btn_event { btn: MiddleButton, ev_t: BtnUp } ),
         WM_XBUTTONUP => {
             match hi_word(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { src_btn: X1Button, ev_t: BtnUp } ),
-                XBUTTON2 => Some ( btn_event { src_btn: X2Button, ev_t: BtnUp } ),
+                XBUTTON1 => Some ( btn_event { btn: X1Button, ev_t: BtnUp } ),
+                XBUTTON2 => Some ( btn_event { btn: X2Button, ev_t: BtnUp } ),
                 _ => None,
         } }
-        WM_MOUSEWHEEL  => Some ( wheel_event { src_wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
-        WM_MOUSEHWHEEL => Some ( wheel_event { src_wheel: HorizontalWheel, delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
+        WM_MOUSEWHEEL  => Some ( wheel_event { wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
+        WM_MOUSEHWHEEL => Some ( wheel_event { wheel: HorizontalWheel, delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
 
         WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,

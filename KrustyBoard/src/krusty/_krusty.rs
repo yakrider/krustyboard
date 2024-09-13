@@ -293,7 +293,7 @@ impl KrustyState {
     pub fn cg_mbtn (&self, mbtn:MouseButton) -> ComboGen { ComboGen::new_w_mbtn (&self, mbtn) }
 
     /// Utlity function to create a new Combo-generator (**mouse-wheel** combo-specification) <br>
-    pub fn cg_mwhl (&self) -> ComboGen { ComboGen::new_w_whl (&self) }
+    pub fn cg_whl (&self) -> ComboGen { ComboGen::new_w_whl (&self) }
 
     /// Utility function to create a new Combo-Action generator (key-action output type) <br>
     /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
@@ -301,7 +301,7 @@ impl KrustyState {
 
     /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
     /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
-    pub fn ag_af (&self, af:AF) -> ActionGen_wAF { ActionGen_wAF::new (af, &self) }
+    pub fn ag_af (&self, af:AF) -> ActionGen { ActionGen::new (af, &self) }
 
 }
 
@@ -380,11 +380,13 @@ pub mod key_utils {
 
 
     pub fn no_action           () -> AF { Arc::new ( || {} ) }
-    pub fn base_action  (key:Key) -> AF { action_p1 (press_release,        key) }
-    pub fn fast_action  (key:Key) -> AF { action_p1 (double_press_release, key) }
-    pub fn ctrl_action  (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
-    pub fn shift_action (key:Key) -> AF { action_p1 (shift_press_release,  key) }
-    pub fn win_action   (key:Key) -> AF { action_p1 (win_press_release,    key) }
+    pub fn press_action   (key:Key) -> AF { action_p1 (press,                key) }
+    pub fn release_action (key:Key) -> AF { action_p1 (release,              key) }
+    pub fn base_action    (key:Key) -> AF { action_p1 (press_release,        key) }
+    pub fn fast_action    (key:Key) -> AF { action_p1 (double_press_release, key) }
+    pub fn ctrl_action    (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
+    pub fn shift_action   (key:Key) -> AF { action_p1 (shift_press_release,  key) }
+    pub fn win_action     (key:Key) -> AF { action_p1 (win_press_release,    key) }
 
 
     /// wraps a given AF into an action that is spawned in its own thread

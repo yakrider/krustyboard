@@ -33,20 +33,18 @@ impl From<KbdEvent_T> for KbdEvCbMapKey_T {
 /// (This is defined matching the EventDat types minus the actual event-specific data)
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EvCbMapKey {
-    key_event_t   (KbdKey, KbdEvCbMapKey_T),
-    btn_event_t   (MouseButton, MouseBtnEvent_T),
-    wheel_event_t (MouseWheel),
-    move_event_t
+    key_ev_t   ( KbdKey,       KbdEvCbMapKey_T   ),
+    btn_ev_t   ( MouseButton,  MouseBtnEv_T   ),
+    wheel_ev_t ( MouseWheel,   MouseWheelEv_T ),
+    move_ev_t
 }
-
-
 impl EvCbMapKey {
     pub fn from_event (event: &Event) -> EvCbMapKey {
         match event.dat {
-            key_event   {src_key,   ev_t, ..}  => key_event_t   (src_key, ev_t.into()),
-            btn_event   {src_btn,   ev_t, ..}  => btn_event_t   (src_btn, ev_t),
-            wheel_event {src_wheel,       ..}  => wheel_event_t (src_wheel),
-            move_event  {..}                   => move_event_t,
+            key_event   {key,   ev_t, ..}  => key_ev_t   (key, ev_t.into()),
+            btn_event   {btn,   ev_t, ..}  => btn_ev_t   (btn, ev_t),
+            wheel_event {wheel, delta   }  => wheel_ev_t (wheel, delta.into()),
+            move_event  {..}               => move_ev_t,
     }  }
 }
 
@@ -111,16 +109,16 @@ impl Bindings {
     }
 
     pub fn bind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( key_event_t (key, ev_t), cbe );
+        self .borrow_mut() .insert ( key_ev_t (key, ev_t), cbe );
     }
-    pub fn bind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEvent_T, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( btn_event_t (mbtn, ev_t), cbe );
+    pub fn bind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEv_T, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( btn_ev_t (mbtn, ev_t), cbe );
     }
-    pub fn bind_wheel_event (&self, whl:MouseWheel, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( wheel_event_t (whl), cbe );
+    pub fn bind_wheel_event (&self, whl:MouseWheel, ev_t:MouseWheelEv_T, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( wheel_ev_t (whl, ev_t), cbe );
     }
     pub fn bind_pointer_event (&self, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( move_event_t, cbe );
+        self .borrow_mut() .insert ( move_ev_t, cbe );
     }
 
 
@@ -128,16 +126,16 @@ impl Bindings {
     // if we want to enable dynamic binding/unbinding at runtime, we should switch bindings back to RwLock
 
     pub fn unbind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T) {
-        self .borrow_mut() .remove ( & key_event_t (key, ev_t) );
+        self .borrow_mut() .remove ( & key_ev_t (key, ev_t) );
     }
-    pub fn unbind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEvent_T) {
-        self .borrow_mut() .remove ( & btn_event_t (mbtn, ev_t) );
+    pub fn unbind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEv_T) {
+        self .borrow_mut() .remove ( & btn_ev_t (mbtn, ev_t) );
     }
-    pub fn unbind_wheel_event (&self, whl:MouseWheel) {
-        self .borrow_mut() .remove ( & wheel_event_t (whl) );
+    pub fn unbind_wheel_event (&self, whl:MouseWheel, ev_t:MouseWheelEv_T) {
+        self .borrow_mut() .remove ( & wheel_ev_t (whl, ev_t) );
     }
     pub fn unbind_pointer_event (&self) {
-        self .borrow_mut() .remove ( & move_event_t );
+        self .borrow_mut() .remove ( & move_ev_t );
     }
 
 }
