@@ -21,6 +21,8 @@ pub struct Edge {xy:i32, tl:i32, br: i32}
 # [ derive (Debug, Default, Copy, Clone) ]
 pub struct RectEdges { left:Edge, top:Edge, right:Edge, bottom:Edge }
 
+# [ derive (Debug, Copy, Clone) ]
+pub enum RectEdgeSide { Left, Top, Right, Bottom }
 
 
 # [ derive (Debug, Default, Clone) ]
@@ -33,10 +35,11 @@ impl RectEdgeLists {
 
 
 # [ derive (Debug, Default, Clone) ]
-pub struct PreDragDat {
+pub struct WinSnapDat {
     pub hwnd        : Hwnd,
     pub rect        : RECT,
     pub padding     : RECT,
+    pub workarea    : RECT,
     pub snap_thresh : u32,
     pub pointer     : POINT,
     pub edge_lists  : RectEdgeLists,
@@ -51,18 +54,15 @@ impl Bounds {
     // The low and high bounds must be ordered for use in edge unification ..
     // .. however, the use of this is expected to be minimal as the ordering should be specified that way during creation
     // We'll leave it here both as a reminder, and for future reference/use
-    fn ordered(&self) -> Bounds {
+    pub fn ordered (&self) -> Bounds {
         if self.low <= self.high { *self } else { Bounds {low:self.high, high:self.low} }
     }
 }
 
 
-
-
-
 fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
     // we'll have saved mouse loc on win-lclick, so we can reference that on where/how to move the window
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap();    // we'll hold this read-lock until this fn exits .. should be ok
+    let pdd = ks.win_snap_dat.read().unwrap();    // we'll hold this read-lock until this fn exits .. should be ok
     let (dx, dy) = ( x - pdd.pointer.x, y - pdd.pointer.y );
     let dest =  RECT {
         left   : pdd.rect.left   + dx,
@@ -78,8 +78,7 @@ fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
     // we want to keep width/height same so we'll snap to left (and top) in preference to right (and bottom) if both of are available
     let dx_snap = if dr_snap.left != 0 { dr_snap.left} else { dr_snap.right };
     let dy_snap = if dr_snap.top  != 0 { dr_snap.top } else { dr_snap.bottom};
-    win_move_to (
-        pdd.hwnd,
+    win_move_to ( pdd.hwnd,
         dest.left + dx_snap,
         dest.top  + dy_snap,
         dest.right  - dest.left,
@@ -87,8 +86,9 @@ fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
     );
     if ks.mode_states.qks1.down.is_set() { win_grp_move_mirrored (dx + dx_snap, dy + dy_snap, ks) }
 }
+
 fn win_grp_move_mirrored (dx:i32, dy:i32, ks:&KrustyState) {     //println!("{:?}",(dx,dy));
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap();
+    let pdd = ks.win_snap_dat.read().unwrap();
     pdd.grp_rects .iter() .for_each (|(&hwnd,&rect)| {
         win_move_to (
             hwnd,
@@ -109,7 +109,7 @@ pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:&KrustyState) {
 
 
 fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap();    // will hold read-lock until this fn exits
+    let pdd = ks.win_snap_dat.read().unwrap();    // will hold read-lock until this fn exits
     let dest = RECT {
         left   : pdd.rect.left,
         top    : pdd.rect.top,
@@ -137,9 +137,39 @@ pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
 
 
 pub fn handle_pointer_action_cancel (ks:&KrustyState) {
-    let pdd = ks.mouse.pre_drag_dat.read().unwrap();
+    let pdd = ks.win_snap_dat.read().unwrap();
     win_move_to (
         pdd.hwnd,  pdd.rect.left,  pdd.rect.top,
+        pdd.rect.right - pdd.rect.left,
+        pdd.rect.bottom - pdd.rect.top
+    );
+}
+
+
+
+pub fn snap_closest_edge_side (ks:&KrustyState, side_t:RectEdgeSide) {
+    // first we'll have a helper fn to correctly snap to the nearest edge in the desired direction within workarea-bounds
+    fn snap (win_edge:&Edge, pad_v:i32, edges:&Vec<Edge>, bound:i32, snap_fwd:bool) -> i32 {
+        let edges = edges .iter() .filter ( |e| {
+            e.xy == bound
+            || (snap_fwd && e.xy > win_edge.xy && e.xy < bound)
+            || (!snap_fwd && e.xy < win_edge.xy && e.xy > bound)
+        } ) .map (|&e| e) .collect::<Vec<Edge>>();
+        snap_to_edgelist_nearest__delta (win_edge, pad_v, &edges, i32::MAX as u32)
+    }
+    ks.capture_fgnd_win_snap_dat();
+    let pdd = ks.win_snap_dat.read().unwrap();
+    let wres = rect_to_edges(&pdd.rect);
+    use RectEdgeSide::*;
+    let (dx,dy) = match side_t {
+        Top    => (0, snap (&wres.top,     pdd.padding.top,    &pdd.edge_lists.horiz, pdd.workarea.top,    false)   ),
+        Bottom => (0, snap (&wres.bottom, -pdd.padding.bottom, &pdd.edge_lists.horiz, pdd.workarea.bottom, true )   ),
+        Left   => (   snap (&wres.left,    pdd.padding.left,   &pdd.edge_lists.vert,  pdd.workarea.left,   false), 0),
+        Right  => (   snap (&wres.right,  -pdd.padding.right,  &pdd.edge_lists.vert,  pdd.workarea.right,  true ), 0),
+    };
+    win_move_to ( pdd.hwnd,
+        pdd.rect.left + dx,
+        pdd.rect.top + dy,
         pdd.rect.right - pdd.rect.left,
         pdd.rect.bottom - pdd.rect.top
     );
@@ -150,16 +180,11 @@ pub fn handle_pointer_action_cancel (ks:&KrustyState) {
 
 
 
-
-pub fn capture_pre_drag_dat (ks:&KrustyState) -> PreDragDat {    //println!("{:?}",("pre-cache"));
+pub fn capture_win_snap_dat (ks:&KrustyState, hwnd:Hwnd) -> WinSnapDat {    //println!("{:?}",("pre-cache"));
     // first set thread dpi-aware in case we're on some spawned thread not inited w that (unlike our event queues)
     win_set_thread_dpi_aware();
 
-    // now lets get the data on the window we want to drag/resize
-    let point = MousePointer::pos();
-    let hwnd = win_get_hwnd_from_point(point);
-
-    // we also want all the windows to calc the current set of visible edge sections to enable snapping on
+    // we'll want all the windows to calc the current set of visible edge sections to enable snapping on
     // NOTE that we want as little time gap between these and self-hwnd query to avoid picking up moving mouse translation in these
     let mut rects = gather_win_rects(hwnd);
     // and now lets get more data for this hwnd
@@ -173,17 +198,19 @@ pub fn capture_pre_drag_dat (ks:&KrustyState) -> PreDragDat {    //println!("{:?
         grp_hwnds .into_iter() .filter_map ( |gh| rects.iter() .find (|(h,_)| gh == *h) .copied() ) .collect()
     } else { FxHashMap::default() };
 
-    // plus lets get the full workable area of the screen to add screen edges to edge-list
+    // plus lets get the full workable area of the screen (which gets used to add screen edges to edge-list, and filter those beyond)
     // we'll also use that as cheap dpi-awareness mechanism by setting snap threshold to 2% of screen height
-    let wa = win_get_work_area();
-    let snap_thresh = ((wa.bottom - wa.top) / 50) as u32;
-    rects.push ((Hwnd(0), wa));
+    let workarea = win_get_work_area();
+    let snap_thresh = ((workarea.bottom - workarea.top) / 50) as u32;
     // lets finally calculate our visible edges lists
-    let edge_lists = rects_to_viz_edgelists (&mut rects);
+    let edge_lists = rects_to_viz_edgelists (&mut rects, &workarea);
+
+    let pointer = MousePointer::pos();
 
     // and thats it, can store it all away so the actual pointer-move callbacks can be fast!
-    PreDragDat { hwnd, rect, padding, snap_thresh, pointer: point, edge_lists, grp_rects }
+    WinSnapDat { hwnd, rect, padding, workarea, snap_thresh, pointer, edge_lists, grp_rects }
 }
+
 
 
 
@@ -213,17 +240,23 @@ fn _rects_to_edgelists (rects: &Vec <RECT>) -> RectEdgeLists {
     RectEdgeLists { vert: reduce_edge_sects(&mut rels.vert), horiz: reduce_edge_sects(&mut rels.horiz)}
 }
 
-fn rects_to_viz_edgelists (rects: &mut Vec<(Hwnd, RECT)>) -> RectEdgeLists {
+fn rects_to_viz_edgelists (rects: &mut Vec<(Hwnd, RECT)>, wa: &RECT) -> RectEdgeLists {
     // Note: we rely on the assumption here that the rects are straight from win-enum call and are therefore in z-order
+    // we're also going to filter out any edge beyond our work-area, as we want to limit snapping to those bounds
     let mut viz_edge_lists = RectEdgeLists::new_w_capacity (2 * rects.len()); // x2 because we make horiz/vert vecs each w 2 edges per rect
     for i in 0 .. rects.len() {
         let rect_edges = rect_to_edges(&rects[i].1);
         rects[..i] .sort_unstable_by_key ( |(_,r)| -1 * (r.right - r.left) * (r.bottom - r.top) );
         // ^^ sorting by decreasing area ensures we check the largest windows first (as they're most likely to occlude)
         // .. (and since we only need to re-sort the section before our cur iteration location, it's safe to do in place!)
-        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (vec![rect_edges.left, rect_edges.right ], true,  &rects[..i]) );
-        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (vec![rect_edges.top,  rect_edges.bottom], false, &rects[..i]) );
+        let edges_v = vec![rect_edges.left, rect_edges.right] .into_iter() .filter (|e| e.xy >= wa.left && e.xy <= wa.right) .collect();
+        let edges_h = vec![rect_edges.top, rect_edges.bottom] .into_iter() .filter (|e| e.xy >= wa.top && e.xy <= wa.bottom) .collect();
+        viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (edges_v, true,  &rects[..i]) );
+        viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (edges_h, false, &rects[..i]) );
     };
+    let wa_edges = rect_to_edges(&wa);
+    viz_edge_lists.vert.push(wa_edges.left); viz_edge_lists.vert.push(wa_edges.right);
+    viz_edge_lists.horiz.push(wa_edges.top); viz_edge_lists.horiz.push(wa_edges.bottom);
     viz_edge_lists.vert  = reduce_edge_sects (&mut viz_edge_lists.vert);
     viz_edge_lists.horiz = reduce_edge_sects (&mut viz_edge_lists.horiz);
     //println!("\n{:#?}\n",(&viz_edge_lists.vert));
@@ -293,7 +326,7 @@ fn reduce_edge_sects(edges: &mut Vec<Edge>) -> Vec<Edge> {
     reduced
 }
 
-fn snap_to_edge_rect_delta (wr:&RECT, pdd:&PreDragDat) -> RECT {
+fn snap_to_edge_rect_delta (wr:&RECT, pdd:&WinSnapDat) -> RECT {
     let wres = rect_to_edges(wr);
     // we'll calc delta to snap for each window edge (similar to how the pad rect is specified)
     let d_left   = snap_to_edgelist_nearest__delta (&wres.left,    pdd.padding.left,   &pdd.edge_lists.vert,  pdd.snap_thresh);

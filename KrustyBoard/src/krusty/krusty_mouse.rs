@@ -2,7 +2,7 @@
 
 use std::{
     thread, time,
-    sync::{Arc, RwLock},
+    sync::Arc,
     sync::atomic::{AtomicI32, Ordering},
 };
 use derive_deref::Deref;
@@ -91,7 +91,7 @@ pub struct Mouse {
     pub vwheel : MouseWheelState,
     pub hwheel : MouseWheelState,
 
-    pub pre_drag_dat : RwLock <PreDragDat>,
+    //pub pointer : MousePointer,
 }
 
 
@@ -110,7 +110,6 @@ impl Mouse {
             vwheel : MouseWheelState::new(DefaultWheel),
             hwheel : MouseWheelState::new(HorizontalWheel),
             //pointer: MousePointerState::default(),
-            pre_drag_dat : RwLock::new (PreDragDat::default())
         }
     }
 
@@ -161,21 +160,13 @@ impl Mouse {
         }
     }
 
-    pub fn capture_pre_drag_dat (&self, ks:&KrustyState) {
-        let ks = ks.clone();
-        //thread::spawn ( move || {     // .. nuh uh
-        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
-        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
-        *ks.mouse.pre_drag_dat.write().unwrap() = capture_pre_drag_dat(&ks);
-    }
-
     // mod-keys notify here in case we need to do some cleanup/flagging etc
     pub fn proc_notice__modkey_down (&self, mk:ModKey, ks:&KrustyState) {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
             // we'll want to capture/refresh pre-drag-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            self.capture_pre_drag_dat(ks);
+            ks.capture_pointer_win_snap_dat();
         }
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:&KrustyState) {
@@ -183,7 +174,7 @@ impl Mouse {
         self.vwheel.spin_invalidated.set();
         if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
             // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
-            self.capture_pre_drag_dat(ks);
+            ks.capture_pointer_win_snap_dat();
         }
     }
 

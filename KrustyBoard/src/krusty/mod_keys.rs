@@ -298,7 +298,7 @@ impl ModKeys {
             umk.modkey.key().release(); umk.down.clear(); umk.active.clear(); umk.dbl_tap.clear();
         });
         // clear capslock too
-        if self.caps.modkey.key().is_toggled() { key_utils::press_release(self.caps.modkey.key().into()) }
+        if self.caps.modkey.key().is_toggled() { self.caps.modkey.key().press_release() }
         self.caps.down.clear();
     }
 
@@ -379,7 +379,7 @@ impl CapsModKey {
         use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
 
         if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
-            key_utils::press_release (Key::CapsLock);
+            Key::CapsLock.press_release();
         }
 
         let ks = k.ks.clone();

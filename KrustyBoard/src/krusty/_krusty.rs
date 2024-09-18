@@ -208,6 +208,9 @@ pub struct _KrustyState {
     // note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
     pub in_right_btn_scroll_state: Flag,
 
+    // we'll hold a win_snap_dat snapshot to support moving/dragging/resizing windows and window-groups
+    pub win_snap_dat : RwLock <WinSnapDat>,
+
 }
 
 
@@ -254,6 +257,8 @@ impl KrustyState {
                 in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
+
+                win_snap_dat : RwLock::new (WinSnapDat::default()),
             } ) )
         ) .clone()
     }
@@ -278,11 +283,21 @@ impl KrustyState {
         // lets send a delayed Esc for any context menus etc that show up
         thread::spawn ( || {
             thread::sleep (Duration::from_millis(100));
-            key_utils::press_release(Key::Escape);
+            Key::Escape.press_release();
             thread::sleep (Duration::from_millis(100));
             InputProcessor::instance().re_set_hooks();
         } );
 
+    }
+
+    pub fn capture_fgnd_win_snap_dat (&self) {
+        //thread::spawn ( move || {     // .. nuh uh
+        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
+        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_fgnd());
+    }
+    pub fn capture_pointer_win_snap_dat (&self) {
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer());
     }
 
     /// Utlity function to create a new Combo-generator (**kbd-key** combo-specification) <br>
@@ -293,11 +308,18 @@ impl KrustyState {
     pub fn cg_mbtn (&self, mbtn:MouseButton) -> ComboGen { ComboGen::new_w_mbtn (&self, mbtn) }
 
     /// Utlity function to create a new Combo-generator (**mouse-wheel** combo-specification) <br>
-    pub fn cg_whl (&self) -> ComboGen { ComboGen::new_w_whl (&self) }
+    pub fn cg_whl (&self) -> ComboGen { ComboGen::new_w_whl (&self, MouseWheel::DefaultWheel) }
+
+    /// Utlity function to create a new Combo-generator (**horiz-mouse-wheel** combo-specification) <br>
+    pub fn cg_hwhl (&self) -> ComboGen { ComboGen::new_w_whl (&self, MouseWheel::HorizontalWheel) }
 
     /// Utility function to create a new Combo-Action generator (key-action output type) <br>
     /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
     pub fn ag (&self, key:Key) -> ActionGen_wKey { ActionGen_wKey::new (key, &self) }
+
+    /// Utility function to create a new Combo-Action generator (mouse-button-action output type) <br>
+    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
+    pub fn agm (&self, btn:MouseButton) -> ActionGen_wMouseBtn { ActionGen_wMouseBtn::new (btn, &self) }
 
     /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
     /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
@@ -345,10 +367,6 @@ pub mod key_utils {
     use std::time::Duration;
     use crate::*;
 
-    pub fn press                (key:Key) { key.press(); }
-    pub fn release              (key:Key) { key.release(); }
-    pub fn press_release        (key:Key) { key.press(); key.release(); }
-    pub fn double_press_release (key:Key) { press_release(key); press_release(key); }
 
     pub fn wrapped_press_release (wrap_key:Key, key_action:fn(Key), key:Key) {
         wrap_key.press(); key_action(key); wrap_key.release();
@@ -358,9 +376,11 @@ pub mod key_utils {
     }
 
     // note that these are ONLY to be used when the mod key states DONT need to be tracked (e.g. in composition fallback actions)
-    pub fn ctrl_press_release  (key:Key) { wrapped_press_release (Key::Ctrl,  press_release, key) }
-    pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, press_release, key) }
-    pub fn win_press_release   (key:Key) { wrapped_press_release (Key::LWin,  press_release, key) }
+    pub fn ctrl_press_release  (key:Key) { wrapped_press_release (Key::Ctrl,  Key::press_release, key) }
+    pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, Key::press_release, key) }
+    pub fn win_press_release   (key:Key) { wrapped_press_release (Key::LWin,  Key::press_release, key) }
+
+    pub fn double_press_release (key:Key) { key.press_release(); key.press_release(); }
 
 
     // we'll define some arc-wrapper util fns, but really, its just as easy to just use arcs directly
@@ -379,10 +399,11 @@ pub mod key_utils {
     { Arc::new ( move || f(t) ) }
 
 
-    pub fn no_action           () -> AF { Arc::new ( || {} ) }
-    pub fn press_action   (key:Key) -> AF { action_p1 (press,                key) }
-    pub fn release_action (key:Key) -> AF { action_p1 (release,              key) }
-    pub fn base_action    (key:Key) -> AF { action_p1 (press_release,        key) }
+    pub fn no_action      (       ) -> AF { Arc::new ( || {} ) }
+    pub fn press_action   (key:Key) -> AF { action_p1 (Key::press,           key) }
+    pub fn release_action (key:Key) -> AF { action_p1 (Key::release,         key) }
+    pub fn base_action    (key:Key) -> AF { action_p1 (Key::press_release,   key) }
+
     pub fn fast_action    (key:Key) -> AF { action_p1 (double_press_release, key) }
     pub fn ctrl_action    (key:Key) -> AF { action_p1 (ctrl_press_release,   key) }
     pub fn shift_action   (key:Key) -> AF { action_p1 (shift_press_release,  key) }

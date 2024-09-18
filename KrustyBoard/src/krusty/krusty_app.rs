@@ -36,9 +36,8 @@ pub mod special_keys_setups {
 pub fn setup_krusty_board () {
 
     // lets import various windows/process/brightness util fns
-    use crate::utils::{windows_utils::*, process_utils::*, /*brightness_utils::*,*/};
+    use crate::utils::*;
     use WinGroups_E::*;
-    // note .. module krusty_mouse has a minimal wrapper around brightness control, we'll use that instead
 
 
     let k = Krusty::new();
@@ -194,13 +193,14 @@ pub fn setup_krusty_board () {
         k.ks.mode_states.register_latch_key (key, ms_t)
     }
 
-    // setup keys for layer-2 caret nav sel/del/fast modes
+    // setup keys for layer-2 caret nav msE/msD/msF/msR modes (typically sel/del/word/fast nav)
     // note: registering as mode key will set all w/caps actions silent in fallback, along w layering mod-key combos w qks1
     // however, they are all in fallback only, so that behavior will be overridden by any combo registrations!
-    register_mode_key ( &k, E, sel  );
-    register_mode_key ( &k, D, del  );
-    register_mode_key ( &k, F, word );
-    register_mode_key ( &k, R, fast );
+    // (and just for reminder, in theory we can assign other keys to these modes here w/o much issue)
+    register_mode_key ( &k, E, msE );
+    register_mode_key ( &k, D, msD );
+    register_mode_key ( &k, F, msF );
+    register_mode_key ( &k, R, msR );
 
     // setup the key for l4 shortcuts mode, but the mechanism is same as for the caret modes
     register_mode_key ( &k, Q,        qks  );
@@ -293,18 +293,18 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).rel().wcma().wcsa(), k.ks.ag_af ( gen_af_lbtn_release (k.ks.clone()) ) );
 
     // for win-lbtn and win-caps-lbtn, we want to capture pre-drag-dat for window drag/resizing
-    fn gen_af_pre_drag_dat (ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.mouse.capture_pre_drag_dat(&ks);
-        win_set_fgnd (ks.mouse.pre_drag_dat.read().unwrap().hwnd);
+    fn gen_af_win_snap_dat (ks:KrustyState) -> AF { Arc::new ( move || {
+        ks.capture_pointer_win_snap_dat();
+        win_set_fgnd (ks.win_snap_dat.read().unwrap().hwnd);
     } ) }
-    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin),          k.ks.ag_af (gen_af_pre_drag_dat (k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin).m(caps),  k.ks.ag_af (gen_af_pre_drag_dat (k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin),          k.ks.ag_af (gen_af_win_snap_dat (k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin).m(caps),  k.ks.ag_af (gen_af_win_snap_dat (k.ks.clone()) ) );
 
     // for win-groups .. caps-lwin-qks<?> + lbtn click on window is add that window to the corresponding group
     // (plus we should also capture dat to allow group window move)
     fn gen_af_win_grp_add (s:ModeState_T, ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.mouse.capture_pre_drag_dat(&ks);
-        win_set_fgnd (ks.mouse.pre_drag_dat.read().unwrap().hwnd);
+        ks.capture_pointer_win_snap_dat();
+        win_set_fgnd (ks.win_snap_dat.read().unwrap().hwnd);
         ks.win_groups.add_to_group (s.try_into().unwrap(), win_get_hwnd_from_pointer())
     } ) }
     k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin).m(caps).s(qks1),  k.ks.ag_af (gen_af_win_grp_add (qks1, k.ks.clone()) ) );
@@ -313,9 +313,24 @@ pub fn setup_krusty_board () {
 
     // for win-lbtn-dbl we want to maximize the pointed window
     fn gen_af_win_tog_max (ks:KrustyState) -> AF { Arc::new ( move || {
-        win_toggle_maximize (ks.mouse.pre_drag_dat.read().unwrap().hwnd)
+        win_toggle_maximize (ks.win_snap_dat.read().unwrap().hwnd)
     } ) }
     k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(lwin) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())), k.ks.ag_af (gen_af_win_tog_max(k.ks.clone())) );
+
+
+    // for caps-alt-click, we want to bring up find usages window in IDE (for word under cursor)
+    // --> (directly assigned in IDE to ctrl-alt-click, which caps-alt-click sends via default fallback)
+
+    // for caps-d-click in IDE, we want to bring up diff for cur file (via ctrl-alt-shift-d configd there)
+    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(caps).s(msD),  k.ks.ag(D).m(ctrl).m(alt).m(shift) );
+
+    // for caps-f-click, we want to bring up find/usages-window in IDE (via alt-u configd in IDE)
+    fn gen_af_ide_find_usages (ks:KrustyState) -> AF {
+        let af = ks.ag(U).m(alt).gen_af();
+        // before we call the hotkey, we'll send a click to have the caret set up at the right place
+        Arc::new ( move || { LeftButton.press_release(); af(); } )
+    }
+    k.cm .add_combo ( k.ks.cg_mbtn(LeftButton).m(caps).s(msF),  k.ks.ag_af(gen_af_ide_find_usages(k.ks.clone())) );
 
 
 
@@ -411,7 +426,7 @@ pub fn setup_krusty_board () {
         let action_key = if fwd_not_bkwd {VolumeUp} else {VolumeDown};
         //ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
         ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
-            Arc::new ( move || { (0 .. n_skips) .into_iter() .for_each (|_| { press_release(action_key) }) } )
+            Arc::new ( move || { (0 .. n_skips) .into_iter() .for_each (|_| { action_key.press_release() }) } )
     ) ) }
     // ^^ gives an AF with specified number of skips
 
@@ -439,9 +454,10 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg_whl().bkwd().m(lalt) .c(alt_tab_fgnd()),  k.ks.ag(Tab).mkg_nw() );
     k.cm .add_combo (k.ks.cg_whl().frwd().m(lalt) .c(alt_tab_fgnd()),  k.ks.ag(Tab).m(shift).mkg_nw() );
 
-    // for SWITCHE, we want to translate to up/down (BUT the fallback by default sends wheel events, so not necessary)
-    //k.cm .add_combo ( k.ks.cg_whl().bkwd().m(lalt) .c(switche_fgnd()),  k.ks.ag(ExtDown).mkg_nw() );
-    //k.cm .add_combo ( k.ks.cg_whl().frwd().m(lalt) .c(switche_fgnd()),  k.ks.ag(ExtUp  ).mkg_nw() );
+    // for SWITCHE, we want to translate to up/down
+    // (In theory, the fallback by default sends wheel events, so not exactly necessary, but having a combo is faster than fallback proc)
+    k.cm .add_combo ( k.ks.cg_whl().bkwd().m(lalt) .c(switche_fgnd()),  k.ks.ag(ExtDown).mkg_nw() );
+    k.cm .add_combo ( k.ks.cg_whl().frwd().m(lalt) .c(switche_fgnd()),  k.ks.ag(ExtUp  ).mkg_nw() );
 
     // specifically during SWITCHE RBTN-SCROLL though, we want to track the state, just so the release can be handled properly
     fn gen_af_rbtn_scroll_state (ks:KrustyState) -> AF { Arc::new ( move || {
@@ -464,18 +480,26 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg_whl().bkwd().m(lwin).m(caps),  k.ks.ag(ExtRight).m(win).m(ctrl) );
     k.cm .add_combo (k.ks.cg_whl().frwd().m(lwin).m(caps),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
     // and we'll do the same for caps-alt-D + wheel .. (similar to that with j/k further down)
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt).s(del),  k.ks.ag(ExtRight).m(win).m(ctrl) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).m(lalt).s(del),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt).s(msD),  k.ks.ag(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).m(lalt).s(msD),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
 
     // caps-scroll as ctrl-up/dn, mostly for IDE CTRL-TAB as it doesnt seem to take wheel-scroll in ctrl-tab
     k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),  k.ks.ag(ExtDown).m(ctrl) );
     k.cm .add_combo (k.ks.cg_whl().frwd().m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),  k.ks.ag(ExtUp  ).m(ctrl) );
 
-    // and general use caps-alt-wheel as UP-DOWN nav .. but if it is win-alt-tab, we want tab/shift-tab
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt) .c(alt_tab_not_fgnd()),  k.ks.ag(ExtDown) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).m(lalt) .c(alt_tab_not_fgnd()),  k.ks.ag(ExtUp) );
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt) .c(alt_tab_fgnd()),      k.ks.ag(Tab).mkg_nw() );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).m(lalt) .c(alt_tab_fgnd()),      k.ks.ag(Tab).m(shift).mkg_nw() );
+    // and general use caps-alt-wheel as UP-DOWN nav .. but if it is alt-tab, we want tab/shift-tab, and for swtiche, left/right arrows
+    fn gen_af_caps_alt_wheel (dir_is_down:bool, ks:&KrustyState) -> AF {
+        let af_switche_fgnd = if dir_is_down { ks.ag(ExtRight).m(alt).gen_af() } else { ks.ag(ExtLeft).m(alt).gen_af() };
+        let af_alt_tab_fgnd = if dir_is_down { ks.ag(Tab).mkg_nw().gen_af()    } else { ks.ag(Tab).m(shift).mkg_nw().gen_af() };
+        let af_normal       = if dir_is_down { ks.ag(ExtDown).gen_af()         } else { ks.ag(ExtUp).gen_af() };
+        Arc::new ( move || {
+            if check_switche_fgnd() { af_switche_fgnd() }
+            else if check_alt_tab_fgnd() { af_alt_tab_fgnd() }
+            else { af_normal() }
+        } )
+    }
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt),  k.ks.ag_af(gen_af_caps_alt_wheel(true,  &k.ks)) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).m(lalt),  k.ks.ag_af(gen_af_caps_alt_wheel(false, &k.ks)) );
 
     // and on caps-alt-shift wheel, we'll do LEFT-RIGHT nav (reminscent of h-wheel, useful to nav sidebar trees etc)
     k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).m(lalt).m(lshift),  k.ks.ag(ExtRight) );
@@ -486,15 +510,15 @@ pub fn setup_krusty_board () {
 
     // caps-e wheel for TAB_NAV .. .. e as that is row 'above', and tabs are usually up above .. oh well
     // we'll setup generally for browser, explorer etc (ctrl-tab, ctrl-shift-tab)
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(sel) .c(intellij_not_fgnd()),  k.ks.ag(Tab).m(ctrl) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(sel) .c(intellij_not_fgnd()),  k.ks.ag(Tab).m(ctrl).m(shift) );
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag(Tab).m(ctrl) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag(Tab).m(ctrl).m(shift) );
     // we'll setup special case for IDE (alt-ctrl-left/right)
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(sel) .c(intellij_fgnd()),  k.ks.ag(ExtRight).m(alt).m(ctrl) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(sel) .c(intellij_fgnd()),  k.ks.ag(ExtLeft ).m(alt).m(ctrl) );
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag(ExtRight).m(alt).m(ctrl) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag(ExtLeft ).m(alt).m(ctrl) );
 
     // caps-f (i.e word mode) wheel, we'll set as nav through SEARCH (F3, Shift-F3)
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(word),  k.ks.ag(F3) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(word),  k.ks.ag(F3).m(shift) );
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(msF),  k.ks.ag(F3) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(msF),  k.ks.ag(F3).m(shift) );
 
     // caps-d wheel to directly SWITCH WINDOWS through cur window-list snapshot (via switche)
     // (and instead of adding a flag in krusty itself to track while we're in this mode, we'll just define a flag here)
@@ -509,8 +533,8 @@ pub fn setup_krusty_board () {
             nav_af();
         } )
     }
-    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(del), k.ks.ag_af (gen_af_snap_switch (true, ssf.clone(), &k.ks)) );
-    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(del), k.ks.ag_af (gen_af_snap_switch (false, ssf.clone(), &k.ks)) );
+    k.cm .add_combo (k.ks.cg_whl().bkwd().m(caps).s(msD), k.ks.ag_af (gen_af_snap_switch (true, ssf.clone(), &k.ks)) );
+    k.cm .add_combo (k.ks.cg_whl().frwd().m(caps).s(msD), k.ks.ag_af (gen_af_snap_switch (false, ssf.clone(), &k.ks)) );
 
     // and once we're done w the switching, we clear the flag so we'll check and refresh the snap next time we start
     k.cm .add_combo ( k.ks.cg(D).rel()         .c(c_flag(ssf.clone())),     k.ks.ag_af (af_clear_flag(ssf.clone())) );
@@ -530,10 +554,34 @@ pub fn setup_krusty_board () {
                      k.ks.ag_af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
 
 
+    // with caps-win-[e/d/f/r]-combos, we'll add window move functionality, similar to what was done w kbd l2 keys
+    k.cm .add_combo ( k.ks.cg_whl().bkwd().m(caps).m(win).s(msD),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel (-10,   0)) ) );
+    k.cm .add_combo ( k.ks.cg_whl().frwd().m(caps).m(win).s(msD),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel ( 10,   0)) ) );
+    k.cm .add_combo ( k.ks.cg_whl().bkwd().m(caps).m(win).s(msE),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel (  0,  10)) ) );
+    k.cm .add_combo ( k.ks.cg_whl().frwd().m(caps).m(win).s(msE),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel (  0, -10)) ) );
+
+    // and for the 'f/r' mode-state variants, we'll have the move snap to the closest edge in the specified side
+    fn gen_af_snap (ks:&KrustyState, side_t:RectEdgeSide) -> AF {
+        let ks = ks.clone();
+        Arc::new ( move || snap_closest_edge_side (&ks, side_t))
+    }
+    k.cm .add_combo ( k.ks.cg_whl().bkwd().m(caps).m(win).s(msF), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Right ) ) );
+    k.cm .add_combo ( k.ks.cg_whl().frwd().m(caps).m(win).s(msF), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Left  ) ) );
+    k.cm .add_combo ( k.ks.cg_whl().bkwd().m(caps).m(win).s(msR), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Bottom) ) );
+    k.cm .add_combo ( k.ks.cg_whl().frwd().m(caps).m(win).s(msR), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Top   ) ) );
+
 
 
     /// MOUSE HORIZONTAL WHEEL combo setups
-    // (none so far .. and simple horiz-scroll will work as is w passthrough)
+    // (note that simple horiz-scroll will work as is w passthrough)
+
+    // we'll add window-move combos for horiz movement, parallel to that for vertical wheel
+    //k.cm .add_combo ( k.ks.cg_hwhl().bkwd().m(caps).m(win).s(msD),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel(-10,0)) ) );
+    //k.cm .add_combo ( k.ks.cg_hwhl().frwd().m(caps).m(win).s(msD),  k.ks.ag_af ( Arc::new (|| win_fgnd_move_rel( 10,0)) ) );
+    // incl the versions with win-snaps
+    //k.cm .add_combo ( k.ks.cg_hwhl().bkwd().m(caps).m(win).s(msF), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Left ) ) );
+    //k.cm .add_combo ( k.ks.cg_hwhl().frwd().m(caps).m(win).s(msF), k.ks.ag_af ( gen_af_snap (&k.ks, RectEdgeSide::Right) ) );
+    // ^^^ disabled since we'd rather just use E/R and D/F for vert/horiz translations all on regular-wheel instead
 
 
 
@@ -550,7 +598,7 @@ pub fn setup_krusty_board () {
                 // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
             }
             ks.in_ctrl_tab_scroll_state.set();
-            press_release(Tab)
+            Tab.press_release()
         }
     } );
     // lets add support for this in caps tab ..
@@ -570,7 +618,7 @@ pub fn setup_krusty_board () {
         Arc::new ( move || {
             if ks.in_ctrl_tab_scroll_state.is_set() {
                 // space defocuses from list so we wont actually switch tabs when we release the ctrl
-                press_release(Space);
+                Space.press_release();
                 // now release the ctrl so the transient-switcher popup goes away
                 ks.mod_keys.lctrl.ensure_inactive();
                 ks.in_managed_ctrl_down_state.clear(); ks.in_ctrl_tab_scroll_state.clear();
@@ -837,7 +885,7 @@ pub fn setup_krusty_board () {
             } else {
                 //press_release(key)
                 // ^^ hmm, instead of win-esc being just esc otherwise, we'll use it as window minimize-and-back
-                if key==Escape { win_fgnd_min_and_back() } else { press_release(key) }
+                if key==Escape { win_fgnd_min_and_back() } else { key.press_release() }
             }
         } )
     }
@@ -885,31 +933,31 @@ pub fn setup_krusty_board () {
     fn setup_l2_key (k:&Krusty, key:Key, l2k:Key, dk:Key, wafg:AFG, fafg:AFG, del_via_sel:bool) {
         // register nav actions for normal-nav, word-nav, and fast-nav modes
         k.cm .add_combo ( k.ks.cg(key).m(caps),          k.ks.ag_af (base_action(l2k)) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(word),  k.ks.ag_af (wafg(l2k)) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(fast),  k.ks.ag_af (fafg(l2k)) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msF),  k.ks.ag_af (wafg(l2k)) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msR),  k.ks.ag_af (fafg(l2k)) );
 
         // selection actions are via wrapping those with shift press-release
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(sel),          k.ks.ag_af (base_action(l2k)) .m(shift) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(sel).s(word),  k.ks.ag_af (wafg(l2k)) .m(shift) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(sel).s(fast),  k.ks.ag_af (fafg(l2k)) .m(shift) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msE),          k.ks.ag_af (base_action(l2k)) .m(shift) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msE).s(msF),  k.ks.ag_af (wafg(l2k)) .m(shift) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msE).s(msR),  k.ks.ag_af (fafg(l2k)) .m(shift) );
 
         fn del_sel_afg (del_key:Key, nav_af:AF) -> AF {
             Arc::new ( move || {
                 LShift.press(); nav_af(); LShift.release(); // dont need guards for shift here.. this is deep into multi key L2
                 //press_release(del_key);
-                thread::spawn ( move || { thread::sleep (Duration::from_millis(20)); press_release(del_key); } );
+                thread::spawn ( move || { thread::sleep (Duration::from_millis(20)); del_key.press_release(); } );
         } ) }
 
         let (da, dwa, dfa) = if del_via_sel {
-            // if deleting via sel, we wrap the del-sel action around the normal nav actions
+            // if deleting via selection, we wrap the del-sel action around the normal nav actions
             ( del_sel_afg(dk,base_action(l2k)), del_sel_afg(dk,wafg(l2k)), del_sel_afg(dk,fafg(l2k)) )
         } else { // and for direct deletes, we perform the nav-eqv action but with the specified delete-key
             ( base_action(dk), ctrl_action(dk), fast_action(dk) )
         };
 
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(del),          k.ks.ag_af(da ) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(del).s(word),  k.ks.ag_af(dwa) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).s(del).s(fast),  k.ks.ag_af(dfa) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msD),          k.ks.ag_af(da ) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msD).s(msF),  k.ks.ag_af(dwa) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).s(msD).s(msR),  k.ks.ag_af(dfa) );
 
 
         // also add these to l2-key registry that gets used to enable their l2+ fallbacks in combo processor
@@ -934,75 +982,75 @@ pub fn setup_krusty_board () {
     setup_l2_key ( &k,  U,     ExtPgUp,   Backspace,   base_action,   base_action,   true  );
     setup_l2_key ( &k,  M,     ExtPgDn,   ExtDelete,   base_action,   base_action,   true  );
 
-    // and finally to round out the l2 keys, we'll add some non-nav word actions on Space key in (sel/del/word)-modes
+    // and finally to round out the l2 keys, we'll add some non-nav word actions on Space key in (msE/msD/msF)-modes
     // (word selection action is a composite of move-to-word-end then select-to-word-beginning)
     let wsa = Arc::new ( || {
-        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); LCtrl.release();
+        LCtrl.press(); ExtRight.press_release(); shift_press_release(ExtLeft); LCtrl.release();
     } );
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(sel ),           k.ks.ag_af (wsa.clone()) );
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),           k.ks.ag_af (wsa.clone()) );
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(sel ).s(word),   k.ks.ag_af (wsa        ) );
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msE),           k.ks.ag_af (wsa.clone()) );
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msF),           k.ks.ag_af (wsa.clone()) );
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msE).s(msF),   k.ks.ag_af (wsa        ) );
 
     // (word del action is a composite of move-to-word-end then del-to-word-beginning)
     let _wda = Arc::new ( || {
-        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); LCtrl.release();
-        press_release(Backspace);
+        LCtrl.press(); ExtRight.press_release(); shift_press_release(ExtLeft); LCtrl.release();
+        Backspace.press_release();
     } );
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(del),  k.ks.ag_af(wda) );
-    // ^^ naah, not worthwhile as can do eqv from just caps-<del>-<arrows> .. instead we'll use that for easy 'Enter'
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msD),  k.ks.ag_af(wda) );
+    // ^^ naah, not worthwhile as can do eqv from just caps-<msD>-<arrows> .. instead we'll use that for easy 'Enter'
 
     // ralt-space for Enter was causing thumb pain, so other quick substitutes for that
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word),        k.ks.ag(Enter) );    // caps-f-space --> Enter
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(word).s(del), k.ks.ag(Enter) );    // caps-d-f-space --> Enter
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(del),         k.ks.ag(Enter) );    // caps-d-space --> Enter
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msF),        k.ks.ag(Enter) );    // caps-f-space --> Enter
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msF).s(msD), k.ks.ag(Enter) );    // caps-d-f-space --> Enter
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msD),        k.ks.ag(Enter) );    // caps-d-space --> Enter
 
     // (line sel/del actions are composite of move-to-line-end then sel/del-to-line-start)
-    let lsa = Arc::new ( || { press_release(ExtEnd); shift_press_release(ExtHome); } );
-    let lda = Arc::new ( || { press_release(ExtEnd); shift_press_release(ExtHome); press_release(Backspace); } );
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(sel ),           k.ks.ag_af (lsa.clone()) );
-    //k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(word),           k.ks.ag_af (lsa.clone()) );
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(sel ).s(word),   k.ks.ag_af (lsa) );
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(del),            k.ks.ag_af (lda) );
+    let lsa = Arc::new ( || { ExtEnd.press_release(); shift_press_release(ExtHome); } );
+    let lda = Arc::new ( || { ExtEnd.press_release(); shift_press_release(ExtHome); Backspace.press_release(); } );
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(msE),           k.ks.ag_af (lsa.clone()) );
+    //k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(msF),           k.ks.ag_af (lsa.clone()) );
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(msE).s(msF),   k.ks.ag_af (lsa) );
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).m(lalt).s(msD),          k.ks.ag_af (lda) );
 
 
     // this one is here simply coz its Space and on l2, but we'll use it for Find-Window trigger in IDE via Ctrl-Enter
-    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(fast),  k.ks.ag(Enter).m(ctrl) );        // caps-r-space --> Ctrl-Enter
+    k.cm .add_combo ( k.ks.cg(Space).m(caps).s(msR),  k.ks.ag(Enter).m(ctrl) );        // caps-r-space --> Ctrl-Enter
     // similar for this one on expanding things in find window (for txt-search)
-    k.cm .add_combo ( k.ks.cg(Slash).m(caps).s(word),  k.ks.ag(Equal).m(ctrl).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Slash).m(caps).s(msF),  k.ks.ag(Equal).m(ctrl).m(alt).m(shift) );
     // (but since we've essentially associated Enter with E, we've added combos e.g. caps-q-e for ctrl-Enter etc there too)
 
 
     // we can further add cut/copy/paste actions on the sel mode (caps-e-x/c/v)
     fn gen_wxcv_af (key:Key) -> AF { Arc::new ( move || {
-        LCtrl.press(); press_release(ExtRight); shift_press_release(ExtLeft); press_release(key); LCtrl.release();
+        LCtrl.press(); ExtRight.press_release(); shift_press_release(ExtLeft); key.press_release(); LCtrl.release();
     } ) }
-    k.cm .add_combo ( k.ks.cg(X).m(caps).s(sel),  k.ks.ag_af (gen_wxcv_af(X)) );
-    k.cm .add_combo ( k.ks.cg(C).m(caps).s(sel),  k.ks.ag_af (gen_wxcv_af(C)) );
-    k.cm .add_combo ( k.ks.cg(V).m(caps).s(sel),  k.ks.ag_af (gen_wxcv_af(V)) );
+    k.cm .add_combo ( k.ks.cg(X).m(caps).s(msE),  k.ks.ag_af (gen_wxcv_af(X)) );
+    k.cm .add_combo ( k.ks.cg(C).m(caps).s(msE),  k.ks.ag_af (gen_wxcv_af(C)) );
+    k.cm .add_combo ( k.ks.cg(V).m(caps).s(msE),  k.ks.ag_af (gen_wxcv_af(V)) );
 
     // specifically for IDE, we can also add move actions to nearest matching brace/paren (via ctrl-shift-p)
-    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(word),  k.ks.ag(P).m(ctrl).m(shift) );
-    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(word),  k.ks.ag(P).m(ctrl).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(msF),  k.ks.ag(P).m(ctrl).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(msF),  k.ks.ag(P).m(ctrl).m(shift) );
     // unfortunately, there's no support in IDE for selecting while doing so !! :(
 
     // and lets support nav to code-block (brace) start/end (and the IDE supports select for this, but its much less useful, oh well)
     //k.cm .add_combo ( k.ks.cg(LBracket).m(lalt),       k.ks.ag(LBracket).m(alt) );
     //k.cm .add_combo ( k.ks.cg(RBracket).m(lalt),       k.ks.ag(RBracket).m(alt) );
-    k.cm .add_combo ( k.ks.cg(LBracket).m(caps).s(sel),  k.ks.ag(LBracket).m(alt).m(shift) );
-    k.cm .add_combo ( k.ks.cg(RBracket).m(caps).s(sel),  k.ks.ag(RBracket).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(LBracket).m(caps).s(msE),  k.ks.ag(LBracket).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(RBracket).m(caps).s(msE),  k.ks.ag(RBracket).m(alt).m(shift) );
 
     // also lets add an even quicker way to switch column mode during IDE edit (using the cur alt-shift-c)
-    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(sel),  k.ks.ag(C).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg(Numrow_9).m(caps).s(msE),  k.ks.ag(C).m(alt).m(shift) );
     // and this to help escape out of multi-col (not toggle mode, just collapse to single caret while in that mode)
-    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(sel),  k.ks.ag(Escape) );
+    k.cm .add_combo ( k.ks.cg(Numrow_0).m(caps).s(msE),  k.ks.ag(Escape) );
 
 
     // we'll use caps-alt-D with j/k or left/right arrows to switch between desktops
-    k.cm .add_combo ( k.ks.cg(D)       .m(caps).m(lalt).s(del),  k.ks.ag_af(no_action()) );
-    k.cm .add_combo ( k.ks.cg(J)       .m(caps).m(lalt).s(del),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
-    k.cm .add_combo ( k.ks.cg(K)       .m(caps).m(lalt).s(del),  k.ks.ag(ExtRight).m(win).m(ctrl) );
-    k.cm .add_combo ( k.ks.cg(ExtLeft ).m(caps).m(lalt).s(del),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
-    k.cm .add_combo ( k.ks.cg(ExtRight).m(caps).m(lalt).s(del),  k.ks.ag(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo ( k.ks.cg(D)       .m(caps).m(lalt).s(msD),  k.ks.ag_af(no_action()) );
+    k.cm .add_combo ( k.ks.cg(J)       .m(caps).m(lalt).s(msD),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo ( k.ks.cg(K)       .m(caps).m(lalt).s(msD),  k.ks.ag(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo ( k.ks.cg(ExtLeft ).m(caps).m(lalt).s(msD),  k.ks.ag(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo ( k.ks.cg(ExtRight).m(caps).m(lalt).s(msD),  k.ks.ag(ExtRight).m(win).m(ctrl) );
 
 
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
@@ -1036,24 +1084,29 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg(C).m(caps_dbl).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_titlebar())) );
     k.cm .add_combo ( k.ks.cg(T).m(caps_dbl).m(lwin),  k.ks.ag_af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
 
-    fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32) {
-        // we'll setup caps-win combos for regular move/stretch etc, and caps-ctrl or caps-qks1 combos for fineer control
+    fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32, side_t:RectEdgeSide) {
+        // we'll setup caps-win combos for regular move/stretch etc
+        k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin),           k.ks.ag_af (Arc::new (move || wmfn (dx*m, dy*m) )) );
+        // .. and caps-win-ctrl or caps-win-qks1 combos for finer control
         k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin).m(lctrl),  k.ks.ag_af (Arc::new (move || wmfn (dx, dy) )) );
         k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin).s(qks1),   k.ks.ag_af (Arc::new (move || wmfn (dx, dy) )) );
-        k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin),           k.ks.ag_af (Arc::new (move || wmfn (dx*m, dy*m) )) );
+        // .. and w caps-win-d/f for closest snap for the respective edges
+        k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin).s(msF),   k.ks.ag_af (gen_af_snap(&k.ks, side_t)) );
+        k.cm .add_combo ( k.ks.cg(key).m(caps).m(lwin).s(msD),    k.ks.ag_af (gen_af_snap(&k.ks, side_t)) );
+
     }
     // caps-win-[j,k,i,comma] should  move window [left, right, top, bottom] respectively
-    setup_win_move_key (&k, J,     win_fgnd_move_rel, -1,  0, 20 );
-    setup_win_move_key (&k, K,     win_fgnd_move_rel,  1,  0, 20 );
-    setup_win_move_key (&k, I,     win_fgnd_move_rel,  0, -1, 20 );
-    setup_win_move_key (&k, Comma, win_fgnd_move_rel,  0,  1, 20 );
+    setup_win_move_key (&k, J,     win_fgnd_move_rel, -1,  0, 20, RectEdgeSide::Left  );
+    setup_win_move_key (&k, K,     win_fgnd_move_rel,  1,  0, 20, RectEdgeSide::Right );
+    setup_win_move_key (&k, I,     win_fgnd_move_rel,  0, -1, 20, RectEdgeSide::Top   );
+    setup_win_move_key (&k, Comma, win_fgnd_move_rel,  0,  1, 20, RectEdgeSide::Bottom);
 
     // caps-win-[h,semicolon,period,o] should stretch window [narrower, wider, shorter, taller] respectively
-    setup_win_move_key ( &k, H,         win_fgnd_stretch,  -1,   0, 20 );
-    setup_win_move_key ( &k, O,         win_fgnd_stretch,   0,  -1, 20 );
-    setup_win_move_key ( &k, Period,    win_fgnd_stretch,   0,   1, 20 );
-    //setup_win_move_key ( &k, L,       win_fgnd_stretch,   1,   0, 20 );     // win-L is reserved by windows for lock
-    setup_win_move_key ( &k, Semicolon, win_fgnd_stretch,   1,   0, 20 );
+    setup_win_move_key ( &k, H,         win_fgnd_stretch,  -1,   0, 20, RectEdgeSide::Left  );
+    setup_win_move_key ( &k, O,         win_fgnd_stretch,   0,  -1, 20, RectEdgeSide::Top   );
+    setup_win_move_key ( &k, Period,    win_fgnd_stretch,   0,   1, 20, RectEdgeSide::Bottom);
+    //setup_win_move_key ( &k, L,       win_fgnd_stretch,   1,   0, 20, RectEdgeSide::Right );     // win-L is reserved by windows for lock
+    setup_win_move_key ( &k, Semicolon, win_fgnd_stretch,   1,   0, 20, RectEdgeSide::Right );
 
 
 
@@ -1236,7 +1289,7 @@ pub fn setup_krusty_board () {
             thread::spawn ( move || {
                 MousePointer::move_abs(x,y);
                 LeftButton.press_release();
-                s(20); press_release(key); s(5); press_release(key);
+                s(20); key.press_release(); s(5); key.press_release();
             } );
         } )
     }

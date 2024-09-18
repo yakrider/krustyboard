@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![ allow (non_camel_case_types, non_snake_case) ]
 
 use std::sync::Arc;
 use std::mem::size_of;
@@ -18,7 +18,7 @@ use crate::{*, ModeState_T::*};
 /// All the supported mode-states, (whether they have triggering keys registered or not)
 pub enum ModeState_T {
     no_ms,  // no_ms can be useful to fill in fns set to take somethhing .. its ignored at its not in bitmaps
-    sel, del, word, fast,
+    msE, msD, msF, msR,     // typically for l2 [sel, del, word, fast] actions respectively
     qks, qks1, qks2, qks3,
     latch_1, latch_2, latch_3, latch_4,
     //mngd_ctrl_dn, //ctrl_tab_scrl, //right_ms_scrl,
@@ -69,10 +69,10 @@ pub struct LatchState ( Arc <_LatchState> );
 pub struct ModeStates {
     _private : (),
     // l2 mode states
-    pub sel  : ModeState,
-    pub del  : ModeState,
-    pub word : ModeState,
-    pub fast : ModeState,
+    pub msE : ModeState,
+    pub msD : ModeState,
+    pub msF : ModeState,
+    pub msR : ModeState,
     // quick-keys mode states
     pub qks  : ModeState,
     pub qks1 : ModeState,
@@ -250,14 +250,14 @@ impl LatchState {
 impl ModeStates {
 
     pub fn new() -> ModeStates {
-        let (_sel, _del,  _word, _fast) = (ModeState::new(sel), ModeState::new(del), ModeState::new(word), ModeState::new(fast));
+        let (_msE, _msD, _msF, _msR) = (ModeState::new(msE), ModeState::new(msD), ModeState::new(msF), ModeState::new(msR));
         let (_qks, _qks1, _qks2, _qks3) = (ModeState::new(qks), ModeState::new(qks1), ModeState::new(qks2), ModeState::new(qks3));
         let (_l1, _l2, _l3, _l4) = (LatchState::new(latch_1), LatchState::new(latch_2), LatchState::new(latch_3), LatchState::new(latch_4));
 
         ModeStates {
             _private : (),
 
-            sel: _sel, del:  _del,  word: _word, fast: _fast,
+            msE: _msE, msD:  _msD,  msF: _msF, msR: _msR,
             qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
 
             latch_1: _l1, latch_2: _l2, latch_3: _l3, latch_4: _l4,
@@ -274,7 +274,7 @@ impl ModeStates {
 
     // we'll just define all enum subsets we need rather than trying to partly/fully iterating through ModeState_T
     pub fn static_l2_modes () -> [ModeState_T;4] {
-        static L2_MODES : [ModeState_T;4]  = [sel, del, word, fast];
+        static L2_MODES : [ModeState_T;4]  = [msE, msD, msF, msR];
         L2_MODES
     }
     pub fn static_qks_modes () -> [ModeState_T;4] {
@@ -282,7 +282,7 @@ impl ModeStates {
         QKS_MODES
     }
     pub fn static_combo_modes() -> [ModeState_T; size_of::<ComboStatesBits_Modes>()] {
-        static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [sel, del, word, fast, qks, qks1, qks2, qks3];
+        static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [msE, msD, msF, msR, qks, qks1, qks2, qks3];
         COMBO_MODES
     }
     pub fn static_latch_states() -> [ModeState_T; size_of::<ComboStatesBits_Latches>()] {
@@ -294,7 +294,7 @@ impl ModeStates {
     pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); size_of::<ComboStatesBits_Modes>() ] { [
         // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
-        (sel, &self.sel), (del,  &self.del),  (word, &self.word), (fast, &self.fast),
+        (msE, &self.msE), (msD,  &self.msD),  (msF, &self.msF), (msR, &self.msR),
         (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3),
     ] }
     pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState); size_of::<ComboStatesBits_Latches>()] { [
@@ -346,7 +346,7 @@ impl ModeStates {
     }
     pub fn refresh_l2_mode_active_flag (&self) {
         self.some_l2_mode_active.store (
-            self.sel.down.is_set() || self.del.down.is_set() || self.word.down.is_set() || self.fast.down.is_set()
+            self.msE.down.is_set() || self.msD.down.is_set() || self.msF.down.is_set() || self.msR.down.is_set()
         );
         self.refresh_caps_mode_active_flag();
     }
