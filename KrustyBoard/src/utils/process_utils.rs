@@ -67,12 +67,17 @@ pub fn bringup_click_monitor_cdc () {
 }
 
 fn setup_opened_window (win_class_part_match_str: &str) {
+    use crate::*;
     let match_str = win_class_part_match_str.to_string();
     thread::spawn ( move || {
         fn attempt_setup (cls_str: &String) -> bool {
             if get_fgnd_win_class().contains(cls_str) {
-                win_fgnd_center_if_past_screen();
-                thread::sleep(Duration::from_millis(300));
+                //win_fgnd_center_if_past_screen();
+                //win_fgnd_place_right_if_past_screen();
+                let ks = KrustyState::instance();
+                snap_closest_edge_side(&ks, RectEdgeSide::Right);
+                //snap_closest_edge_side(&ks, RectEdgeSide::Top);
+                //thread::sleep(Duration::from_millis(300));
                 win_fgnd_toggle_vertmax();
                 true
             } else { false }

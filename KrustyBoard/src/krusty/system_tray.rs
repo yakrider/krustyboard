@@ -59,6 +59,7 @@ pub fn start_system_tray_monitor() {
             }
             else if event.id == reload.id() {
                 KrustyState::instance().unstick_all();
+                suspend.set_text("Suspend");
             }
             else if event.id == suspend.id() {
                 if InputProcessor::instance().are_hooks_set() {

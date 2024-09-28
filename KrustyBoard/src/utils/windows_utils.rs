@@ -206,11 +206,22 @@ pub fn win_fgnd_center () { unsafe {
 } }
 
 
+/// centers if past beyond screen bounds, uses full screen area (incl taskbar etc)
 pub fn win_fgnd_center_if_past_screen () { unsafe {
     let scr_w = GetSystemMetrics(SM_CXSCREEN);
     let (hwnd, r) = win_get_fgnd_rect();
     if r.right > (scr_w - 30) {
-        MoveWindow (hwnd, (scr_w - (r.right - r.left))/2 + 100, r.top, r.right-r.left, r.bottom-r.top, true);
+        let (w, h) = (r.right - r.left,  r.bottom - r.top);
+        MoveWindow (hwnd, (scr_w - w)/2 + 100, r.top, w, h, true);
+    }
+} }
+/// places screen to right of workarea (uses usable screen area, not incl taskbar etc)
+pub fn win_fgnd_place_right_if_past_screen () { unsafe {
+    let wa = win_get_work_area();
+    let (hwnd, r) = win_get_fgnd_rect();
+    if r.right > wa.right || r.bottom > wa.bottom || r.top < wa.top || r.left < wa.left {
+        let (w, h) = (r.right - r.left,  r.bottom - r.top);
+        MoveWindow (hwnd, wa.right - w, r.top, w, h, true);
     }
 } }
 
