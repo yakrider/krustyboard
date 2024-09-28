@@ -48,6 +48,8 @@ pub mod krusty {
     pub mod mod_keys;
     pub mod mode_states;
     pub mod combo_maps;
+    pub mod combo_gen;
+    pub mod action_gen;
     pub mod krusty_mouse;
     pub mod win_snaps;
     pub mod win_groups;
@@ -59,6 +61,8 @@ pub mod krusty {
     pub use self::mod_keys::*;
     pub use self::mode_states::*;
     pub use self::combo_maps::*;
+    pub use self::combo_gen::*;
+    pub use self::action_gen::*;
     pub use self::krusty_mouse::*;
     pub use self::win_snaps::*;
     pub use self::win_groups::*;
