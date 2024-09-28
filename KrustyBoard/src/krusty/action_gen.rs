@@ -3,141 +3,147 @@
 use crate::{*, key_utils::*};
 
 
-# [ derive (Clone) ]
-/// Combo-Action-Generator for a combo targeting a key-action (e.g. mapping a combo to another key).
-/// By default, the action is press-release, but just press or release can be specified via .press() or .rel()
-pub struct ActionGen_wKey<'a> {
-    pub(crate) ks     : &'a KrustyState,
-    pub(crate) key    : Key,                     // key on which the output combo-action will be built
-    pub(crate) action : Option<KbdEvCbMapKey_T>, // if unspecified, action is press-release, else a press or release can be specified
-    pub(crate) mks    : Vec<ModKey>,             // modifier-keys to send out with this combo-action
-    // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
-    pub(crate) wrap_mod_key_guard : bool,
-}
-
-/// Combo-Action-Generator for a combo targeting a mouse-button-action (e.g. mapping a combo to a click).
-/// By default, the action is press-release, but just press or release can be specified via .press() or .rel()
-pub struct ActionGen_wMouseBtn<'a> {
-    pub(crate) ks     : &'a KrustyState,
-    pub(crate) btn    : MouseButton,             // mouse-button on which the output combo-action will be built
-    pub(crate) action : Option<MouseBtnEv_T>,    // if unspecified, action is press-release, else a press or release can be specified
-    pub(crate) mks    : Vec<ModKey>,             // modifier-keys to send out with this combo-action
-    // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
-    pub(crate) wrap_mod_key_guard : bool,
-}
-
-# [ derive (Clone) ]
-/// Combo-Action-Generator for a a combo targeting a non-key action (e.g. moving windows etc)
-pub struct ActionGen<'a> {
-    pub(crate) ks  : &'a KrustyState,
-    pub(crate) mks : Vec<ModKey>,      // modifier-keys to wrap the specified action-function for this combo-action
-    pub(crate) af  : AF,               // the action-function to build this combo-output-action with
-    // the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
-    pub(crate) wrap_mod_key_guard : bool,
-}
+// ActionGen has states for action-gen-[w-key, w-mouse, and w-AF] .. and the methods we want for them overlap
+// .. hence instead of just making them separate progressive structs, we'll impl them as parameterized generic Type-States
 
 
+pub struct ActionGenSt_Init     { }
+pub struct ActionGenSt_Key      { key  : Key,         action : Option<KbdEvCbMapKey_T> }
+pub struct ActionGenSt_MouseBtn { mbtn : MouseButton, action : Option<MouseBtnEv_T> }
+pub struct ActionGenSt_AF       { af : AF }
+pub struct ActionGenSt_Inited   { pub af : AF }
+
+// ^^ note above that the action option, if unspecified will produce press-release output, else a press or rel action can be specified
+
+pub trait ActionGenSt {}
+impl ActionGenSt for ActionGenSt_Init {}
+impl ActionGenSt for ActionGenSt_Key {}
+impl ActionGenSt for ActionGenSt_MouseBtn {}
+impl ActionGenSt for ActionGenSt_AF {}
+impl ActionGenSt for ActionGenSt_Inited {}
 
 
-/// Action-Generator for a specified Key Combo (as opposed to a combo that triggers non-key action etc)<br>
-impl<'a> ActionGen_wKey<'a> {
-    pub fn new (key:Key, ks: &'a KrustyState) -> ActionGen_wKey {
-        ActionGen_wKey { ks, key, action:None, mks:Vec::new(), wrap_mod_key_guard:true }
+impl ActionGenSt_Init {
+    /// Create a new Combo-Action generator (key-action output type) <br>
+    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
+    pub fn k (&self, key:Key) -> ActionGen<ActionGenSt_Key> {
+        ActionGen { mks: Vec::new(), wrap_mod_key_guard: true, _state: ActionGenSt_Key { key, action:None } }
     }
+    /// Create a new Combo-Action generator (mouse-button-action output type) <br>
+    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
+    pub fn mbtn (&self, mbtn:MouseButton) -> ActionGen<ActionGenSt_MouseBtn> {
+        ActionGen { mks: Vec::new(), wrap_mod_key_guard: true, _state: ActionGenSt_MouseBtn { mbtn, action:None } }
+    }
+    /// Create a new Combo-Action-generator (non-key action-function output type). <br>
+    /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
+    pub fn af (&self, af:AF) -> ActionGen<ActionGenSt_AF> {
+        ActionGen { mks: Vec::new(), wrap_mod_key_guard: false, _state: ActionGenSt_AF { af } }
+    }
+}
+
+pub trait ActionGenable {}
+impl ActionGenable for ActionGenSt_Key {}
+impl ActionGenable for ActionGenSt_MouseBtn {}
+impl ActionGenable for ActionGenSt_AF {}
+impl ActionGenable for ActionGenSt_Inited {}
+
+pub struct ActionGen <S: ActionGenSt + ActionGenable> {
+    pub mks : Vec<ModKey>,
+    // ^ modifier-keys to wrap the specified action-function for this combo-action
+    pub wrap_mod_key_guard : bool,
+    // ^^ the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
+    pub _state : S,
+    // ^^ internal state specific data .. either the AF supplied, or the key/mbtn and event type to generate an action AF
+}
+
+
+
+impl <S: ActionGenSt + ActionGenable> ActionGen<S> {
     /// Add a modifier key to the combo
-    pub fn m (mut self, mk:ModKey) -> ActionGen_wKey<'a> {
-        self.mks.push(mk); self
+    pub fn m (mut self, mk:ModKey) -> Self {
+        self.mks.push(mk);
+        self
     }
-    /// Specify the key action to be press only (not the default press-release)
-    pub fn press (mut self) -> ActionGen_wKey<'a> {
-        self.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown); self
-    }
-    /// Specify the key action to be release only (not the default press-release)
-    pub fn rel (mut self) -> ActionGen_wKey<'a> {
-        self.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp); self
-    }
-    /// Disable wrapping with mod-key guard actions (which disables their key repeat). <br>
-    /// (The default for ActionGen_wKey is enabled)
-    pub fn mkg_nw (mut self) -> ActionGen_wKey<'a> {
-        self.wrap_mod_key_guard = false; self
-    }
+}
+
+impl <S: ActionGenSt + ActionGenable> ActionGen<S>
+    where ActionGen<ActionGenSt_Inited> : From<ActionGen<S>>
+{   // ^^ the compiler wants explicitly that our state is castable to Inited (presumably as the S here is not sealed?)
+
     /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
     pub fn gen_af (self) -> AF {
         Combo::gen_af (&self.into(), None)
     }
 }
 
-
-
-/// Action-Generator for a specified mouse-btn Combo (as opposed to a combo that triggers non-key action etc)<br>
-impl<'a> ActionGen_wMouseBtn<'a> {
-    pub fn new (btn:MouseButton, ks: &'a KrustyState) -> ActionGen_wMouseBtn {
-        ActionGen_wMouseBtn { ks, btn, action:None, mks:Vec::new(), wrap_mod_key_guard:true }
-    }
-    /// Add a modifier key to the combo
-    pub fn m (mut self, mk:ModKey) -> ActionGen_wMouseBtn<'a> {
-        self.mks.push(mk); self
-    }
+impl ActionGen <ActionGenSt_Key> {
     /// Specify the key action to be press only (not the default press-release)
-    pub fn press (mut self) -> ActionGen_wMouseBtn<'a> {
-        self.action = Some (MouseBtnEv_T::BtnDown); self
+    pub fn press (mut self) -> Self {
+        self._state.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown);
+        self
     }
     /// Specify the key action to be release only (not the default press-release)
-    pub fn rel (mut self) -> ActionGen_wMouseBtn<'a> {
-        self.action = Some (MouseBtnEv_T::BtnUp); self
+    pub fn rel (mut self) -> Self {
+        self._state.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp);
+        self
     }
-    /// Disable wrapping with mod-key guard actions (which disables their key repeat). <br>
-    /// (The default for ActionGen_wKey is enabled)
-    pub fn mkg_nw (mut self) -> ActionGen_wMouseBtn<'a> {
-        self.wrap_mod_key_guard = false; self
+
+}
+impl ActionGen <ActionGenSt_MouseBtn> {
+    /// Specify the mouse btn action to be press only (not the default press-release)
+    pub fn press (mut self) -> Self {
+        self._state.action = Some (MouseBtnEv_T::BtnDown); self
     }
-    /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
-    pub fn gen_af (self) -> AF {
-        Combo::gen_af (&self.into(), None)
+    /// Specify the mouse btn action to be release only (not the default press-release)
+    pub fn rel (mut self) -> Self {
+        self._state.action = Some (MouseBtnEv_T::BtnUp); self
     }
 }
 
+pub trait ActionGenS_mkgWrapped {}
+impl ActionGenS_mkgWrapped for ActionGenSt_Key { }
+impl ActionGenS_mkgWrapped for ActionGenSt_MouseBtn { }
 
-
-/// Action-Generator for a a combo targeting any pre-supplied action (e.g. moving windows etc)
-impl<'a> ActionGen<'a> {
-    pub fn new  (af:AF, ks: &'a KrustyState) -> ActionGen {
-        ActionGen { ks, mks:Vec::new(), af, wrap_mod_key_guard:false }
+impl <S : ActionGenSt + ActionGenable + ActionGenS_mkgWrapped> ActionGen<S> {
+    /// Disable wrapping with mod-key guard actions (which disables their key repeat)
+    /// (The default for ActionGenSt_Key and ActionGenSt_MouseBtn is disabled)
+    pub fn mkg_nw (mut self) -> Self {
+        self.wrap_mod_key_guard = false;
+        self
     }
-    pub fn m (mut self, mk:ModKey) -> ActionGen<'a> {
-        self.mks.push(mk); self
-    }
+}
+impl ActionGen<ActionGenSt_AF> {
     /// Enable wrapping with mod-key guard actions (which disables their key repeat). <br>
-    /// (The default for ActionGen is disabled)
-    pub fn mkg_w (mut self) -> ActionGen<'a> {
-        self.wrap_mod_key_guard = true; self
-    }
-    /// Generate the action for this ActionGen, w mod-key guard wrapping as specified during construction
-    pub fn gen_af (self) -> AF {
-        Combo::gen_af (&self, None)
+    /// (The default for ActionGenSt_AF is disabled)
+    pub fn mkg_w (mut self) -> Self {
+        self.wrap_mod_key_guard = true;
+        self
     }
 }
-impl<'a> From<ActionGen_wKey<'a>> for ActionGen<'a> {
-    fn from (ag: ActionGen_wKey<'a>) -> Self {
-        let af = match ag.action {
-            Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown) => action_p1 (Key::press,         ag.key),
-            Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp)   => action_p1 (Key::release,       ag.key),
-            _                                          => action_p1 (Key::press_release, ag.key),
+
+impl From<ActionGen<ActionGenSt_Key>> for ActionGen<ActionGenSt_Inited> {
+    fn from (ag : ActionGen<ActionGenSt_Key>) -> Self {
+        let af = match ag._state.action {
+            Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown) => action_p1 (Key::press,         ag._state.key),
+            Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp)   => action_p1 (Key::release,       ag._state.key),
+            _                                          => action_p1 (Key::press_release, ag._state.key),
         };
-        ActionGen { ks: ag.ks, mks: ag.mks, af, wrap_mod_key_guard: ag.wrap_mod_key_guard }
+        Self { mks: ag.mks, wrap_mod_key_guard: ag.wrap_mod_key_guard, _state: ActionGenSt_Inited{af} }
     }
 }
-impl<'a> From<ActionGen_wMouseBtn<'a>> for ActionGen<'a> {
-    fn from (ag: ActionGen_wMouseBtn<'a>) -> Self {
-        let af = match ag.action {
-            Some (MouseBtnEv_T::BtnDown) => action_p1 (MouseButton::press,         ag.btn),
-            Some (MouseBtnEv_T::BtnUp)   => action_p1 (MouseButton::release,       ag.btn),
-            _                            => action_p1 (MouseButton::press_release, ag.btn),
+impl From<ActionGen<ActionGenSt_MouseBtn>> for ActionGen<ActionGenSt_Inited> {
+    fn from (ag : ActionGen<ActionGenSt_MouseBtn>) -> Self {
+        let af = match ag._state.action {
+            Some (MouseBtnEv_T::BtnDown) => action_p1 (MouseButton::press,         ag._state.mbtn),
+            Some (MouseBtnEv_T::BtnUp)   => action_p1 (MouseButton::release,       ag._state.mbtn),
+            _                            => action_p1 (MouseButton::press_release, ag._state.mbtn),
         };
-        ActionGen { ks: ag.ks, mks: ag.mks, af, wrap_mod_key_guard: ag.wrap_mod_key_guard }
+        Self { mks: ag.mks, wrap_mod_key_guard: ag.wrap_mod_key_guard, _state: ActionGenSt_Inited{af} }
     }
 }
-
-
-
+impl From<ActionGen<ActionGenSt_AF>> for ActionGen<ActionGenSt_Inited> {
+    fn from (ag : ActionGen<ActionGenSt_AF>) -> Self {
+        Self { mks: ag.mks, wrap_mod_key_guard: ag.wrap_mod_key_guard, _state: ActionGenSt_Inited { af: ag._state.af } }
+    }
+}
 

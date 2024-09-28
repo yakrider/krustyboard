@@ -306,17 +306,8 @@ impl KrustyState {
     /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
     pub fn cg (&self) -> ComboGen_Init { ComboGen_Init {} }
 
-    /// Utility function to create a new Combo-Action generator (key-action output type) <br>
-    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
-    pub fn ag (&self, key:Key) -> ActionGen_wKey { ActionGen_wKey::new (key, &self) }
-
-    /// Utility function to create a new Combo-Action generator (mouse-button-action output type) <br>
-    /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
-    pub fn agm (&self, btn:MouseButton) -> ActionGen_wMouseBtn { ActionGen_wMouseBtn::new (btn, &self) }
-
-    /// Utlity function to create a new Combo-Action-generator (non-key action-function output type). <br>
-    /// By default, it WILL NOT wrap the AF with modifier key guard actions, can be set to do so w .mkg_w()
-    pub fn ag_af (&self, af:AF) -> ActionGen { ActionGen::new (af, &self) }
+    /// Utility function to create a new Combo-Action generator
+    pub fn ag (&self) -> ActionGenSt_Init { ActionGenSt_Init {} }
 
 }
 

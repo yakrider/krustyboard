@@ -239,7 +239,7 @@ impl Combo {
     /// modkeys specified (or not-specified) in the ActionGen builder. <br>
     /// Further, if a combo-gen is provided, will appropriately wrap modkey or mode-key consumption wrappers around the action
     /// (the consumption wrapper marks the keys as consumed, which typically suppresses their key-repeat and/or release events)
-    pub fn gen_af (ag:&ActionGen, cgo:Option<&ComboGen>) -> AF {
+    pub fn gen_af (ag: &ActionGen<ActionGenSt_Inited>, cgo:Option<&ComboGen>) -> AF {
         // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
@@ -247,9 +247,10 @@ impl Combo {
         fn triplet_contains (mks:&Vec<ModKey>, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
             mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk)
         }
-        let mut af = ag.af.clone();
+        let ks = KrustyState::instance();
+        let mut af = ag._state.af.clone();
         ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
-            ag.ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
+            ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
                 // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
                 if triplet_contains (&ag.mks, lrmk, lmk, rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
@@ -278,12 +279,12 @@ impl Combo {
         // else, if we did have a combo-gen, we'll try to wrap it with any specified mod-key/mode-key consume actions
         let cg = cgo.unwrap();
         if !cg.mod_key_no_consume {
-            ag.ks.mod_keys.mod_umk_pairs() .iter() .for_each ( |(mk, umk)| {
+            ks.mod_keys.mod_umk_pairs() .iter() .for_each ( |(mk, umk)| {
                 if umk.handling.is_managed() && cg.mks.contains(mk) { af = umk.keydn_consuming_action (af.clone()) }
             });
         }
         if !cg.mode_kdn_no_consume {
-            ag.ks.mode_states.mode_flag_pairs() .iter() .for_each ( |(ms_t, ms)| {
+            ks.mode_states.mode_flag_pairs() .iter() .for_each ( |(ms_t, ms)| {
                 if cg.modes.contains(ms_t) { af = ms.mode_key_consuming_action (af.clone()); }
             } );
         }
@@ -291,12 +292,12 @@ impl Combo {
     }
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    fn gen_combo_entries (mut cg: ComboGen, ag:ActionGen) -> Vec<(Combo, ComboValue)> {
+    fn gen_combo_entries (mut cg: ComboGen, ag:ActionGen<ActionGenSt_Inited>) -> Vec<(Combo, ComboValue)> {
         // before we gen combos/AFs from these, lets make useful updates to the combo-gen as the final prep step
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // (note that these can still be set to no-consume if key-repeat is desired)
         if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.cmk {
-            if let Some(ms_t) = ag.ks.mode_states.get_mode_t(key) {
+            if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.modes.contains(&ms_t) { cg.modes.push(ms_t) }
             }
             // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
@@ -344,7 +345,7 @@ impl CombosMap {
 
     /// Use this fn to register combos <br>
     /// (the ActionGen param can be either ActionGen_wKey to output other keys/combos, or ActionGen to directly supply the AF to trigger)
-    pub fn add_combo<'a> (&self, cg: ComboGen, ag: impl Into<ActionGen<'a>>) {
+    pub fn add_combo (&self, cg: ComboGen, ag: impl Into<ActionGen<ActionGenSt_Inited>>) {
         for (c, cv) in Combo::gen_combo_entries(cg, ag.into()) {
             //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> k:{:?} mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.key, ag.mks );
             self.add_to_combos_map (c, cv);
