@@ -242,6 +242,7 @@ pub struct Krusty {
 /// impl for Krusty-State
 impl KrustyState {
 
+    /// Get a clone of the sole (arc-wrapped) instance of the global krusty-state
     pub fn instance () -> KrustyState {
         static INSTANCE: OnceCell<KrustyState> = OnceCell::new();
         INSTANCE .get_or_init ( ||
@@ -263,6 +264,7 @@ impl KrustyState {
         ) .clone()
     }
 
+    /// Goes through all keys and mouse-btns doing press/rel, and clears out all internal states
     pub fn unstick_all (&self) {
         println! ("WARNING: Attempting to UNSTICK_ALL !!");
 
@@ -300,18 +302,9 @@ impl KrustyState {
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer());
     }
 
-    /// Utlity function to create a new Combo-generator (**kbd-key** combo-specification) <br>
+    /// Utlity function to create a new Combo-generator. <br>
     /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
-    pub fn cg (&self, key:Key) -> ComboGen { ComboGen::new_w_key (&self, key) }
-
-    /// Utlity function to create a new Combo-generator (**mouse-button** combo-specification) <br>
-    pub fn cg_mbtn (&self, mbtn:MouseButton) -> ComboGen { ComboGen::new_w_mbtn (&self, mbtn) }
-
-    /// Utlity function to create a new Combo-generator (**mouse-wheel** combo-specification) <br>
-    pub fn cg_whl (&self) -> ComboGen { ComboGen::new_w_whl (&self, MouseWheel::DefaultWheel) }
-
-    /// Utlity function to create a new Combo-generator (**horiz-mouse-wheel** combo-specification) <br>
-    pub fn cg_hwhl (&self) -> ComboGen { ComboGen::new_w_whl (&self, MouseWheel::HorizontalWheel) }
+    pub fn cg (&self) -> ComboGen_Init { ComboGen_Init {} }
 
     /// Utility function to create a new Combo-Action generator (key-action output type) <br>
     /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
