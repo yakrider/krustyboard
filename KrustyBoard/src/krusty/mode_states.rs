@@ -136,7 +136,7 @@ impl ModeState {
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_mode_key_down (&self, k:&Krusty) {
         use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
-        let (ms, ks) = (self.clone(), k.ks.clone());
+        let ks = k.ks.clone();
         let mss_cba : AF = {
             if ModeStates::static_l2_modes() .contains(&self.ms_t) {
                 Arc::new ( move || { ks.mode_states.some_l2_mode_active.set();  ks.mode_states.some_combo_mode_active.set(); } )
@@ -147,10 +147,15 @@ impl ModeState {
             } else { Arc::new (move || { }) }
         };
         // note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens
+        let (ms, ks) = (self.clone(), k.ks.clone());
         let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             ms.down.set(); mss_cba();
-            if ms.consumed.is_set() { EvProc_Ds::new (EvProp_Stop, ComboProc_Disable) }
-            else { EvProc_Ds::new (EvProp_Continue, ComboProc_Enable) }
+            if ms.consumed.is_set() {
+                EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
+            } else {
+                ks.mouse.vwheel.spin_invalidated.set();
+                EvProc_Ds::new (EvProp_Continue, ComboProc_Enable)
+            }
         } ) );
         let ev_proc_ds = EvProc_Ds::new (EvProp_Undet, ComboProc_Undet);
         if let Some(key) = self.key() {
@@ -161,16 +166,18 @@ impl ModeState {
     /// Binds mode-key-up event on registered mod-key to flag update action
     fn bind_mode_key_up (&self, k:&Krusty) {
         use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
-        let (ms, ks) = (self.clone(), k.ks.clone());
+        let ks = k.ks.clone();
         let mss_cba : AF = {
             if      ModeStates::static_l2_modes()    .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
             else if ModeStates::static_qks_modes()   .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
             else if ModeStates::static_combo_modes() .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_caps_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
+        let (ms, ks) = (self.clone(), k.ks.clone());
         let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
         let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             ms.down.clear(); ms.consumed.clear(); mss_cba();
+            ks.mouse.vwheel.spin_invalidated.set();
             ev_proc_ds
         } ) );
         if let Some(key) = self.key() {

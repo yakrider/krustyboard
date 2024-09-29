@@ -543,7 +543,7 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).m(lalt).s(qks1),  k.ks.ag().k(ExtRight) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).m(lalt).s(qks1),  k.ks.ag().k(ExtLeft) );
 
-    // caps-e wheel for **_ TAB_NAV _** .. .. e as that is row 'above', and tabs are usually up above .. oh well
+    /// caps-e wheel for **_ TAB_NAV _** .. .. e as that is row 'above', and tabs are usually up above .. oh well
     // we'll setup generally for browser, explorer etc (ctrl-tab, ctrl-shift-tab)
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag().k(Tab).m(ctrl) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag().k(Tab).m(ctrl).m(shift) );
@@ -551,7 +551,7 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag().k(ExtRight).m(alt).m(ctrl) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag().k(ExtLeft ).m(alt).m(ctrl) );
 
-    // caps-f (i.e word mode) wheel, we'll set as **_ nav through SEARCH (F3, Shift-F3) _**
+    /// caps-f (i.e word mode) wheel, we'll set as **_ nav through SEARCH (F3, Shift-F3) _**
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msF),  k.ks.ag().k(F3) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msF),  k.ks.ag().k(F3).m(shift) );
 
@@ -576,7 +576,7 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().k(D).rel().m(caps) .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
 
 
-    /// note: general **_ caps-wheel as ctrl-wheel _** is handled via managed-ctrl-down-state and the fallback wheel action (with its incr arg)
+    /// note: general **_ CAPS-AS-CTRL WHEEL _** is handled via managed-ctrl-down-state and the fallback wheel action (with its incr arg)
     // (noted here as wouldnt be easy to do via combos here as we havent yet setup combo AFs to have access to event data)
     // ^^ however, the fallbacks cant do continuous/managed ctrl-down, which is desirable (and marginally better for zoom etc)
     // .. so we'll impl this here anyway, just using last stored delta in wheel struct .. not ideal ofc, but ok if queue is processed fast
@@ -584,11 +584,17 @@ pub fn setup_krusty_board () {
         ks.in_managed_ctrl_down_state.set(); ks.mod_keys.lctrl.ensure_active();
         ks.mouse.vwheel.wheel.scroll (ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
     } ) }
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
-                     k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
-                     k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
+                      k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
+                      k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
 
+    /// we'll let caps-R-wheel do **_ FASTER SCROLL _**
+    fn gen_af_fast_scroll (ks:KrustyState) -> AF { Arc::new ( move || {
+        ks.mouse.vwheel.wheel.scroll (3 * ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
+    } ) }
+    k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).s(msR),  k.ks.ag().af ( gen_af_fast_scroll(k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps).s(msR),  k.ks.ag().af ( gen_af_fast_scroll(k.ks.clone()) ) );
 
     /// with caps-win-[e/d/f/r]-combos, we'll add **_ WINDOW MOVE _** functionality, similar to what was done w kbd l2 keys
     k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).m(win).s(msD),  k.ks.ag().af ( Arc::new (|| win_fgnd_move_rel (-10,   0)) ) );
@@ -596,7 +602,7 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).m(win).s(msE),  k.ks.ag().af ( Arc::new (|| win_fgnd_move_rel (  0,  10)) ) );
     k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps).m(win).s(msE),  k.ks.ag().af ( Arc::new (|| win_fgnd_move_rel (  0, -10)) ) );
 
-    /// and for the 'f/r' mode-state variants, we'll have the **_ WINDOW MOVE SNAP _** to the closest edge in the specified side
+    /// for caps-win 'f/r' variants, we'll impl **_ WINDOW MOVE SNAP _** to the closest edge in the specified side
     fn gen_af_snap (ks:&KrustyState, side_t:RectEdgeSide) -> AF {
         let ks = ks.clone();
         Arc::new ( move || snap_closest_edge_side (&ks, side_t))
@@ -1185,15 +1191,18 @@ pub fn setup_krusty_board () {
     /// **_ IDE SPECIFIC COMBOS _**
     // some generated AFs for IDE cmds use
     // note that its better not to specify no-modkey-guard-wrap below in case the action moves to some combo with a mod-key etc
+
     fn line_sel         (k:&Krusty) -> AF { k.ks.ag().k(ExtHome).m(alt).m(shift).gen_af() } // IDE alt-shift-home to sel line
     fn line_repl_send   (k:&Krusty) -> AF { k.ks.ag().k(ExtEnd ).m(alt).m(shift).gen_af() } // IDE alt-shift-end to send sel to repl
     fn caret_sel_start  (k:&Krusty) -> AF { k.ks.ag().k(ExtLeft).gen_af()                 } // unselect the line (caret to line beginning)
     fn caret_line_start (k:&Krusty) -> AF { k.ks.ag().k(ExtHome).gen_af()                 } // caret to beginning of first word in line
-    fn sel_page         (k:&Krusty) -> AF { k.ks.ag().k(A).m(ctrl).gen_af()               }
-    fn sel_send         (k:&Krusty) -> AF { k.ks.ag().k(End).m(alt).m(shift).gen_af()     }
-    fn esc_send         (k:&Krusty) -> AF { k.ks.ag().k(Escape).gen_af()                  }
-    fn sel_format       (k:&Krusty) -> AF { k.ks.ag().k(F).m(ctrl).m(shift).gen_af()      }
-    fn clear_console    (k:&Krusty) -> AF { k.ks.ag().k(Minus).m(alt).m(ctrl).m(shift).gen_af() }
+
+    fn sel_page      (k:&Krusty) -> AF { k.ks.ag().k(A).m(ctrl).gen_af()                     }
+    fn sel_send      (k:&Krusty) -> AF { k.ks.ag().k(End).m(alt).m(shift).gen_af()           }
+    fn esc_send      (k:&Krusty) -> AF { k.ks.ag().k(Escape).gen_af()                        }
+    fn sel_format    (k:&Krusty) -> AF { k.ks.ag().k(F).m(ctrl).m(shift).gen_af()            }
+    fn clear_console (k:&Krusty) -> AF { k.ks.ag().k(Minus).m(alt).m(ctrl).m(shift).gen_af() }
+
 
     // we'll overload regular F2 with special IDE scala-console action if IDEA window is foreground
     fn gen_line_to_repl_action (k:&Krusty) -> AF {
@@ -1221,21 +1230,29 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg().k(F).m(caps).s(qks).c(intellij_fgnd()), k.ks.ag().af(gen_page_format_action(&k)) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
-    k.cm .add_combo ( k.ks.cg().k(F2).m(caps).c(intellij_fgnd()),  k.ks.ag().k(End).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg().k(F2).m(caps).c(intellij_fgnd()),  k.ks.ag().af(sel_send(&k)) );
 
 
-        // setting up caps-qks-L for IDE leetcode tool window (via alt-ctrl-shift-F24)
-    k.cm .add_combo ( k.ks.cg().k(L).s(qks).m(caps),  k.ks.ag().k(F24).m(alt).m(ctrl).m(shift) );
+    // hotkeys to move lines and statements up and down
+    let move_line_up = k.ks.ag().k(I    ).m(alt).m(ctrl).gen_af();
+    let move_line_dn = k.ks.ag().k(Comma).m(alt).m(ctrl).gen_af();
+    let move_stmt_up = k.ks.ag().k(I    ).m(alt).m(ctrl).m(shift).gen_af();
+    let move_stmt_dn = k.ks.ag().k(Comma).m(alt).m(ctrl).m(shift).gen_af();
 
-    // caps-qks-M for more IDE leetcode testcases
-    k.cm .add_combo ( k.ks.cg().k(M).s(qks).m(caps),  k.ks.ag().k(F23).m(alt).m(ctrl).m(shift) );
+    k.cm .add_combo ( k.ks.cg().k(I    ).m(caps).s(qks3),         k.ks.ag().af(move_line_up) );
+    k.cm .add_combo ( k.ks.cg().k(Comma).m(caps).s(qks3),         k.ks.ag().af(move_line_dn) );
+    k.cm .add_combo ( k.ks.cg().k(I    ).m(caps).s(qks3).s(msR),  k.ks.ag().af(move_stmt_up) );
+    k.cm .add_combo ( k.ks.cg().k(Comma).m(caps).s(qks3).s(msR),  k.ks.ag().af(move_stmt_dn) );
 
-    // caps-qks-Period for IDE leetcode submission (alt-Period is set to local test)
-    //k.cm .add_combo ( k.ks.cg().k(Period).s(qks).m(caps),  k.ks.ag().k(F23).m(alt).m(ctrl).m(shift) );
-    // ^^ we'll also add action to clear console right after sending submission (console needs focus for clear to work)
-    let lc_run     = k.ks.ag().k(F21).m(alt).m(ctrl).m(shift).gen_af();
-    let lc_submit  = k.ks.ag().k(F22).m(alt).m(ctrl).m(shift).gen_af();
-    fn console_clearing_action (k:&Krusty, af:AF) -> AF {
+
+    // IDE lcq helpers
+    let lc_run    = k.ks.ag().k(F21).m(alt).m(ctrl).m(shift).gen_af();   // locally run lc solution
+    let lc_submit = k.ks.ag().k(F22).m(alt).m(ctrl).m(shift).gen_af();   // submit file to lc
+    let lc_tool   = k.ks.ag().k(F24).m(alt).m(ctrl).m(shift).gen_af();   // bring up lc tool window
+    let lc_tests  = k.ks.ag().k(F23).m(alt).m(ctrl).m(shift).gen_af();   // get additional lc test-cases
+
+    // we'll define an aciton wrapper to clear console, e.g. right after sending submission (console needs focus for clear to work)
+    fn console_clearing_af (k:&Krusty, af:AF) -> AF {
         let cc = clear_console(&k);
         Arc::new ( move || {
             af();
@@ -1243,8 +1260,11 @@ pub fn setup_krusty_board () {
             thread::spawn ( move || { thread::sleep (Duration::from_millis(2000)); cc(); } );
         } )
     }
-    k.cm .add_combo ( k.ks.cg().k(Period).m(lalt),         k.ks.ag().af (console_clearing_action (&k,lc_run)) );
-    k.cm .add_combo ( k.ks.cg().k(Period).s(qks).m(caps),  k.ks.ag().af (console_clearing_action (&k,lc_submit)) );
+    k.cm .add_combo ( k.ks.cg().k(L).s(qks).m(caps),  k.ks.ag().af(lc_tool) );    // caps-q-l .. lc_tool
+    k.cm .add_combo ( k.ks.cg().k(M).s(qks).m(caps),  k.ks.ag().af(lc_tests) );   // caps-q-m .. more lc test-cases
+
+    k.cm .add_combo ( k.ks.cg().k(Period).m(lalt),         k.ks.ag().af (console_clearing_af (&k,lc_run)) );     // alt-period .. lc-run
+    k.cm .add_combo ( k.ks.cg().k(Period).s(qks).m(caps),  k.ks.ag().af (console_clearing_af (&k,lc_submit)) );  // caps-q-period .. lc-submit
 
 
     /// **_ IDE TAB-SWITCHER SEARCH _** .. specifically for IntelliJ, wanted to add a quick switch from tab-switcher to searchable one

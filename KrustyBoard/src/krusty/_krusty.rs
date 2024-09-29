@@ -303,10 +303,10 @@ impl KrustyState {
     }
 
     /// Utlity function to create a new Combo-Generator
-    pub fn cg (&self) -> ComboGenSt_Init { ComboGenSt_Init {} }
+    pub fn cg (&self) -> ComboGen { ComboGen::new() }
 
     /// Utility function to create a new Combo-Action-Generator
-    pub fn ag (&self) -> ActionGenSt_Init { ActionGenSt_Init {} }
+    pub fn ag (&self) -> ActionGen { ActionGen::new() }
 
 }
 

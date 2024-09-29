@@ -159,6 +159,13 @@ impl Mouse {
             _ => None
         }
     }
+    pub fn get_wheel_state (&self, wheel:MouseWheel) -> Option<MouseWheelState> {
+        match wheel {
+            MouseWheel::DefaultWheel    => Some (self.vwheel.clone()),
+            MouseWheel::HorizontalWheel => Some (self.hwheel.clone()),
+            _ => None
+        }
+    }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
     pub fn proc_notice__modkey_down (&self, mk:ModKey, ks:&KrustyState) {

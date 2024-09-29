@@ -39,103 +39,133 @@ impl ComboGenable for ComboGenSt_Wheel {}
 impl ComboGenable for ComboGenSt_Inited {}
 
 
-/// Combo-Generator progressive state struct
-pub struct ComboGen <S: ComboGenSt + ComboGenable> {
-    _private : (),   // prevent direct init of this struct
 
-    pub mks      : Vec<ModKey>,        // modifier keys that should be down to trigger this combo
-    pub modes    : Vec<ModeState_T>,   // mode-states that should match for this combo to trigger
-    pub wc_mks   : Option<Vec<ModKey>>,        // modifier keys that can be ignored (marked as wildcard) .. (defined but empty-list means global wc)
-    pub wc_modes : Option<Vec<ModeState_T>>,   // mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
-    pub cond     : Option<ComboCond>,  // optional condition to check before triggering this combo
+/// Combo-Generator progressive state struct inner data
+pub struct _ComboGen {
 
+    /// modifier keys that should be down to trigger this combo
+    pub mks      : Vec<ModKey>,
+
+    /// mode-states that should match for this combo to trigger
+    pub modes    : Vec<ModeState_T>,
+
+    /// modifier keys that can be ignored (marked as wildcard) .. (defined but empty-list means global wc)
+    pub wc_mks   : Option<Vec<ModKey>>,
+
+    /// mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
+    pub wc_modes : Option<Vec<ModeState_T>>,
+
+    /// optional condition to check before triggering this combo
+    pub cond     : Option<ComboCond>,
+
+    /// the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
     pub mod_key_no_consume  : bool,
-    // ^^ the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
-    pub mode_kdn_no_consume : bool,
-    // ^^ the mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released
 
-    pub _state : S,
-    // ^^ internal state specific data .. either the combo-map-key, or the requisites to create one
+    /// the mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released
+    pub mode_kdn_no_consume : bool,
 }
+
+impl _ComboGen {
+    fn new () -> _ComboGen {
+        _ComboGen {
+            mks:Vec::new(), modes:Vec::new(),
+            wc_mks:None, wc_modes:None, cond:None,
+            mod_key_no_consume:false, mode_kdn_no_consume:false,
+        }
+    }
+}
+
+
+
+/// Combo-Generator progressive state struct
+pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
+
+    /// all the data that ComboGen actually holds through the construction states
+    pub dat : Box<_ComboGen>,
+
+    /// internal state specific data .. either the combo-map-key, or the requisites to create one
+    pub st  : S,
+}
+
 
 /// alias for the finalied ComboGen state, since we'll be passing that around to downstream processing fns
 pub type CG = ComboGen <ComboGenSt_Inited>;
 
 
 
-impl ComboGenSt_Init {
-    /// helper fn to init non-state fields of ComboGen<_>
-    fn new <S: ComboGenSt + ComboGenable> (st:S) -> ComboGen<S> {
-        ComboGen { _private:(),
-            mks:Vec::new(), modes:Vec::new(),
-            wc_mks:None, wc_modes:None, cond:None,
-            mod_key_no_consume:false, mode_kdn_no_consume:false,
-            _state: st
-        }
+impl ComboGen <ComboGenSt_Init> {
+    /// Create a new ComboGen at the _Init state (which is default)
+    pub fn new () -> Self {
+        ComboGen { dat: Box::new(_ComboGen::new()), st: ComboGenSt_Init{} }
     }
     /// Create ComboGen around a keyboard key action (default action is press)
-    pub fn k (&self, key:Key) -> ComboGen<ComboGenSt_Key> {
-        Self::new ( ComboGenSt_Key { key, action: KbdEvCbMapKey_T::KeyEventCb_KeyDown } )
+    pub fn k (self, key:Key) -> ComboGen <ComboGenSt_Key> {
+        let st = ComboGenSt_Key { key, action: KbdEvCbMapKey_T::KeyEventCb_KeyDown };
+        ComboGen { dat: self.dat, st }
     }
     /// Create ComboGen around a mouse button action (default action is press)
-    pub fn mbtn (&self, mbtn:MouseButton) -> ComboGen<ComboGenSt_MouseBtn> {
-        Self::new ( ComboGenSt_MouseBtn { mbtn, action: MouseBtnEv_T::BtnDown } )
+    pub fn mbtn (self, mbtn:MouseButton) -> ComboGen <ComboGenSt_MouseBtn> {
+        let st = ComboGenSt_MouseBtn { mbtn, action: MouseBtnEv_T::BtnDown };
+        ComboGen { dat: self.dat, st }
     }
     /// Create ComboGen around mouse vertical wheel action (default action is wheel-backwards/downwards)
-    pub fn whl (&self) -> ComboGen<ComboGenSt_Wheel> {
-        Self::new ( ComboGenSt_Wheel { whl: MouseWheel::DefaultWheel, action: MouseWheelEv_T::WheelBackwards } )
+    pub fn whl (self) -> ComboGen <ComboGenSt_Wheel> {
+        let st = ComboGenSt_Wheel { whl: MouseWheel::DefaultWheel, action: MouseWheelEv_T::WheelBackwards };
+        ComboGen { dat: self.dat, st }
     }
     /// Create ComboGen around mouse horizontal wheel action (default action is wheel-backwards/leftwards)
-    pub fn hwhl (&self) -> ComboGen<ComboGenSt_Wheel> {
-        Self::new ( ComboGenSt_Wheel { whl: MouseWheel::HorizontalWheel, action: MouseWheelEv_T::WheelBackwards } )
+    pub fn hwhl (self) -> ComboGen <ComboGenSt_Wheel> {
+        let st = ComboGenSt_Wheel { whl: MouseWheel::HorizontalWheel, action: MouseWheelEv_T::WheelBackwards };
+        ComboGen { dat: self.dat, st }
     }
 }
 
 
 /// Common methods for ComboGenable states
-impl <S: ComboGenSt + ComboGenable> ComboGen<S> {
-
+impl <S> ComboGen<S>
+    where S : ComboGenSt + ComboGenable
+{
     /// Add a modifier key to the combo
     pub fn m (mut self, mk:ModKey) -> Self {
-        if !self.mks.contains(&mk) { self.mks.push(mk) }; self
+        if !self.dat.mks.contains(&mk) { self.dat.mks.push(mk) }; self
     }
     /// Add a mode-state to the combo
     pub fn s (mut self, md: ModeState_T) -> Self {
-        if !self.modes.contains(&md) { self.modes.push(md) }; self
+        if !self.dat.modes.contains(&md) { self.dat.modes.push(md) }; self
     }
 
     /// Add a wildcard mod-key to the combo
     pub fn wcm (mut self, mk:ModKey) -> Self {
-        if let Some(wc_mks) = self.wc_mks.as_mut() {
+        if let Some(wc_mks) = self.dat.wc_mks.as_mut() {
             if !wc_mks.is_empty() && !wc_mks.contains(&mk) { wc_mks.push(mk) }
             // ^^ note that we treat a defined but empty list as global wildcard
-        } else { self.wc_mks = Some (vec![mk]) }
+        } else { self.dat.wc_mks = Some (vec![mk]) }
         self
     }
     /// Add a wildcard mode-state to the combo
     pub fn wcs (mut self, md:ModeState_T) -> Self {
-        if let Some(wc_modes) = self.wc_modes.as_mut() {
+        if let Some(wc_modes) = self.dat.wc_modes.as_mut() {
             if !wc_modes.is_empty() && !wc_modes.contains(&md) { wc_modes.push(md) }
-        } else { self.wc_modes = Some (vec![md]) }
+        } else { self.dat.wc_modes = Some (vec![md]) }
         self
     }
 
     /// Add all non-specified mod-keys as wildcards to the combo
     pub fn wcma (mut self) -> Self {
-        self.wc_mks = Some (vec![]); self
+        self.dat.wc_mks = Some (vec![]); self
     }
     /// Add all non-specified mode-states as wildcards to the combo
     pub fn wcsa (mut self) -> Self {
-        self.wc_modes = Some (vec![]); self
+        self.dat.wc_modes = Some (vec![]); self
     }
 
     /// Add a condition to the combo
     pub fn c (mut self, cond:ComboCond) -> Self {
-        if self.cond.is_none() {
-            self.cond = Some(cond);
+        if self.dat.cond.is_none() {
+            self.dat.cond = Some(cond);
         } else {
-            let cond_old = self.cond.take().unwrap();
-            self.cond = Some ( Arc::new ( move |ks,e| cond_old(ks,e) && cond(ks,e) ) );
+            let cond_old = self.dat.cond.take().unwrap();
+            self.dat.cond = Some ( Arc::new ( move |ks,e| cond_old(ks,e) && cond(ks,e) ) );
         }
         self
     }
@@ -143,12 +173,12 @@ impl <S: ComboGenSt + ComboGenable> ComboGen<S> {
     /// Disable consuming mod-key key-downs for this combo. <br>
     /// (The default is to consume (i.e. do masking when releasing modkey) any modkey kdn on registered combos)
     pub fn mk_nc (mut self) -> Self {
-        self.mod_key_no_consume = true; self
+        self.dat.mod_key_no_consume = true; self
     }
     /// Disable consuming mode-trigger-key key-downs for this combo. <br>
     /// (The default is to consume (i.e. disable further key-events until released) any mode-trigger-key kdn on registered combos)
     pub fn msk_nc (mut self) -> Self {
-        self.mode_kdn_no_consume = true; self
+        self.dat.mode_kdn_no_consume = true; self
     }
 
 }
@@ -158,7 +188,7 @@ impl <S: ComboGenSt + ComboGenable> ComboGen<S> {
 impl ComboGen <ComboGenSt_Key> {
     /// Specify the key trigger action to be release (instead of the default press)
     pub fn rel (mut self) -> Self {
-        self._state.action = KbdEvCbMapKey_T::KeyEventCb_KeyUp;
+        self.st.action = KbdEvCbMapKey_T::KeyEventCb_KeyUp;
         self
     }
 }
@@ -167,7 +197,7 @@ impl ComboGen <ComboGenSt_Key> {
 impl ComboGen <ComboGenSt_MouseBtn> {
     /// Specify the mouse btn trigger action to be release (instead of the default press)
     pub fn rel (mut self) -> Self {
-        self._state.action = MouseBtnEv_T::BtnUp;
+        self.st.action = MouseBtnEv_T::BtnUp;
         self
     }
 }
@@ -176,12 +206,12 @@ impl ComboGen <ComboGenSt_MouseBtn> {
 impl ComboGen <ComboGenSt_Wheel> {
     /// Specify the direction of the combo wheel trigger action to forwards/upwards
     pub fn frwd (mut self) -> Self {
-        self._state.action = MouseWheelEv_T::WheelForwards;
+        self.st.action = MouseWheelEv_T::WheelForwards;
         self
     }
     /// Specify the direction of the combo wheel trigger action to backwards/downwards
     pub fn bkwd (mut self) -> Self {
-        self._state.action = MouseWheelEv_T::WheelBackwards;
+        self.st.action = MouseWheelEv_T::WheelBackwards;
         self
     }
 }
@@ -189,32 +219,24 @@ impl ComboGen <ComboGenSt_Wheel> {
 
 
 // So we're allowing the ComboGennable states to directly gen the final _Inited state at any part of process ..
-// .. and we'll do that by making them transformable 'into' the final _Inited state
+// .. and we'll do that by making them transformable 'into' the final _Inited state (type aliased as CG)
 
-impl ComboGen <ComboGenSt_Inited> {
-    /// helper fn to move over fields from various ComboGennable states to the final _Inited state
-    pub fn new <S: ComboGenSt + ComboGenable> (cmk: EvCbMapKey, cg:ComboGen<S>) -> Self {
-        Self { _private:(),
-            mks: cg.mks, modes: cg.modes, wc_mks: cg.wc_mks, wc_modes: cg.wc_modes, cond: cg.cond,
-            mod_key_no_consume: cg.mod_key_no_consume, mode_kdn_no_consume: cg.mode_kdn_no_consume,
-            _state: ComboGenSt_Inited{cmk}
-        }
+impl From <ComboGen <ComboGenSt_Key>> for CG {
+    fn from (cg : ComboGen <ComboGenSt_Key>) -> Self {
+        let cmk = EvCbMapKey::key_ev_t (cg.st.key, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
     }
 }
-
-impl From<ComboGen<ComboGenSt_Key>> for ComboGen<ComboGenSt_Inited> {
-    fn from (cg : ComboGen<ComboGenSt_Key>) -> Self {
-        Self::new ( EvCbMapKey::key_ev_t (cg._state.key, cg._state.action), cg )
+impl From <ComboGen <ComboGenSt_MouseBtn>> for CG {
+    fn from (cg : ComboGen <ComboGenSt_MouseBtn>) -> Self {
+        let cmk = EvCbMapKey::btn_ev_t (cg.st.mbtn, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
     }
 }
-impl From<ComboGen<ComboGenSt_MouseBtn>> for ComboGen<ComboGenSt_Inited> {
-    fn from (cg : ComboGen<ComboGenSt_MouseBtn>) -> Self {
-        Self::new ( EvCbMapKey::btn_ev_t (cg._state.mbtn, cg._state.action), cg )
-    }
-}
-impl From<ComboGen<ComboGenSt_Wheel>> for ComboGen<ComboGenSt_Inited> {
-    fn from (cg : ComboGen<ComboGenSt_Wheel>) -> Self {
-        Self::new ( EvCbMapKey::wheel_ev_t (cg._state.whl, cg._state.action), cg )
+impl From <ComboGen <ComboGenSt_Wheel>> for CG {
+    fn from (cg : ComboGen <ComboGenSt_Wheel>) -> Self {
+        let cmk = EvCbMapKey::wheel_ev_t (cg.st.whl, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
     }
 }
 

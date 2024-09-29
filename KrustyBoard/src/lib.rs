@@ -47,6 +47,7 @@ pub mod krusty {
     // other sub-modules in module directory
     pub mod mod_keys;
     pub mod mode_states;
+    pub mod combo;
     pub mod combo_maps;
     pub mod combo_gen;
     pub mod action_gen;
@@ -60,6 +61,7 @@ pub mod krusty {
     // and our (selective or wholesale) sub-module re-exports
     pub use self::mod_keys::*;
     pub use self::mode_states::*;
+    pub use self::combo::*;
     pub use self::combo_maps::*;
     pub use self::combo_gen::*;
     pub use self::action_gen::*;
