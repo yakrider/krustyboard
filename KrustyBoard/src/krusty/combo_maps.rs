@@ -209,16 +209,16 @@ impl Combo {
         mvs
     }
 
-    fn gen_combos (cg:&ComboGen) -> Vec<Combo> {
+    fn gen_combos (cg:&CG) -> Vec<Combo> {
         // we'll have to convert the states bits/flags to the wildcard-supporting enum
         use ComboStatesBits_T::*;
-        fn get_modkey_enum (cg:&ComboGen, emks:&Vec<ModKey>, mk:ModKey) -> ComboStatesBits_T {
+        fn get_modkey_enum (cg:&CG, emks:&Vec<ModKey>, mk:ModKey) -> ComboStatesBits_T {
             if let Some(v) = cg.wc_mks.as_ref() {
                 if (v.is_empty() && !emks.contains(&mk)) || v.contains(&mk) { return Bit_Ignored }
             }
             if emks.contains(&mk) { Bit_Present } else { Bit_Absent }
         }
-        fn get_mode_enum (cg:&ComboGen, md:ModeState_T) -> ComboStatesBits_T {
+        fn get_mode_enum (cg:&CG, md:ModeState_T) -> ComboStatesBits_T {
             if let Some(v) = cg.wc_modes.as_ref() {
                 if (v.is_empty() && !cg.modes.contains(&md)) || v.contains(&md) { return Bit_Ignored }
             }
@@ -231,7 +231,7 @@ impl Combo {
             let latch_states  = ModeStates::static_latch_states() .map (|md| get_mode_enum (cg,md));
             let flags_states  = Self::static_flags_modes()        .map (|md| get_mode_enum (cg,md));
 
-            Combo { _private:(), cmk: cg.cmk, modkey_states, mode_states, latch_states, flags_states }
+            Combo { _private:(), cmk: cg._state.cmk, modkey_states, mode_states, latch_states, flags_states }
         } ) .collect::<Vec<Combo>>()
     }
 
@@ -239,7 +239,7 @@ impl Combo {
     /// modkeys specified (or not-specified) in the ActionGen builder. <br>
     /// Further, if a combo-gen is provided, will appropriately wrap modkey or mode-key consumption wrappers around the action
     /// (the consumption wrapper marks the keys as consumed, which typically suppresses their key-repeat and/or release events)
-    pub fn gen_af (ag: &ActionGen<ActionGenSt_Inited>, cgo:Option<&ComboGen>) -> AF {
+    pub fn gen_af (ag:&AG, cgo:Option<&CG>) -> AF {
         // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
@@ -292,11 +292,11 @@ impl Combo {
     }
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    fn gen_combo_entries (mut cg: ComboGen, ag:ActionGen<ActionGenSt_Inited>) -> Vec<(Combo, ComboValue)> {
+    fn gen_combo_entries (mut cg:CG, ag:AG) -> Vec<(Combo, ComboValue)> {
         // before we gen combos/AFs from these, lets make useful updates to the combo-gen as the final prep step
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // (note that these can still be set to no-consume if key-repeat is desired)
-        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.cmk {
+        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg._state.cmk {
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.modes.contains(&ms_t) { cg.modes.push(ms_t) }
             }
@@ -344,12 +344,12 @@ impl CombosMap {
 
 
     /// Use this fn to register combos <br>
-    /// (the ActionGen param can be either ActionGen_wKey to output other keys/combos, or ActionGen to directly supply the AF to trigger)
-    pub fn add_combo (&self, cg: ComboGen, ag: impl Into<ActionGen<ActionGenSt_Inited>>) {
-        for (c, cv) in Combo::gen_combo_entries(cg, ag.into()) {
-            //println! ("+C: mks:{:?}, ms:{:?}, k:{:?}, mks:{:?}, ms:{:?} -> k:{:?} mks:{:?}", c.mk_state, c.mode_state, cg.key, cg.mks, cg.modes, ag.key, ag.mks );
+    /// The expectation is to progressively (fluently) build the ComboGen and ActionGen params, and pass them here.
+    pub fn add_combo (&self, cg: impl Into<CG>, ag: impl Into<AG>) {
+        for (c, cv) in Combo::gen_combo_entries(cg.into(), ag.into()) {
             self.add_to_combos_map (c, cv);
-    } }
+        }
+    }
 
 
     fn add_to_wildcards_map (&self, c:Combo) {

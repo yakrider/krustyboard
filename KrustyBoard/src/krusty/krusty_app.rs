@@ -322,7 +322,7 @@ pub fn setup_krusty_board () {
         // release ctrl (when need to) only after click btn up is sent
         if ks.in_managed_ctrl_down_state.is_set() { ks.in_managed_ctrl_down_state.clear(); ks.mod_keys.lctrl.ensure_inactive() }
     } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn_up(LeftButton).wcma().wcsa(), k.ks.ag().af ( gen_af_lbtn_release (k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).rel().wcma().wcsa(), k.ks.ag().af ( gen_af_lbtn_release (k.ks.clone()) ) );
 
     /// for win-lbtn and win-caps-lbtn, we want to **_ capture pre-drag-dat _** for window drag/resizing
     fn gen_af_win_snap_dat (ks:KrustyState) -> AF { Arc::new ( move || {
@@ -399,7 +399,7 @@ pub fn setup_krusty_board () {
         }
         ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
     } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn_up(RightButton).wcma().wcsa(),  k.ks.ag().af (gen_af_rbtn_release (k.ks.clone())) );
+    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).rel().wcma().wcsa(),  k.ks.ag().af (gen_af_rbtn_release (k.ks.clone())) );
 
 
 
@@ -420,8 +420,8 @@ pub fn setup_krusty_board () {
             if ks.mouse.mbtn.active.is_set() { ks.mouse.mbtn.active.clear(); MiddleButton.release(); }
             if mbs.active.is_set() { mbs.active.clear(); mbs.btn.release(); }
         } ) }
-        k.cm .add_combo ( k.ks.cg().mbtn_up(btn).wcma().wcsa(),
-                             k.ks.ag().af ( gen_xbtn_base_rel_af   (k.ks.clone(), k.ks.mouse.get_btn_state(btn).unwrap()) ) );
+        k.cm .add_combo ( k.ks.cg().mbtn(btn).rel().wcma().wcsa(),
+                          k.ks.ag().af ( gen_xbtn_base_rel_af (k.ks.clone(), k.ks.mouse.get_btn_state(btn).unwrap()) ) );
 
         // win-xbtn as window close
         k.cm .add_combo ( k.ks.cg().mbtn(btn).m(lwin),  k.ks.ag().af ( Arc::new ( || win_close(win_get_hwnd_from_pointer()) ) ) );
@@ -572,8 +572,8 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msD), k.ks.ag().af (gen_af_snap_switch (false, ssf.clone(), &k.ks)) );
 
     // and once we're done w the switching, we clear the flag so we'll check and refresh the snap next time we start
-    k.cm .add_combo (k.ks.cg().k_up(D)         .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
-    k.cm .add_combo (k.ks.cg().k_up(D).m(caps) .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
+    k.cm .add_combo (k.ks.cg().k(D).rel()         .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
+    k.cm .add_combo (k.ks.cg().k(D).rel().m(caps) .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
 
 
     /// note: general **_ caps-wheel as ctrl-wheel _** is handled via managed-ctrl-down-state and the fallback wheel action (with its incr arg)

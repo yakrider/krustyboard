@@ -302,11 +302,10 @@ impl KrustyState {
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer());
     }
 
-    /// Utlity function to create a new Combo-generator. <br>
-    /// By default, it sets the modifier-keys to have mask-release (consumed), and mod-keys to have repeats suppressed (consumed)
-    pub fn cg (&self) -> ComboGen_Init { ComboGen_Init {} }
+    /// Utlity function to create a new Combo-Generator
+    pub fn cg (&self) -> ComboGenSt_Init { ComboGenSt_Init {} }
 
-    /// Utility function to create a new Combo-Action generator
+    /// Utility function to create a new Combo-Action-Generator
     pub fn ag (&self) -> ActionGenSt_Init { ActionGenSt_Init {} }
 
 }
