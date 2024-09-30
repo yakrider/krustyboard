@@ -62,8 +62,8 @@ pub fn setup_krusty_board () {
             fi.exe == "chrome.exe" || fi.exe == "msedge.exe"
     } ) }
 
-    fn c_flag   (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_set() } ) }
-    fn c_flag_n (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_clear() } ) }
+    #[allow (dead_code)] fn c_flag   (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_set() } ) }
+    #[allow (dead_code)] fn c_flag_n (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_clear() } ) }
 
     #[allow (dead_code)] fn af_set_flag   (flag:Flag) -> AF { Arc::new ( move || flag.set() ) }
     #[allow (dead_code)] fn af_clear_flag (flag:Flag) -> AF { Arc::new ( move || flag.clear() ) }
@@ -273,13 +273,14 @@ pub fn setup_krusty_board () {
     // dbl-caps T to toggle capslock
     k.cm .add_combo ( k.ks.cg().k(T).m(caps_dbl),   k.ks.ag().k(CapsLock) );
 
-    // we'll set dbl-caps-alt-S/C/A/W as tmp shift/ctrl/alt/win lock (useful for doing mouse horiz scroll on say moon-reader etc)
-    fn gen_af_ensure_mk (mk:UnifModKey) -> AF { Arc::new ( move || mk.ensure_active() ) }
-    k.cm .add_combo ( k.ks.cg().k(S).m(caps_dbl).m(lalt),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lshift.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().k(C).m(caps_dbl).m(lalt),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lctrl.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().k(A).m(caps_dbl).m(lalt),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lalt.clone()) ) );
+    // we'll set dbl-caps-win-S/C/A/W as tmp shift/ctrl/alt/win lock (useful for doing mouse horiz scroll on say moon-reader etc)
+    fn gen_af_ensure_mk (mk:UnifModKey) -> AF { Arc::new ( move || { mk.ensure_active(); mk.mngd_active.clear(); } ) }
+    k.cm .add_combo ( k.ks.cg().k(S).m(caps_dbl).m(lwin),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lshift.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().k(C).m(caps_dbl).m(lwin),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lctrl.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().k(A).m(caps_dbl).m(lwin),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lalt.clone()) ) );
     //k.cm .add_combo ( k.ks.cg().k(W).m(caps_dbl).m(lalt),   k.ks.ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lwin.clone()) ) );
     // ^^ win is now dbled modkey (and so not full-managed), and so ensure-active doesnt make sense for it
+
 
     // we'll also setup special mode for dbl-caps-q + other keys .. intended to use to drive more complex hotkeys for IDE use etc
     k.cm .add_combo ( k.ks.cg().k(Q).s(qks).m(caps_dbl),  k.ks.ag().af(no_action()) );
@@ -311,7 +312,7 @@ pub fn setup_krusty_board () {
     /// for caps-lbtn we'll enable **_ caps-as-ctrl _** (for drags etc) via mngd_ctrl_state .. (but not other caps-mod-combos as ctrl-mod-combos)
     // (note that plain clicks will work ok via fallback, though mod-click fallback will only have mod-wrap arouund press not press-rel)
     fn gen_af_caps_mngd_lbtn (ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.in_managed_ctrl_down_state.set(); ks.mod_keys.lctrl.ensure_active();
+        ks.mod_keys.lctrl.ensure_active();
         ks.mouse.lbtn.active.set(); LeftButton.press();
     } ) }
     k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(caps),  k.ks.ag().af (gen_af_caps_mngd_lbtn(k.ks.clone())) );
@@ -319,8 +320,8 @@ pub fn setup_krusty_board () {
     /// for **_ mbtn release _**, we'll specify full wildcards (modkeys, modes) to avoid missing btn releases regardless of mode-states
     fn gen_af_lbtn_release (ks:KrustyState) -> AF { Arc::new ( move || {
         if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
-        // release ctrl (when need to) only after click btn up is sent
-        if ks.in_managed_ctrl_down_state.is_set() { ks.in_managed_ctrl_down_state.clear(); ks.mod_keys.lctrl.ensure_inactive() }
+        // now release ctrl (when need to) .. (and only after lbtn-up was sent first ^^)
+        ks.mod_keys.lctrl.ensure_inactive();
     } ) }
     k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).rel().wcma().wcsa(), k.ks.ag().af ( gen_af_lbtn_release (k.ks.clone()) ) );
 
@@ -447,12 +448,14 @@ pub fn setup_krusty_board () {
     // as such, one way around is to just set conditionals that check that upon trigger .. which the following fn lets us do
     // (alternately, we could use stored last wheel-delta in mouse-wheel struct, which should be fine as long as queue clearance is fast-enough)
     // UPDATE: we now have wheel direction added into binding key and event itself, but letting the below stand as its still valid too
-    #[allow(dead_code)]
-    fn c_wheel_dir (is_down:bool) -> ComboCond { Arc::new ( move |_,e| {
-        if let EventDat::wheel_event {delta, ..} = e.dat { is_down == (delta < 0) } else { false }
-    } ) }
+    //
+    // #[allow(dead_code)]
+    // fn c_wheel_dir (is_down:bool) -> ComboCond { Arc::new ( move |_,e| {
+    //     if let EventDat::wheel_event {delta, ..} = e.dat { is_down == (delta < 0) } else { false }
+    // } ) }
     //fn c_wheel_dir_down () -> ComboCond { c_wheel_dir(true ) }
     //fn c_wheel_dir_up ()   -> ComboCond { c_wheel_dir(false) }
+
 
     fn gen_af_incr_brightness (step:i32) -> AF { Arc::new ( move || { let _ = incr_brightness(step); } ) }
 
@@ -465,6 +468,7 @@ pub fn setup_krusty_board () {
     ) ) }
     // ^^ gives an AF with specified number of skips
 
+    // media next/prev work via alt-shift-vol-up/dn as configured in musicbee etc
     fn media_next_action (ks:&KrustyState, next_not_prev:bool)  -> AF {
         let media_next_af = {
             if next_not_prev { ks.ag().k(VolumeUp  ).m(lalt ).m(lshift).gen_af() }
@@ -476,57 +480,75 @@ pub fn setup_krusty_board () {
             let mnsaf = media_next_skips_af.clone();  // clone again to move into spawned thread (spawned since combos run in single queued side-thread)
             thread::spawn ( move || { thread::sleep(Duration::from_millis(2000));  mnsaf(); } );
     } ) }
-    // note that in the above, although we're using win-combos, we dont have to wrap in win-action guards anymore as win is now as TMK_dbl
+    // note that in the above, although we're using win-combos, we dont have to wrap in win-action guards as win is Modkey_Doubled
 
-    /// we want to set alt-wheel to **_ BRIGHTNESS control _**, but NOT when switche or task-switcher is fgnd
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lalt) .c(switche_not_fgnd()) .c(alt_tab_not_fgnd()),  k.ks.ag().af (gen_af_incr_brightness(-4)) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(lalt) .c(switche_not_fgnd()) .c(alt_tab_not_fgnd()),  k.ks.ag().af (gen_af_incr_brightness( 4)) );
+
+    fn gen_af_base_wheel (dir_is_down:bool, ks:KrustyState) -> AF {
+        // we want to mark when we enter switche right-btn-scroll .. but otherwise, we just send regular wheel scrolls
+        let af_wheel_scroll   = if dir_is_down { ks.ag().whl().bkwd().gen_af() } else { ks.ag().whl().frwd().gen_af() };
+        Arc::new ( move || {
+            if ks.mouse.rbtn.down.is_set() { ks.in_right_btn_scroll_state.set() }
+            af_wheel_scroll()
+            // ^^ we'll send out the scroll even during rbtn-scrll, despite switche hooks directly listening to it ..
+            // .. because in cases when our hooks are ahead of switche hooks, it wouldn't otherwise get there
+        } )
+    }
+    k.cm .add_combo (k.ks.cg().whl().bkwd(),  k.ks.ag().af ( gen_af_base_wheel (true,  k.ks.clone()) ) );
+    k.cm .add_combo (k.ks.cg().whl().frwd(),  k.ks.ag().af ( gen_af_base_wheel (false, k.ks.clone()) ) );
+
+
+    fn gen_af_caps_wheel (dir_is_down:bool, ks:KrustyState) -> AF {
+        // for switche, we send shift-up/dn which will do in-block-only-wrap instead in recents/grouped instead of across the groups
+        // else during ctrl-tab, we'll do ctrl-up/dn, mostly for IDE as it doesnt seem to respond to wheel during ctrl-tab
+        // else for general caps-wheel, we send out managed-ctrl-wheels (managed to avoid having ctrl dn/up be interspersed)
+        let af_switche_fgnd = if dir_is_down { ks.ag().k(ExtDown).m(shift).gen_af() } else { ks.ag().k(ExtUp).m(shift).gen_af() };
+        let af_ctrl_tab     = if dir_is_down { ks.ag().k(ExtDown).m(ctrl).gen_af() } else { ks.ag().k(ExtUp).m(ctrl).gen_af() };
+        let af_ctrl_wheel   = if dir_is_down { ks.ag().whl().bkwd().m(ctrl).gen_af() } else { ks.ag().whl().frwd().m(ctrl).gen_af() };
+        Arc::new ( move || {
+            if check_switche_fgnd() {
+                af_switche_fgnd()
+            } else if ks.in_ctrl_tab_scroll_state.is_set() {
+                af_ctrl_tab()
+            } else {
+                ks.mod_keys.lctrl.ensure_active();
+                af_ctrl_wheel()
+            }
+        } )
+    }
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps),  k.ks.ag().af ( gen_af_caps_wheel (true,  k.ks.clone()) ) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps),  k.ks.ag().af ( gen_af_caps_wheel (false, k.ks.clone()) ) );
+    // we'll also do this for actual ctrl-wheel so the behavior is consistent
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(ctrl),          k.ks.ag().af ( gen_af_caps_wheel (true,  k.ks.clone()) ) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(ctrl),          k.ks.ag().af ( gen_af_caps_wheel (false, k.ks.clone()) ) );
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(ctrl).m(caps),  k.ks.ag().af ( gen_af_caps_wheel (true,  k.ks.clone()) ) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(ctrl).m(caps),  k.ks.ag().af ( gen_af_caps_wheel (false, k.ks.clone()) ) );
+
+
+    fn gen_af_alt_wheel (dir_is_down:bool, ks:&KrustyState) -> AF {
+        // general alt-wheel will do brightness control, and we'll separately support alt-tab and swtiche nav
+        let af_brightness   = if dir_is_down { gen_af_incr_brightness(-4) } else { gen_af_incr_brightness(4) };
+        let af_alt_tab_fgnd = if dir_is_down { ks.ag().k(ExtRight).mkg_nw().gen_af() } else { ks.ag().k(ExtLeft).mkg_nw().gen_af() };
+        let af_switche_fgnd = if dir_is_down { ks.ag().k(ExtDown ).mkg_nw().gen_af() } else { ks.ag().k(ExtUp  ).mkg_nw().gen_af() };
+        Arc::new ( move || {
+            if check_switche_fgnd() { af_switche_fgnd() }
+            else if check_alt_tab_fgnd() { af_alt_tab_fgnd() }
+            else { af_brightness() }
+        } )
+    }
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lalt),  k.ks.ag().af ( gen_af_alt_wheel(true,  &k.ks)) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(lalt),  k.ks.ag().af ( gen_af_alt_wheel(false, &k.ks)) );
+
     // and for alt-wheel w qks1 (i.e. alt+1+wheel), we do finer brightness adjustments
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(lalt).s(qks1),  k.ks.ag().af ( gen_af_incr_brightness(-1) ) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(lalt).s(qks1),  k.ks.ag().af ( gen_af_incr_brightness( 1) ) );
 
-    /// for winodws **_ ALT-TAB TASK SWITCHER _**, we want mouse wheel to translate to left-right nav in the list
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lalt) .c(alt_tab_fgnd()),  k.ks.ag().k(Tab).mkg_nw() );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(lalt) .c(alt_tab_fgnd()),  k.ks.ag().k(Tab).m(shift).mkg_nw() );
 
-    /// for **_ SWITCHE _**, we want to translate to up/down
-    // (In theory, the fallback by default sends wheel events, so not exactly necessary, but having a combo is faster than fallback proc)
-    k.cm .add_combo ( k.ks.cg().whl().bkwd().m(lalt) .c(switche_fgnd()),  k.ks.ag().k(ExtDown).mkg_nw() );
-    k.cm .add_combo ( k.ks.cg().whl().frwd().m(lalt) .c(switche_fgnd()),  k.ks.ag().k(ExtUp  ).mkg_nw() );
-
-    /// specifically during **_ SWITCHE RBTN-SCROLL _** though, we want to track the state, just so the release can be handled properly
-    fn gen_af_rbtn_scroll_state (ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.in_right_btn_scroll_state.set();
-        // and for when kr hooks are ahead of sw hooks, we gotta let it go through as well
-        ks.mouse.vwheel.wheel.scroll (ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
-    } ) }
-    k.cm .add_combo (k.ks.cg().whl().bkwd() .c(c_flag(k.ks.mouse.rbtn.down.clone())),  k.ks.ag().af (gen_af_rbtn_scroll_state(k.ks.clone())) );
-    k.cm .add_combo (k.ks.cg().whl().frwd() .c(c_flag(k.ks.mouse.rbtn.down.clone())),  k.ks.ag().af (gen_af_rbtn_scroll_state(k.ks.clone())) );
-
-    /// for win-wheel, we'll do **_ VOLUME control _**
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin),  k.ks.ag().k(VolumeDown).mkg_nw() );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin),  k.ks.ag().k(VolumeUp  ).mkg_nw() );
-
-    /// caps-win-3 wheel .. **_ media FWD-BKWD SKIP _** .. (cf win-3 for vol, win-f3 skip-fwd)
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin).m(caps).s(qks3),  k.ks.ag().af (media_skips_action (1, &k.ks, true )) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin).m(caps).s(qks3),  k.ks.ag().af (media_skips_action (1, &k.ks, false)) );
-
-    /// and with win-caps-wheel, we'll **_ navigate across DESKTOPS _** (via win combo ctrl-win-left/right)
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin).m(caps),  k.ks.ag().k(ExtRight).m(win).m(ctrl) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin).m(caps),  k.ks.ag().k(ExtLeft ).m(win).m(ctrl) );
-    /// and we'll do the same for caps-alt-D + wheel .. (similar to that with j/k further down)
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).m(lalt).s(msD),  k.ks.ag().k(ExtRight).m(win).m(ctrl) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).m(lalt).s(msD),  k.ks.ag().k(ExtLeft ).m(win).m(ctrl) );
-
-    /// caps-scroll as ctrl-up/dn, mostly for **_ IDE CTRL-TAB _** as it doesnt seem to take wheel-scroll in ctrl-tab
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),  k.ks.ag().k(ExtDown).m(ctrl) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),  k.ks.ag().k(ExtUp  ).m(ctrl) );
-
-    /// and general use caps-alt-wheel as **_ UP-DOWN nav _** .. but if it is alt-tab, we want tab/shift-tab, and for swtiche, left/right arrows
     fn gen_af_caps_alt_wheel (dir_is_down:bool, ks:&KrustyState) -> AF {
-        let af_switche_fgnd = if dir_is_down { ks.ag().k(ExtRight).m(alt).gen_af() } else { ks.ag().k(ExtLeft).m(alt).gen_af() };
-        let af_alt_tab_fgnd = if dir_is_down { ks.ag().k(Tab).mkg_nw().gen_af()    } else { ks.ag().k(Tab).m(shift).mkg_nw().gen_af() };
-        let af_normal       = if dir_is_down { ks.ag().k(ExtDown).gen_af()         } else { ks.ag().k(ExtUp).gen_af() };
+        // general caps-alt-wheel we'll do up/down nav, and we'll support regular alt-tab tab
+        // and for swtiche, we'll do in-block-only nav (via alt-shift-up/dn arrows)
+        let af_normal       = if dir_is_down { ks.ag().k(ExtDown).gen_af()      } else { ks.ag().k(ExtUp).gen_af() };
+        let af_alt_tab_fgnd = if dir_is_down { ks.ag().k(ExtRight).mkg_nw().gen_af() } else { ks.ag().k(ExtLeft).mkg_nw().gen_af() };
+        let af_switche_fgnd = if dir_is_down { ks.ag().k(ExtDown).m(shift).mkg_nw().gen_af() } else { ks.ag().k(ExtUp).m(shift).mkg_nw().gen_af() };
         Arc::new ( move || {
             if check_switche_fgnd() { af_switche_fgnd() }
             else if check_alt_tab_fgnd() { af_alt_tab_fgnd() }
@@ -543,17 +565,40 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).m(lalt).s(qks1),  k.ks.ag().k(ExtRight) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).m(lalt).s(qks1),  k.ks.ag().k(ExtLeft) );
 
+
+    /// for win-wheel, we'll do **_ VOLUME control _**
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin),  k.ks.ag().k(VolumeDown).mkg_nw() );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin),  k.ks.ag().k(VolumeUp  ).mkg_nw() );
+
+    /// caps-win-3 wheel .. **_ media FWD-BKWD SKIP _** .. (cf win-3 for vol, win-f3 skip-fwd)
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin).m(caps).s(qks3),  k.ks.ag().af (media_skips_action (1, &k.ks, true )) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin).m(caps).s(qks3),  k.ks.ag().af (media_skips_action (1, &k.ks, false)) );
+
+    /// and with win-caps-wheel, we'll **_ navigate across DESKTOPS _** (via win combo ctrl-win-left/right)
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(lwin).m(caps),  k.ks.ag().k(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(lwin).m(caps),  k.ks.ag().k(ExtLeft ).m(win).m(ctrl) );
+    /// and we'll do the same for caps-alt-D + wheel .. (similar to that with j/k further down)
+    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).m(lalt).s(msD),  k.ks.ag().k(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).m(lalt).s(msD),  k.ks.ag().k(ExtLeft ).m(win).m(ctrl) );
+
     /// caps-e wheel for **_ TAB_NAV _** .. .. e as that is row 'above', and tabs are usually up above .. oh well
-    // we'll setup generally for browser, explorer etc (ctrl-tab, ctrl-shift-tab)
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag().k(Tab).m(ctrl) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msE) .c(intellij_not_fgnd()),  k.ks.ag().k(Tab).m(ctrl).m(shift) );
-    // we'll setup special case for IDE (alt-ctrl-left/right)
-    k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag().k(ExtRight).m(alt).m(ctrl) );
-    k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msE) .c(intellij_fgnd()),  k.ks.ag().k(ExtLeft ).m(alt).m(ctrl) );
+    fn gen_af_caps_e_wheel (dir_is_down:bool, ks:&KrustyState) -> AF {
+        // we'll setup generally for browser, explorer etc (ctrl-tab, ctrl-shift-tab)
+        // and setup special case for IDE (alt-ctrl-left/right)
+        let af_normal = if dir_is_down { ks.ag().k(Tab).m(ctrl).gen_af() } else { ks.ag().k(Tab).m(ctrl).m(shift).gen_af() };
+        let af_ide    = if dir_is_down { ks.ag().k(ExtRight).m(alt).m(ctrl).gen_af() } else { ks.ag().k(ExtLeft).m(alt).m(ctrl).gen_af() };
+        Arc::new ( move || {
+            if check_intellij_fgnd() { af_ide() }
+            else { af_normal() }
+        } )
+    }
+    k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).s(msE),  k.ks.ag().af ( gen_af_caps_e_wheel (true,  &k.ks) ) );
+    k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps).s(msE),  k.ks.ag().af ( gen_af_caps_e_wheel (false, &k.ks) ) );
 
     /// caps-f (i.e word mode) wheel, we'll set as **_ nav through SEARCH (F3, Shift-F3) _**
     k.cm .add_combo (k.ks.cg().whl().bkwd().m(caps).s(msF),  k.ks.ag().k(F3) );
     k.cm .add_combo (k.ks.cg().whl().frwd().m(caps).s(msF),  k.ks.ag().k(F3).m(shift) );
+
 
     /// caps-d wheel to directly **_ SWITCH WINDOWS _** through cur window-list snapshot (via switche)
     // (and instead of adding a flag in krusty itself to track while we're in this mode, we'll just define a flag here)
@@ -576,25 +621,13 @@ pub fn setup_krusty_board () {
     k.cm .add_combo (k.ks.cg().k(D).rel().m(caps) .c(c_flag(ssf.clone())), k.ks.ag().af (af_clear_flag(ssf.clone())) );
 
 
-    /// note: general **_ CAPS-AS-CTRL WHEEL _** is handled via managed-ctrl-down-state and the fallback wheel action (with its incr arg)
-    // (noted here as wouldnt be easy to do via combos here as we havent yet setup combo AFs to have access to event data)
-    // ^^ however, the fallbacks cant do continuous/managed ctrl-down, which is desirable (and marginally better for zoom etc)
-    // .. so we'll impl this here anyway, just using last stored delta in wheel struct .. not ideal ofc, but ok if queue is processed fast
-    fn gen_af_caps_mngd_wheel (ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.in_managed_ctrl_down_state.set(); ks.mod_keys.lctrl.ensure_active();
-        ks.mouse.vwheel.wheel.scroll (ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
-    } ) }
-    k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
-                      k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps) .c(c_flag_n(k.ks.in_ctrl_tab_scroll_state.clone())),
-                      k.ks.ag().af ( gen_af_caps_mngd_wheel (k.ks.clone()) ) );
-
     /// we'll let caps-R-wheel do **_ FASTER SCROLL _**
     fn gen_af_fast_scroll (ks:KrustyState) -> AF { Arc::new ( move || {
         ks.mouse.vwheel.wheel.scroll (3 * ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
     } ) }
     k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).s(msR),  k.ks.ag().af ( gen_af_fast_scroll(k.ks.clone()) ) );
     k.cm .add_combo ( k.ks.cg().whl().frwd().m(caps).s(msR),  k.ks.ag().af ( gen_af_fast_scroll(k.ks.clone()) ) );
+
 
     /// with caps-win-[e/d/f/r]-combos, we'll add **_ WINDOW MOVE _** functionality, similar to what was done w kbd l2 keys
     k.cm .add_combo ( k.ks.cg().whl().bkwd().m(caps).m(win).s(msD),  k.ks.ag().af ( Arc::new (|| win_fgnd_move_rel (-10,   0)) ) );
@@ -646,23 +679,23 @@ pub fn setup_krusty_board () {
     // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
     // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
     let ks = k.ks.clone();
-    let cb : AF = Arc::new (move || {
+    let af_caps_tab: AF = Arc::new (move || {
         if ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_ctrl_down() {
             if ks.mod_keys.caps.down.is_set() {
-                ks.in_managed_ctrl_down_state.set();
                 ks.mod_keys.lctrl.ensure_active();  // this enables caps-as-ctrl for caps-tab switching
                 // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
             }
-            ks.in_ctrl_tab_scroll_state.set();
+            ks.in_ctrl_tab_scroll_state.set();   // this will affect wheel scrolls until the state clears
             Tab.press_release()
         }
     } );
     // lets add support for this in caps tab ..
-    k.cm .add_combo ( k.ks.cg().k(Tab).m(caps),            k.ks.ag().af(cb.clone()) );
-    // the rest of these below (for ctrl/shift/ralt) work naturally via fallback, but we'll keep them here for reference/reminder
-    //k.cm .add_combo ( k.ks.cg().k(Tab).m(ctrl),          k.ks.ag().af(cb.clone()) );
-    //k.cm .add_combo ( k.ks.cg().k(Tab).m(caps).m(ralt),  k.ks.ag().af(cb.clone()) );
-    //k.cm .add_combo ( k.ks.cg().k(Tab).m(ctrl).m(ralt),  k.ks.ag().af(cb.clone()) );
+    k.cm .add_combo ( k.ks.cg().k(Tab).m(caps),            k.ks.ag().af(af_caps_tab.clone()) );
+    // just for the tab, the rest of these below (for ctrl/shift/ralt) work naturally via fallback ..
+    // .. but we still want the ctrl-tab-state to be marked so the wheel behavior is uniform w caps
+    k.cm .add_combo ( k.ks.cg().k(Tab).m(ctrl),          k.ks.ag().af(af_caps_tab.clone()) );
+    k.cm .add_combo ( k.ks.cg().k(Tab).m(caps).m(ralt),  k.ks.ag().af(af_caps_tab.clone()) );
+    k.cm .add_combo ( k.ks.cg().k(Tab).m(ctrl).m(ralt),  k.ks.ag().af(af_caps_tab.clone()) );
 
 
 
@@ -1087,9 +1120,8 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg().k(N).m(caps).m(lwin),  k.ks.ag().af(action(start_chrome)) );
 
     // we also have some additional more drastic ones with double-caps-win combos
-    k.cm .add_combo ( k.ks.cg().k(S).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_titlebar())) );
-    k.cm .add_combo ( k.ks.cg().k(C).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_titlebar())) );
     k.cm .add_combo ( k.ks.cg().k(T).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
+    k.cm .add_combo ( k.ks.cg().k(B).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_titlebar())) );
 
     fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32, side_t:RectEdgeSide) {
         // we'll setup caps-win combos for regular move/stretch etc
@@ -1278,7 +1310,7 @@ pub fn setup_krusty_board () {
                 Space.press_release();
                 // now release the ctrl so the transient-switcher popup goes away
                 ks.mod_keys.lctrl.ensure_inactive();
-                ks.in_managed_ctrl_down_state.clear(); ks.in_ctrl_tab_scroll_state.clear();
+                ks.in_ctrl_tab_scroll_state.clear();
                 // then do actual ctrl-e to bring up the persistent-switcher (ctrl-e is default shortcut in IDE for that)
                 // we'll want to give a tiny delay so IDE has time to process focus changes appropriately .. just spawning is enough for that
                 let ks = ks.clone();
@@ -1424,10 +1456,10 @@ pub fn setup_krusty_board () {
 
 
     /// **_ END OF USER COMBO SETUPS _**
-    ///
 
     // finally we can start binding key maps .. first the specialized handling for mode/latch trigger keys
     k.ks.mode_states.bind_mode_keys_actions(&k);
+
     // then setup the combo-processor itself .. (note that modifier key handlers were already set up earlier)
     k.cm.enable_combos_map_events_processor(&k);
 
@@ -1438,6 +1470,8 @@ pub fn setup_krusty_board () {
     special_keys_setups::setup_direct_binding_keys (&k);
 
 
+    // and we'll give a lil indicator for when we restart etc
+    jiggle_cursor();
 
     // note: the handle_input_events to start the whole shebang should be being called from main, like via the start_krusty_board fn
     //start_krusty_board();

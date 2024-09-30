@@ -171,7 +171,7 @@ impl ActionGen <ActionGenSt_Wheel> {
 
 /// methods specific to generating ActionGen for directly specified Action-Function
 impl ActionGen <ActionGenSt_AF> {
-    /// Enable wrapping with mod-key guard actions (which disables their key repeat). <br>
+    /// Enable wrapping with mod-key guard actions (which accounts for prior modkey active/inactive). <br>
     /// (The default for ActionGenSt_AF is disabled)
     pub fn mkg_w (mut self) -> Self {
         self.wrap_mkg = true;
@@ -196,7 +196,7 @@ impl ActionGenS_mkgWrapped for ActionGenSt_Wheel { }
 impl <S> ActionGen<S>
     where S : ActionGenSt + ActionGenable + ActionGenS_mkgWrapped
 {
-    /// Disable wrapping with mod-key guard actions (which disables their key repeat)
+    /// Disable wrapping with mod-key guard actions (which accounts for prior modkey active/inactive). <br>
     /// (The default for ActionGenSt_Key and ActionGenSt_MouseBtn is disabled)
     pub fn mkg_nw (mut self) -> Self {
         self.wrap_mkg = false;

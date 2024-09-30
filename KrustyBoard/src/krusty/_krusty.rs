@@ -199,9 +199,7 @@ pub struct _KrustyState {
     // win-groups .. maanges the three supported window-grouping functionalty
     pub win_groups: WinGroups,
 
-    // for caps-ctrl eqv for caps-tab, caps-wheel, ctrl-move etc, we'll send ctrl press/rel at the right times, and will need to track that
-    pub in_managed_ctrl_down_state: Flag,
-    // and since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
+    // since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
     pub in_ctrl_tab_scroll_state: Flag,
 
     // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
@@ -255,7 +253,6 @@ impl KrustyState {
                 mouse       : Mouse::new(),
                 win_groups  : WinGroups::new(),
 
-                in_managed_ctrl_down_state : Flag::default(),
                 in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
 
@@ -277,7 +274,7 @@ impl KrustyState {
         MiddleButton.release(); X1Button.release(); X2Button.release();
 
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-           &self.in_managed_ctrl_down_state, &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
+           &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
 
         jiggle_cursor();
