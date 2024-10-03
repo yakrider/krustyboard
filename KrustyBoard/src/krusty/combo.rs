@@ -105,6 +105,10 @@ impl Combo {
         wc_eqv (&self.modkey_states, &c.modkey_states) && wc_eqv (&self.mode_states, &c.mode_states) &&
             wc_eqv (&self.latch_states, &c.latch_states) && wc_eqv (&self.flags_states, &c.flags_states)
     }
+    // todo: In theory, we could make wildcards matching and filtering more efficient by leaning into bitwise operations ..
+    // .. we'd store combos as actual bit-packed words, along w a bit-mask for the wildcards specified
+    // .. then at runtime, we'd gen cur-combo bit-packed as well, then 'AND' that w the mask, then try and match that in wc combos table
+    // In practice, wcs (under specific cmks) should be rare enough that none of that is prob worth implementing
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves

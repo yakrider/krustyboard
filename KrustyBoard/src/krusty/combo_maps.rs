@@ -70,8 +70,8 @@ impl CombosMap {
 
     fn add_to_wildcards_map (&self, c:Combo) {
         let mut wcm = self.wildcard_combos.borrow_mut();
-        if let Some(cmks) = wcm.get_mut(&c.cmk) {
-            if !cmks.contains(&c) { cmks.push(c) }
+        if let Some(cs) = wcm.get_mut(&c.cmk) {
+            if !cs.contains(&c) { cs.push(c) }
         } else {
             wcm.insert (c.cmk, vec![c]);
         }
@@ -88,16 +88,49 @@ impl CombosMap {
         let mut cm = self.combos_map.borrow_mut();
         //self.combos_map.write().unwrap() .insert (c, cv);
         if let Some(cvs) = cm.get_mut(&c) {
-            // if we already had combo-values for this combo, we can add new conditional, but must replace any prior non-conditional AF entries
-            if cv.cond.is_none() {
-                if let Some(idx) = cvs.iter().position (|cv| cv.cond.is_none()) {
-                    let _ = cvs.remove(idx);
-            }  }
+            // note that we allow multiple conditional or mult non-conditional combos to trigger ..
+            // .. but if any conditional combo triggers, then non-conditional combos for that are ignored
             cvs.push(cv);
             cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.stamp));
             // ^^ we want to sort such that conditionals are up top sorted by timestamp .. (hence the boolean supplied as cond.is_none())
         } else {
             cm.insert (c, vec![cv]);
+        }
+    }
+
+
+
+    /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
+    /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
+    /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
+    fn gen_fallback_base_af (&self, ks:KrustyState, ev:&Event) -> Option<AF> {
+        match ev.dat {
+            EventDat::key_event {key, ev_t, ..} => { match ev_t {
+                KbdEvent_T::KbdEvent_KeyDown | KbdEvent_T::KbdEvent_SysKeyDown => {
+                    Some ( Arc::new (move || key.press_release()) )
+                }
+                _ => None   // no default fallback for key-releas types (w/ or w/o syskey)
+            } }
+            EventDat::btn_event {btn, ev_t} => { match ev_t {
+                // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
+                MouseBtnEv_T::BtnDown => {
+                    Some ( Arc::new ( move || {
+                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
+                            bs.active.set(); bs.btn.press();
+                    } ) } ) )
+                }
+                MouseBtnEv_T::BtnUp   => {
+                    Some ( Arc::new ( move || {
+                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
+                            if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
+                    } ) } ) )
+                }
+            } }
+            EventDat::wheel_event {wheel, delta} => {
+                Some ( Arc::new (move || wheel.scroll(delta) ) )
+            }
+            EventDat::move_event {..} => None
+            // ^^ move events wont even get here, but eitherway we'd do nothing
         }
     }
 
@@ -141,55 +174,6 @@ impl CombosMap {
     }
 
 
-    /// applies applicable combo-actions (that meet conditional requirements if any), returns whether any combo AF was executed
-    fn process_combo_afs (&self, ks:&KrustyState, cvs:&Vec<ComboValue>, e:&Event) -> bool {
-        // note that we have previously ordered combo-values for each combo such that conditional ones are up top sorted by timestamp
-        // this ensures determinism, and since the non-conditional af is at the end, allows us to only run that if no conditions matched
-        let mut cond_matched = false;
-        cvs.iter() .for_each ( |cv| {
-            if cv.cond.as_ref() .is_some_and (|c| c(ks,e)) || (cv.cond.is_none() && !cond_matched) {
-                cond_matched = true;
-                (cv.af)();
-            }
-        } );
-        cond_matched
-    }
-
-
-    /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
-    /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
-    /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
-    fn gen_fallback_base_af (&self, ks:KrustyState, ev:&Event) -> Option<AF> {
-        match ev.dat {
-            EventDat::key_event {key, ev_t, ..} => { match ev_t {
-                KbdEvent_T::KbdEvent_KeyDown | KbdEvent_T::KbdEvent_SysKeyDown => {
-                    Some ( Arc::new (move || key.press_release()) )
-                }
-                _ => None   // no default fallback for key-releas types (w/ or w/o syskey)
-            } }
-            EventDat::btn_event {btn, ev_t} => { match ev_t {
-                // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
-                MouseBtnEv_T::BtnDown => {
-                    Some ( Arc::new ( move || {
-                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
-                            bs.active.set(); bs.btn.press();
-                    } ) } ) )
-                }
-                MouseBtnEv_T::BtnUp   => {
-                    Some ( Arc::new ( move || {
-                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
-                            if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
-                    } ) } ) )
-                }
-            } }
-            EventDat::wheel_event {wheel, delta} => {
-                Some ( Arc::new (move || wheel.scroll(delta) ) )
-            }
-            EventDat::move_event {..} => None
-            // ^^ move events wont even get here, but eitherway we'd do nothing
-        }
-    }
-
 
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
@@ -198,49 +182,88 @@ impl CombosMap {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        // we'll use these helper fns to repeatedly attempt combo matches .. if this returns true, we can immdtly return
+        // Matched Combo-Values/AFs processing : exec applicable combo-actions (w/ conditionals if any), return whether any AF was executed.
+        // Note that we execute AFs for all matching coditional-combos OR all matching non-conditional combos ..
+        // However, if any conditional combo triggers, then any remaining non-conditional combos are ignored ..
+        // (This allows for ergonomic declaration and use of base-case actions and special conditional-case actions).
+        // Note also that combo-values for each combo-key are previously ordered such that conditional ones are up top sorted by timestamp
+        //  .. this ensures determinism, and since the non-conditional AFs are at the end, allows us to only run those if no conditions matched.
+        fn process_combo_afs (cvs:&Vec<ComboValue>, ev:&Event, ks:&KrustyState) -> bool {
+            let (mut cond_matched, mut combo_execd) = (false, false);
+            cvs.iter() .for_each ( |cv| {
+                if let Some(cond) = cv.cond.as_ref() {
+                    // all conditional combos that are satisfied can be run
+                    if cond(ks,ev) {
+                        cond_matched = true; combo_execd = true;
+                        (cv.af)();
+                    }
+                } else if !cond_matched {
+                    // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
+                    combo_execd = true;
+                    (cv.af)();
+                }
+            } );
+            combo_execd
+        }
+
+        // Exact Combo Matching : first we try directly looking up a combo and executing it
         fn try_proc_combo_afs (combo:&Combo, ev:&Event, cm:&CombosMap, ks:&KrustyState) -> bool {
             //let pcm = self.combos_map.borrow();
             // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
             // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
             let pcm  = unsafe { & *cm.combos_map.as_ptr() };
+            let mut combo_execd = false;
             if let Some(cvs) = pcm.get(&combo) {
-                cm.process_combo_afs (ks, &cvs, ev)
-            } else { false }
-        }
-        fn try_proc_wc_combo_afs (cmk:&EvCbMapKey, combo:&Combo, ev:&Event, cm:&CombosMap, ks:&KrustyState) -> bool {
-            let cwm = unsafe { & *cm.wildcard_combos.as_ptr() };
-            if let Some(cs) = cwm.get(cmk) {
-                if let Some(c) = cs.iter().find (|c| c.check_wildcard_eqv (&combo)) {
-                    // todo: ^^ should be ok for minimal wildcard use, but in theory we could make it much more efficient by doing things like
-                    // .. using a column-wise bitmap (as in databases), or even just membership maps and progressively filtering matching combos etc
-                    if try_proc_combo_afs (&c.strip_wildcards(), ev, &cm, ks) { return true }
-                }
+                combo_execd = process_combo_afs (&cvs, ev, ks);
             }
-            false
+            combo_execd
         }
+
+        // Wild-Card Combo Matching : we first check the wildcard-combos map to get wildcard combos (if any) for this particular combo-maps-key
+        // this keeps it efficient for most typical use-cases (which have no wildcards) .. and should be adequate for limited/rare wildcards use
+        // todo : however in theory we could make wildcard combo matching much more efficient by doing things like ..
+        // .. using a column-wise bitmap (as in databases), or even just membership maps and progressively filtering matching combos etc
+        // .. or even just actually using packed bitmaps for combos, and storing wildcard combos as a bitmask to 'AND' cur-combo with
+        fn try_proc_wildcard_combo_afs (cmk:&EvCbMapKey, combo:&Combo, ev:&Event, cm:&CombosMap, ks:&KrustyState) -> bool {
+            let cwm = unsafe { & *cm.wildcard_combos.as_ptr() };
+            let mut combo_execd = false;
+            if let Some(cs) = cwm.get(cmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
+                cs .iter().filter (|c| c.check_wildcard_eqv (&combo)) .for_each (|c| {
+                    let wcsc = c.strip_wildcards();
+                    if wcsc != *combo && try_proc_combo_afs (&wcsc, ev, &cm, ks) {
+                        combo_execd = true;
+                    }
+                } );
+            }
+            combo_execd
+        }
+
+        // Combo-matching order :
+        // - First we run any exact match combos .. (any conditional combos if satisfied, else non-conditionals if no conditional matched)
+        // - Next, we'll run any wildcard combos that might match .. (same with conditionals exclusivity among them)
+        // if we found/executed something so far, we dont need any fallback processing, and can return
 
         let combo = Combo::gen_cur_combo (cmk, &ks);
+        let combo_execd = try_proc_combo_afs (&combo, ev, &self, ks);
+        let wc_combo_execd = try_proc_wildcard_combo_afs (&cmk, &combo, ev, &self, ks);
+        if combo_execd || wc_combo_execd { return }
 
-        // if we find an exact match combo, that overrides everything else
-        if try_proc_combo_afs (&combo, ev, &self, ks) { return }
 
-        // else, we'll check if there are some wildcard combos that might match
-        // Note that we ONLY run the first matching wildcarded combo (not all matching ones)
-        if try_proc_wc_combo_afs (&cmk, &combo, ev, &self, ks) { return }
-
-        // else if some latch state was active, we can try to match a combo ignoring latches (as fallback)
-        // note that we're doing the 'check again w/o latch' coz its more efficient than trying to default all latch combos to have no-latch wildcards ..
+        // - Else if some latch state was active, we can try to match a combo ignoring latches (as fallback)
+        //   (And we'll do the same as above here, w direct matches first, w exclusivity to conditionals, then check wildcards similarly)
+        // Note that we're doing the 'check again w/o latch' coz its more efficient than trying to default all latch combos to have no-latch wildcards ..
         // .. coz the cur impl requires linear search to match wildcard combos (within the subset for that particular cmk w wildcard combos)
-        let combo_no_latch = Combo::gen_no_latch_combo(combo);
+
         if ks.mode_states.some_latch_state_active.is_set() {
-            // again, first we check exact match
-            if try_proc_combo_afs (&combo_no_latch, ev, &self, ks) { return }
-            // else we check for wildcard matches
-            if try_proc_wc_combo_afs (&cmk, &combo_no_latch, ev, &self, ks) { return }
+            let combo_no_latch = Combo::gen_no_latch_combo(combo);
+            let combo_execd = try_proc_combo_afs (&combo_no_latch, ev, &self, ks);
+            let wc_combo_execd = try_proc_wildcard_combo_afs (&cmk, &combo_no_latch, ev, &self, ks);
+            if combo_execd || wc_combo_execd { return }
         }
 
-        // fallback processing ..
+        // - And finally, if neither direct lookups, nor lookups ignoring any active latch state found anything to run (with and without wildcards)
+        // .. then we'll resort to fallback action generation and processing
+
         let fbaf = self.gen_fallback_base_af (ks.clone(), &ev);
         if fbaf.is_none() { return }
         // ^^ if we explicitly didnt want to do anything, no point trying to wrap mods below etc

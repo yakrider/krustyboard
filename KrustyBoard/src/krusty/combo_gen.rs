@@ -142,7 +142,8 @@ impl <S> ComboGen<S>
         } else { self.dat.wc_mks = Some (vec![mk]) }
         self
     }
-    /// Add a wildcard mode-state to the combo
+    /// Add a wildcard mode-state to the combo. <br>
+    /// Note that all exactly matching combos are executed first, before any wildcard matching combos are searched and executed
     pub fn wcs (mut self, md:ModeState_T) -> Self {
         if let Some(wc_modes) = self.dat.wc_modes.as_mut() {
             if !wc_modes.is_empty() && !wc_modes.contains(&md) { wc_modes.push(md) }
@@ -159,7 +160,11 @@ impl <S> ComboGen<S>
         self.dat.wc_modes = Some (vec![]); self
     }
 
-    /// Add a condition to the combo
+    /// Add a condition to the combo. <br>
+    /// Note that all conditional combos that satisfy the condition are ran when a combo triggers. <br>
+    /// However, if any conditional combo triggers, then any remaining non-conditional combos will be ignored. <br>
+    /// (Tip: To ensure a combo always runs even if other conditional combos trigger, can give it an always-true condition). <br>
+    /// (Note that wildcard combos are still only checked after exact match combos for that combo-map-key, regardless of conditionals etc)
     pub fn c (mut self, cond:ComboCond) -> Self {
         if self.dat.cond.is_none() {
             self.dat.cond = Some(cond);

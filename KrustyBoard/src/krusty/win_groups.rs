@@ -9,22 +9,18 @@ use std::ops::Not;
 use derive_deref::Deref;
 use rustc_hash::FxHashSet;
 
-use crate::{Flag, Key, ModeState_T};
+use crate::Flag;
 use crate::utils::*;
 
 
 pub const NUM_WIN_GROUPS : usize = 3;
 
-# [ derive (Debug, Copy, Clone) ]
+# [ derive (Debug, Copy, Clone, Eq, PartialEq) ]
 pub enum WinGroups_E { wg1, wg2, wg3 }
 impl WinGroups_E {
     pub fn idx (&self) -> usize {
         use WinGroups_E::*;
         match self { wg1 => 0, wg2 => 1, wg3 => 2 }
-    }
-    pub fn key (&self) -> Key {
-        use WinGroups_E::*; use crate::KbdKey::*;
-        match self { wg1 => Numrow_1, wg2 => Numrow_2, wg3 => Numrow_3 }
     }
 }
 impl TryFrom<usize> for WinGroups_E {
@@ -32,19 +28,6 @@ impl TryFrom<usize> for WinGroups_E {
     fn try_from (idx: usize) -> Result <Self, Self::Error> {
         use WinGroups_E::*;
         match idx { 0 => Ok(wg1), 1 => Ok(wg2), 2 => Ok(wg3), _ => Err(()) }
-    }
-}
-impl TryFrom <ModeState_T> for WinGroups_E {
-    type Error = ();
-    fn try_from (ms: ModeState_T) -> Result<Self, Self::Error> {
-        use ModeState_T::*;  use WinGroups_E::*;
-        match ms { qks1 => Ok(wg1), qks2 => Ok(wg2), qks3 => Ok(wg3), _ => Err(()) }
-    }
-}
-impl From <WinGroups_E> for ModeState_T {
-    fn from (wg : WinGroups_E) -> Self {
-        use ModeState_T::*;  use WinGroups_E::*;
-        match wg { wg1 => qks1, wg2 => qks2, wg3 => qks3 }
     }
 }
 
@@ -176,9 +159,8 @@ impl WinGroups {
     pub fn new() -> WinGroups {
         WinGroups { grps : [ WinGroup::new(), WinGroup::new(), WinGroup::new() ] }
     }
-    pub fn check_win_group (&self, hwnd:Hwnd) -> Option <WinGroups_E> {
-        self .grps .iter() .enumerate() .into_iter()
-            .find (|&(_,g)| g.check(&hwnd)) .and_then (|(idx,_)| idx.try_into().ok())
+    pub fn grp_contains (&self, wg:WinGroups_E, hwnd:Hwnd) -> bool {
+        self.grps [wg.idx()] .get_hwnds() .contains(&hwnd)
     }
     pub fn get_grp_hwnds (&self, wg:WinGroups_E) -> Vec<Hwnd> {
         self .grps [wg.idx()] .get_hwnds()
