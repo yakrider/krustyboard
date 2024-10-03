@@ -250,7 +250,7 @@ pub fn setup_krusty_board () {
     // NOTE that these could be removed now that we've made win into TMK_dbl ..
     // .. but if we set win-combo single-press fallback to win-combo, these will still be useful, so we'll let them be!,
     // .. note ofc that everything disabled like this will be accessible on win-dbl press combos!
-    "1234567890" .chars() .map (|c| Key::from_char(c)) .flatten() .for_each ( |key| {
+    "4567890" .chars() .map (|c| Key::from_char(c)) .flatten() .for_each ( |key| {    // 1,2,3 are qks keys, need special handling
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin),                   k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(caps),           k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(lalt),           k.ks.ag().af(no_action()) );
@@ -258,7 +258,8 @@ pub fn setup_krusty_board () {
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(caps).m(lalt),   k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(caps).m(ralt),   k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(caps).m(shift),  k.ks.ag().af(no_action()) );
-    } ); // some of ^^ these will get overwritten by specific win-combos added later .. which is fine
+    } ); // some of ^^ these will get overloaded with specific win-combos added later .. which is fine
+    // (if wanted to include qks1/2/3 keys here, we'd want to do msk_nc() to avoid these setting consumed flags)
     // note that at least for now, we're choosing to ignore caps-shift, caps-ctrl etc combos, though ofc could impl if need arises
 
     // we'll disable win-d too, as I never use that show/hide desktop and it's disruptive
@@ -325,30 +326,45 @@ pub fn setup_krusty_board () {
     } ) }
     k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).rel().wcma().wcsa(), k.ks.ag().af ( gen_af_lbtn_release (k.ks.clone()) ) );
 
-    /// for win-lbtn and win-caps-lbtn, we want to **_ capture pre-drag-dat _** for window drag/resizing
-    fn gen_af_win_snap_dat (ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.capture_pointer_win_snap_dat();
-        win_set_fgnd (ks.win_snap_dat.read().unwrap().hwnd);
-    } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin),          k.ks.ag().af (gen_af_win_snap_dat (k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps),  k.ks.ag().af (gen_af_win_snap_dat (k.ks.clone()) ) );
 
-    /// for **_ win-groups _** .. caps-lwin-qks<?> + lbtn click on window is add that window to the corresponding group
-    // (plus we should also capture dat to allow group window move)
-    fn gen_af_win_grp_add (s:ModeState_T, ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.capture_pointer_win_snap_dat();
+    /// for win-lbtn and win-caps-lbtn, we want to **_ capture win-snap-dat _** for window drag/resizing
+    fn gen_af_win_snap_dat (ks:KrustyState, wgo:Option<WinGroups_E>) -> AF { Arc::new ( move || {
+        ks.capture_pointer_win_snap_dat(wgo);
         win_set_fgnd (ks.win_snap_dat.read().unwrap().hwnd);
-        ks.win_groups.add_to_group (s.try_into().unwrap(), win_get_hwnd_from_pointer())
     } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(qks1),  k.ks.ag().af (gen_af_win_grp_add (qks1, k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(qks2),  k.ks.ag().af (gen_af_win_grp_add (qks2, k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(qks3),  k.ks.ag().af (gen_af_win_grp_add (qks3, k.ks.clone()) ) );
+    // win-drag does drag with snap .. caps-win does resize .. and adding shift disables snap for both
+    // .. so we'll use wildcards to set any of these to trigger taking a win-snap-dat for subsequent use
+    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin) .wcm(caps).wcm(shift),
+                      k.ks.ag().af (gen_af_win_snap_dat (k.ks.clone(), None) ) );
+
+
+    /// for **_ win-groups _** ..
+    // .. caps-lwin-qks<?> + lbtn-dbl-click on window is add that window to the corresponding group
+    fn setup_win_grp_action (k:&Krusty, s:ModeState_T, wg:WinGroups_E) {
+        let ks = k.ks.clone();
+        let add_af = Arc::new ( move || {
+            let hwnd = win_get_hwnd_from_pointer();
+            ks.win_groups.add_to_group (wg, hwnd);
+            jiggle_window(hwnd);
+        } );
+        k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(s) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())),  k.ks.ag().af(add_af) );
+        // also, on single-click we should capture dat to allow group window drag
+        let wsd_af = gen_af_win_snap_dat (k.ks.clone(), Some(wg));
+        k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(s),           k.ks.ag().af(wsd_af.clone()) );
+        k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin).m(caps).s(s).m(shift),  k.ks.ag().af(wsd_af) );
+    }
+    setup_win_grp_action (&k, qks1, wg1);
+    setup_win_grp_action (&k, qks2, wg2);
+    setup_win_grp_action (&k, qks3, wg3);
+
+
 
     // for win-lbtn-dbl we want to maximize the pointed window
     fn gen_af_win_tog_max (ks:KrustyState) -> AF { Arc::new ( move || {
         win_toggle_maximize (ks.win_snap_dat.read().unwrap().hwnd)
     } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())), k.ks.ag().af (gen_af_win_tog_max(k.ks.clone())) );
+    k.cm .add_combo ( k.ks.cg().mbtn(LeftButton).m(lwin) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())),
+                      k.ks.ag().af (gen_af_win_tog_max(k.ks.clone())) );
 
 
     // for caps-alt-click, we want to bring up find usages window in IDE (for word under cursor)
@@ -371,12 +387,14 @@ pub fn setup_krusty_board () {
     /// **_ MOUSE RIGHT_BTN _** combo setups
 
     // win-caps-qks? + rbtn-click is used to remove the pointed window from the corresponding win-group
-    fn gen_af_win_grp_remove (s:ModeState_T, ks:KrustyState) -> AF { Arc::new ( move || {
-        ks.win_groups.remove_from_group (s.try_into().unwrap(), win_get_hwnd_from_pointer())
+    fn gen_af_win_grp_remove (wg:WinGroups_E, ks:KrustyState) -> AF { Arc::new ( move || {
+        let hwnd = win_get_hwnd_from_pointer();
+        ks.win_groups.remove_from_group (wg, hwnd);
+        jiggle_window(hwnd);
     } ) }
-    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks1),  k.ks.ag().af (gen_af_win_grp_remove (qks1, k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks2),  k.ks.ag().af (gen_af_win_grp_remove (qks2, k.ks.clone()) ) );
-    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks3),  k.ks.ag().af (gen_af_win_grp_remove (qks3, k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks1),  k.ks.ag().af (gen_af_win_grp_remove (wg1, k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks2),  k.ks.ag().af (gen_af_win_grp_remove (wg2, k.ks.clone()) ) );
+    k.cm .add_combo ( k.ks.cg().mbtn(RightButton).m(lwin).m(caps).s(qks3),  k.ks.ag().af (gen_af_win_grp_remove (wg3, k.ks.clone()) ) );
 
     // for release, we'll again setup global wildcard combo
     fn gen_af_rbtn_release (ks:KrustyState) -> AF { Arc::new ( move || {
@@ -697,6 +715,16 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg().k(Tab).m(caps).m(ralt),  k.ks.ag().af(af_caps_tab.clone()) );
     k.cm .add_combo ( k.ks.cg().k(Tab).m(ctrl).m(ralt),  k.ks.ag().af(af_caps_tab.clone()) );
 
+    /// tweak **_ ALT-TAB _** .. (mostly for switche)
+    // in general, alt-tab is direclty listened to by switche, so we no longer drive it from here ..
+    // however, we'll handle the case for caps-alt-tab which we'll set to do switche within-block nav (shift up/dn)
+    k.cm .add_combo ( k.ks.cg().k(Tab).m(caps).m(alt) .c(switche_fgnd()),  k.ks.ag().k(ExtUp).m(alt).m(shift) );
+    // and for completeness, might as well set that conditional override for generic l2 nav too
+    k.cm .add_combo ( k.ks.cg().k(I    ).m(caps).m(alt)  .c(switche_fgnd()),  k.ks.ag().k(ExtUp  ).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg().k(Comma).m(caps).m(alt)  .c(switche_fgnd()),  k.ks.ag().k(ExtDown).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg().k(U    ).m(caps).m(alt)  .c(switche_fgnd()),  k.ks.ag().k(ExtPgUp).m(alt).m(shift) );
+    k.cm .add_combo ( k.ks.cg().k(M    ).m(caps).m(alt)  .c(switche_fgnd()),  k.ks.ag().k(ExtPgDn).m(alt).m(shift) );
+
 
 
     /// setup **_ BACK-QUOTE _** ..
@@ -763,7 +791,7 @@ pub fn setup_krusty_board () {
     //k.cm .add_combo    ( k.ks.cg().k(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag().k(F18).m(alt).m(ctrl) );   // switche alt-esc
     // ^^ disabled since swi now does auto-hide-on-fgnd-lost, and that mostly does the dismiss/esc anyway .. so natural alt-esc is fine
     //k.cm .add_combo    ( k.ks.cg().k(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag().k(Escape) );               // switche alt-esc
-    //k.cm .add_combo ( k.ks.cg().k(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag().af (no_action()) );      // switche alt-esc
+    //k.cm .add_combo    ( k.ks.cg().k(Escape).m(lalt).c(switche_fgnd()),      k.ks.ag().af (no_action()) );        // switche alt-esc
     k.cm .add_combo ( k.ks.cg().k(Escape).m(lalt).c(switche_not_fgnd()),  k.ks.ag().af (alt_esc_action) );
 
 
@@ -1197,19 +1225,25 @@ pub fn setup_krusty_board () {
 
 
     /// **_ WIN GROUPS _** combos
-    // first lets set up a helper fn that sets up a provided action for all three wingroups
+    // we'll assign the Numrow_[1/2/3] (overloaded with qks1/qks2/qks3) for win-grp activations
+    // and when those are held down (hence why assigned to qks keys), we'll have T/W etc do actions on those groups
+    // (Note that there are also mouse lbtn-dbl-click and rbtn-click combos (defined in mouse sections above) for add/remove to wingroups)
     fn set_win_grp_af_combos <F> (k:&Krusty, key:Option<Key>, f:F)
         where F : Fn (&KrustyState, WinGroups_E) + Clone + Send + Sync + 'static
     {
-        let key = |wg:WinGroups_E| key.unwrap_or_else(|| wg.key());
-        // ^^ for activation, no key will be supplied, and we'll use the trigger key associated for that particular win-group
+        fn wgs (wg: WinGroups_E) -> ModeState_T {
+            match wg { wg1 => qks1,  wg2 => qks2,  wg3 => qks3 }
+        }
+        fn wgk (wg: WinGroups_E) -> Key {
+            match wg { wg1 => Numrow_1,  wg2 => Numrow_2,  wg3 => Numrow_3 }
+        }
         let gen_af = |wg:WinGroups_E, f:&F| {
             let ks = k.ks.clone(); let f = f.clone();
             Arc::new ( move || f (&ks, wg) )
         };
-        k.cm .add_combo ( k.ks.cg().k(key(wg1)).s(qks1).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg1, &f)) );
-        k.cm .add_combo ( k.ks.cg().k(key(wg2)).s(qks2).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg2, &f)) );
-        k.cm .add_combo ( k.ks.cg().k(key(wg3)).s(qks3).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg3, &f)) );
+        k.cm .add_combo ( k.ks.cg().k( key.unwrap_or_else(|| wgk(wg1)) ).s(wgs(wg1)).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg1, &f)) );
+        k.cm .add_combo ( k.ks.cg().k( key.unwrap_or_else(|| wgk(wg2)) ).s(wgs(wg2)).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg2, &f)) );
+        k.cm .add_combo ( k.ks.cg().k( key.unwrap_or_else(|| wgk(wg3)) ).s(wgs(wg3)).m(caps).m(lwin),  k.ks.ag().af (gen_af (wg3, &f)) );
     }
     // finally we can now set up actions (which will be set up for each of the three win-groups)
     set_win_grp_af_combos ( &k, None,    |ks,wg| ks.win_groups.toggle_grp_activation(wg) );
@@ -1266,11 +1300,13 @@ pub fn setup_krusty_board () {
 
 
     // hotkeys to move lines and statements up and down
-    let move_line_up = k.ks.ag().k(I    ).m(alt).m(ctrl).gen_af();
-    let move_line_dn = k.ks.ag().k(Comma).m(alt).m(ctrl).gen_af();
-    let move_stmt_up = k.ks.ag().k(I    ).m(alt).m(ctrl).m(shift).gen_af();
-    let move_stmt_dn = k.ks.ag().k(Comma).m(alt).m(ctrl).m(shift).gen_af();
+    let duplicate_line = k.ks.ag().k(L    ).m(alt).m(ctrl).gen_af();
+    let move_line_up   = k.ks.ag().k(I    ).m(alt).m(ctrl).gen_af();
+    let move_line_dn   = k.ks.ag().k(Comma).m(alt).m(ctrl).gen_af();
+    let move_stmt_up   = k.ks.ag().k(I    ).m(alt).m(ctrl).m(shift).gen_af();
+    let move_stmt_dn   = k.ks.ag().k(Comma).m(alt).m(ctrl).m(shift).gen_af();
 
+    k.cm .add_combo ( k.ks.cg().k(L    ).m(caps).s(qks3),         k.ks.ag().af(duplicate_line) );
     k.cm .add_combo ( k.ks.cg().k(I    ).m(caps).s(qks3),         k.ks.ag().af(move_line_up) );
     k.cm .add_combo ( k.ks.cg().k(Comma).m(caps).s(qks3),         k.ks.ag().af(move_line_dn) );
     k.cm .add_combo ( k.ks.cg().k(I    ).m(caps).s(qks3).s(msR),  k.ks.ag().af(move_stmt_up) );
@@ -1428,6 +1464,21 @@ pub fn setup_krusty_board () {
     } } ); } ) }
     k.cm .add_combo ( k.ks.cg().k(Insert).s(latch_2).m(caps),  k.ks.ag().af (og_setup()) );
     k.cm .add_combo ( k.ks.cg().k(Delete).s(latch_2).m(caps),  k.ks.ag().af (og_teardown()) );
+
+
+
+    /// some inlined tests for reminder
+    // // - check that wildcard combos trigger even when other directly matching combos have been defined
+    // k.cm .add_combo ( k.ks.cg().k(F9).m(caps).s(qks3),  k.ks.ag().k(F19).m(ctrl) );
+    // k.cm .add_combo ( k.ks.cg().k(F9).m(caps).wcsa(),   k.ks.ag().k(F19).m(alt) );
+    // // - check that multiple conditional or non-conditional combos can run, but if cond matches, then non-cond will be ignored
+    // k.cm .add_combo ( k.ks.cg().k(F9).m(caps).c(Arc::new(|_,_| true)),   k.ks.ag().k(F19).m(alt).m(ctrl) );
+    // k.cm .add_combo ( k.ks.cg().k(F9).m(caps).c(Arc::new(|_,_| true)),   k.ks.ag().k(F19).m(alt).m(shift) );
+    // k.cm .add_combo ( k.ks.cg().k(F10).m(caps).c(Arc::new(|_,_| false)),   k.ks.ag().k(F19).m(shift).m(ctrl) );
+    // k.cm .add_combo ( k.ks.cg().k(F10).m(caps),   k.ks.ag().k(F19).m(shift).m(ctrl) );
+    // k.cm .add_combo ( k.ks.cg().k(F10).m(caps),   k.ks.ag().k(F20).m(shift).m(ctrl) );
+    // k.cm .add_combo ( k.ks.cg().k(F10).m(caps).wcsa(),   k.ks.ag().k(F20).m(shift).m(alt) );
+
 
 
 

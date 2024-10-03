@@ -172,16 +172,16 @@ impl Mouse {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
-            // we'll want to capture/refresh pre-drag-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            ks.capture_pointer_win_snap_dat();
+            // we'll want to capture/refresh win-snap-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
+            ks.capture_pointer_win_snap_dat(None);
         }
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:&KrustyState) {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
         if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
-            // if we're exiting drag-resize into drag-move, so we should refresh our pre-drag dat reference
-            ks.capture_pointer_win_snap_dat();
+            // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
+            ks.capture_pointer_win_snap_dat(None);
         }
     }
 
@@ -197,7 +197,7 @@ pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnDown, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
-            mbs.down.set();
+            mbs.down.set(); mbs.consumed.clear();
             update_stamp_mouse_dbl_click (ev.stamp, &mbs.stamp, &mbs.dbl_tap);
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
@@ -321,18 +321,18 @@ pub fn setup_mouse_move_handling (k:&Krusty) {
             if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 ks.mod_keys.lwin.consumed.set();
                 if let move_event { x_pos, y_pos, .. } = ev.dat {
-                    handle_pointer_move (x_pos, y_pos, &ks)
+                    handle_lwin_mouse_drag (x_pos, y_pos, &ks)
             } }
         } ) ),
     } );
 }
 
-fn handle_pointer_move (x:i32, y:i32, ks:&KrustyState) {
+fn handle_lwin_mouse_drag (x:i32, y:i32, ks:&KrustyState) {
     // NOTE that mouse move is inline pass-through before these handler calls get queued
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
     if ks.mouse.lbtn.down.is_set() && ks.mouse.lbtn.consumed.is_clear() {
-        if ks.mod_keys.caps.down.is_set() && ks.mode_states.qks1.down.is_clear() {
+        if ks.mod_keys.caps.down.is_set() && ks.mode_states.some_qks_mode_active.is_clear() {
             handle_pointer_window_resize_spaced (x, y, &ks)
         } else {
             handle_pointer_window_drag_spaced (x, y, &ks)

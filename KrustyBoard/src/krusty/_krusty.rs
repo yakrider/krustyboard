@@ -293,10 +293,10 @@ impl KrustyState {
         //thread::spawn ( move || {     // .. nuh uh
         // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
         // .. but also often right after calling this we're doing other related work that expects this to be filled out!
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_fgnd());
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_fgnd(), None);
     }
-    pub fn capture_pointer_win_snap_dat (&self) {
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer());
+    pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
     /// Utlity function to create a new Combo-Generator
