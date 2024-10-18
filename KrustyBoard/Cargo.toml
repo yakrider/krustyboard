@@ -1,6 +1,6 @@
 [package]
 name = "krustyboard"
-version = "0.5.0"
+version = "1.4.4"
 authors = ["yakrider <yakrider@gmail.com>"]
 description = "Keyboard Remapping to support layer-2 and layer-3 functionality."
 documentation = "https://docs.rs/krustyboard"

@@ -154,6 +154,11 @@ pub trait KeyHandling : Debug {
     fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
     fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
 
+    // for caps up/down the default impl should do nothing, but ModKey_Managed etc can define their own processing
+    fn proc_notice__caps_down (&self, _:&UnifModKey, _:&KrustyState) { }
+    fn proc_notice__caps_up   (&self, _:&UnifModKey, _:&KrustyState) { }
+
+    // general behavioral queries can be satisfied here w/o the specific impls having to worry about them
     fn is_managed (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Managed }
     fn is_doubled (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Doubled }
 
@@ -286,12 +291,12 @@ impl ModKeys {
     pub fn some_shift_down (&self) -> bool { self.lshift.down.is_set() || self.rshift.down.is_set() }
     pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set() }
     pub fn some_alt_down   (&self) -> bool { self.lalt.down.is_set() } // ralt is disabled as an Alt key
-    pub fn some_win_down   (&self) -> bool { self.lwin.down.is_set()  || self.rctrl.down.is_set() }
+    pub fn some_win_down   (&self) -> bool { self.lwin.down.is_set()  || self.rwin.down.is_set() }
 
     pub fn some_shift_dbl (&self) -> bool { self.lshift.dbl_tap.is_set() || self.rshift.dbl_tap.is_set() }
     pub fn some_ctrl_dbl  (&self) -> bool { self.lctrl.dbl_tap.is_set()  || self.rctrl.dbl_tap.is_set()  }
     pub fn some_alt_dbl   (&self) -> bool { self.lalt.dbl_tap.is_set()   }  // ralt is disabled as an Alt key
-    pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rctrl.dbl_tap.is_set()  }
+    pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rwin.dbl_tap.is_set()  }
 
     pub fn unstick_all (&self) {
         // all modkey states .. we'll do two loops to interleave them so they dont activate e.g. start-menu
@@ -307,11 +312,11 @@ impl ModKeys {
     }
 
 
-    pub fn proc_notice__caps_down (&self) {
-        self.mod_umk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_down());
+    pub fn proc_notice__caps_down (&self, ks:&KrustyState) {
+        self.mod_umk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_down(ks));
     }
-    pub fn proc_notice__caps_up (&self) {
-        self.mod_umk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_up());
+    pub fn proc_notice__caps_up (&self, ks:&KrustyState) {
+        self.mod_umk_pairs() .iter() .for_each (|(_,smk)| smk.proc_notice__caps_up(ks));
     }
 
     pub fn setup_tracking (&self, k:&Krusty) {
@@ -350,8 +355,8 @@ impl CapsModKey {
             update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
 
             // lets notify the synced tracked mod keys, so they can invalidate/release themselves
-            ks.mod_keys.proc_notice__caps_down();
-            ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
+            ks.mod_keys.proc_notice__caps_down(ks);
+            ks.mouse.proc_notice__modkey_down (self.modkey, ks);
         }
         if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
             // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
@@ -363,12 +368,12 @@ impl CapsModKey {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
-        ks.mouse.proc_notice__modkey_up(self.modkey, &ks);
+        ks.mouse.proc_notice__modkey_up(self.modkey, ks);
         if ks.in_ctrl_tab_scroll_state.is_set() {
             if !ks.mod_keys.some_ctrl_down() { ks.in_ctrl_tab_scroll_state.clear() }
         }
         // lets also notify the alt/win tracked mod keys so they can update mngd flags or re-enable themselves if applicable
-        ks.mod_keys.proc_notice__caps_up();
+        ks.mod_keys.proc_notice__caps_up(ks);
     }
 
 
@@ -492,9 +497,16 @@ impl KeyHandling for ModKey_Managed {
     }
 
     fn handle_key_up (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds {
-        // if caps is pressed, or alt is already inactive (via masked-rel, press-rel etc), we block it
-        // else if win was consumed, we release with mask, else we can actually pass it through unblocked
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
+
+        // first off, we'll take care of pair managed flags
+        // basically, if we're managed, and pair-mngd flag is set, but pair is up, and caps is also up ..
+        // .. then we should clear the pair's mngd flag (as caps up doesnt clear mngd while any of the pair is down)
+        // .. (this is ofc, coz we only typically set mngd flag on left-of-pair, but still want it cleared when neither pair nor caps are down)
+        if !ks.mod_keys.caps.down.is_set() && bmk.paired_mngd_active() && !bmk.paired_down() {
+            bmk.paired() .iter() .for_each (|p| { p.ensure_inactive() } )
+        }
+
         if bmk.active.is_clear() || (bmk.mngd_active.is_set() && ks.mod_keys.caps.down.is_set()) {
             // if inactive (usually due to caps-down), or we're forced active while caps still down, we just suppress this keyup
         } else {
@@ -511,6 +523,45 @@ impl KeyHandling for ModKey_Managed {
                 } );
         }  }
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
+    }
+
+    fn proc_notice__caps_down (&self, bmk:&UnifModKey, _ks:&KrustyState) {
+        // we will immediately invalidate and clear any down mod-key found upon caps activation!
+        // note that internally tracked physical is_down will continue to be down
+        // note also that each of paired mod-keys will get their own notification too
+        if bmk.down.is_set() && bmk.active.is_set() {
+            bmk.consumed.set();
+            let umk = bmk.clone();
+            thread::spawn ( move || {
+                // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
+                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" {
+                    umk.release_w_masking()   // this will update flags too
+                }
+            } );
+        }
+    }
+
+    fn proc_notice__caps_up (&self, bmk:&UnifModKey, _ks:&KrustyState) {
+        // for managed active (i.e active outside w/o down held), we want to clear it on caps release ..
+        // note that only checking ourselves works even if the paired was held down, the pair would just reactivate itself afterwards
+        // (because each of the pair gets its own caps-up/dn notification)
+        if bmk.mngd_active.is_set() {
+            bmk.mngd_active.clear();
+            if bmk.active.is_set() && !bmk.down.is_set() { bmk.ensure_inactive() }
+        }
+        // since we deactivate mod-keys on caps press, check to see if we want to reactivate them
+        // note: we'll setup a delay for activation to allow for some sloppy combo releases etc
+        // note also, that if inspecting (shift) in browser-key-events, this might appear unexpected coz browser does its own shift 'unifying'
+        // .. so to check the logic here must use lower level key inspections like via ahk key history!!
+        // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
+        if bmk.down.is_set() {
+            let umk = bmk.clone();
+            thread::spawn ( move || {
+                thread::sleep(time::Duration::from_millis(150));
+                if umk.down.is_set() && !umk.active.is_set() {
+                    umk.modkey.key().press(); umk.active.set(); umk.consumed.set();
+            } } );
+        }
     }
 
 }
@@ -566,7 +617,10 @@ impl UnifModKey {
         ks.mouse.proc_notice__modkey_up (self.modkey, &ks);
 
         // if we were in ctrl-tab-scroll state, we'll clear it if this is ctrl release and caps not still being held
-        if !ks.mod_keys.caps.down.is_set() && (self.modkey == lctrl || self.modkey == rctrl) { ks.in_ctrl_tab_scroll_state.clear() }
+        if ks.in_ctrl_tab_scroll_state.is_set()
+            && !ks.mod_keys.caps.down.is_set()
+            && ((self.modkey == lctrl || self.modkey == rctrl) && !self.paired_down())
+        { ks.in_ctrl_tab_scroll_state.clear() }
 
         // then for external active state etc updates, we'll call the mgmt specific fns
         self.handling.handle_key_up (&self, ks)
@@ -594,46 +648,8 @@ impl UnifModKey {
     }
 
 
-
-    pub fn proc_notice__caps_down(&self) {
-        // we will immediately invalidate and clear any down mod-key found upon caps activation!
-        // note that internally tracked physical is_down will continue to be down
-        // note also that each of paired mod-keys will get their own notification too
-        if self.handling.is_managed()  &&  self.down.is_set() && self.active.is_set() {
-            self.consumed.set();
-            let umk = self.clone();
-            thread::spawn ( move || {
-                // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
-                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" {
-                    umk.release_w_masking()   // this will update flags too
-                }
-            } );
-        }
-    }
-    pub fn proc_notice__caps_up (&self) {
-        if self.handling.is_managed() {
-            // for managed active (i.e active outside w/o down held), we want to clear it on caps release ..
-            // note that only checking ourselves works even if the paired was held down, the pair would just reactivate itself afterwards
-            if self.mngd_active.is_set() {
-                self.mngd_active.clear();
-                if self.active.is_set() && !self.down.is_set() { self.ensure_inactive() }
-            }
-            // since we deactivate mod-keys on caps press, check to see if we want to reactivate them
-            // note: we'll setup a delay for activation to allow for some sloppy combo releases etc
-            // note also, that if inspecting in browser-key-events, this might appear unexpected coz browser does its own 'unifying'
-            // .. so to check the logic here must use lower level key inspections like via ahk key history!!
-            // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
-            if self.down.is_set() {
-                let umk = self.clone();
-                thread::spawn ( move || {
-                    thread::sleep(time::Duration::from_millis(150));
-                    if umk.down.is_set() && !umk.active.is_set() {
-                        umk.modkey.key().press(); umk.active.set(); umk.consumed.set();
-                } } );
-            }
-        }
-    }
-
+    pub fn proc_notice__caps_down (&self, ks:&KrustyState) { self.handling.proc_notice__caps_down (&self, ks) }
+    pub fn proc_notice__caps_up   (&self, ks:&KrustyState) { self.handling.proc_notice__caps_up   (&self, ks) }
 
 
 
@@ -643,14 +659,22 @@ impl UnifModKey {
     fn mask (&self) -> Key { Key::OtherKey(0x9A) }
 
 
+    /// release masking for when key release can have side-effects (e.g for Win and Alt releases)
     fn is_rel_masking   (&self) -> bool { self.modkey.key() == Key::LWin || self.modkey.key() == Key::RWin || self.modkey.key() == Key::LAlt } // excluding RAlt
+
+    /// delayed-release is specifically for Win key,
     fn is_rel_delaying  (&self) -> bool { self.modkey.key() == Key::LWin || self.modkey.key() == Key::RWin }
+
+    /// unified-keyup is for shift where the OS behavior seems to be to ONLY release shift keys (both if applicable) once both shift keys are up
     fn is_keyup_unified (&self) -> bool { self.modkey.key() == Key::LShift || self.modkey.key() == Key::RShift }
 
-    fn paired_down     (&self) -> bool { self.paired() .iter() .any (|p| p.down.is_set()) }
-    fn paired_active   (&self) -> bool { self.paired() .iter() .any (|p| p.active.is_set()) }
-    //fn pair_any_down   (&self) -> bool { self.down.is_set() || self.paired_down() }
-    fn pair_any_active (&self) -> bool { self.active.is_set() || self.paired_active() }
+    fn paired_down        (&self) -> bool { self.paired() .iter() .any (|p| p.down.is_set()) }
+    fn paired_active      (&self) -> bool { self.paired() .iter() .any (|p| p.active.is_set()) }
+    fn paired_mngd_active (&self) -> bool { self.paired() .iter() .any (|p| p.mngd_active.is_set()) }
+
+    //fn pair_any_down      (&self) -> bool { self.down.is_set() || self.paired_down() }
+    fn pair_any_active      (&self) -> bool { self.active.is_set() || self.paired_active() }
+    //fn pair_any_mngd_active (&self) -> bool { self.active.is_set() || self.paired_mngd_active() }
 
     pub fn release_w_masking(&self) {
         // masking w an unassigned key helps avoid/reduce focus loss to menu etc for alt/win
@@ -729,11 +753,12 @@ impl UnifModKey {
                 if smk.active.is_set() { smk.release_w_masking() }
                 if smk.paired_active() { smk.paired() .iter() .for_each (|p| p.release_w_masking()) }
                 af();
-                if !smk.is_rel_delaying() { // post release reactivation delays (for win)
+                if !smk.is_rel_delaying() {  // (all but win keys)
                     // basically any/both thats down is activated, but if none are down, still reactivate self (which is the left one)
                     if smk.paired_down() { smk.paired_reactivate() } else { smk.reactivate() }
                     if smk.down.is_set() && !smk.active.is_set() { smk.reactivate() } // if still not active from above when down, do it
                 } else {
+                    // we have post release reactivation delays (for win)
                     let smk = smk.clone(); // for the delay closure
                     thread::spawn ( move || {
                         thread::sleep(time::Duration::from_millis(100));

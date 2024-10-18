@@ -208,7 +208,7 @@ impl Combo {
             let latch_states  = ModeStates::static_latch_states() .map (|md| get_mode_enum (cg,md));
             let flags_states  = Self::static_flags_modes()        .map (|md| get_mode_enum (cg,md));
 
-            Combo { _private:(), cmk: cg.st.cmk, modkey_states, mode_states, latch_states, flags_states }
+            Combo { _private:(), cmk: cg.get_cmk(), modkey_states, mode_states, latch_states, flags_states }
         } ) .collect::<Vec<Combo>>()
     }
 
@@ -225,25 +225,28 @@ impl Combo {
         fn triplet_contains (mks:&Vec<ModKey>, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
             mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk)
         }
+        fn ag_triplet_contains (ag:&AG, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
+            ag.check_mks_contains(&lrmk) || ag.check_mks_contains(&lmk) || ag.check_mks_contains(&rmk)
+        }
         let ks = KrustyState::instance();
-        let mut af = ag.st.af.clone();
+        let mut af = ag.get_af();
         ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
             ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
                 // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
-                if triplet_contains (&ag.mks, lrmk, lmk, rmk) {
+                if ag_triplet_contains (ag, lrmk, lmk, rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
                     // so if this is managed mk and the wrapping flag is set, we'll wrap in active action, else just direct action
-                    if umk.handling.is_managed() && ag.wrap_mkg {
+                    if umk.handling.is_managed() && ag.check_mkg_wrap() {
                         af = umk.active_action (af.clone())
                     } else {
                         af = umk.bare_action (af.clone())
                     }
                 } else {
                     // we're in a triplet where neither of lr/l/r is in the modkeys set for this combo
-                    if umk.handling.is_managed() && ag.wrap_mkg {
+                    if umk.handling.is_managed() && ag.check_mkg_wrap() {
                         af = umk.inactive_action(af.clone())
                         // ^^ for managed mk, as this mod-key was not in the list, we wrap inactive action around it
-                    } else if umk.handling.is_doubled() && ag.wrap_mkg && cgo.is_some_and (|cg| triplet_contains (&cg.dat.mks, lrmk, lmk, rmk) ) {
+                    } else if umk.handling.is_doubled() && ag.check_mkg_wrap() && cgo.is_some_and (|cg| triplet_contains (&cg.dat.mks, lrmk, lmk, rmk) ) {
                         af = umk.masked_released_action (af.clone())
                         // ^^ for doubled-mk (e.g. lwin) specified in combo-gen mks but not in action mks, we'll do a masked release here for robustness
                         // .. in theory, we shouldnt need it, but the OS might have gotten at the held key earlier than our hook, so this helps
@@ -275,7 +278,7 @@ impl Combo {
         // before we gen combos/AFs from these, lets make useful updates to the combo-gen as the final prep step
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // (note that these can still be set to no-consume if key-repeat is desired)
-        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.st.cmk {
+        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
             }

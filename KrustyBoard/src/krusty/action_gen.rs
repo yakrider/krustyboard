@@ -21,7 +21,7 @@ pub struct ActionGenSt_MouseBtn { mbtn : MouseButton, action : Option<MouseBtnEv
 pub struct ActionGenSt_Wheel    { wheel: MouseWheel,  action : MouseWheelEv_T }
 pub struct ActionGenSt_AF       { af : AF }
 
-pub struct ActionGenSt_Inited   { pub af : AF }
+pub struct ActionGenSt_Inited   { af : AF }
 // ^^ The inited state holds the actual provided AF or an AF generated with the key/mouse action specifications
 // ^^ note above that the action option, if unspecified will produce press-release output, else a press or rel action can be specified
 
@@ -51,13 +51,13 @@ impl ActionGenable for ActionGenSt_Inited {}
 pub struct ActionGen <S: ActionGenSt = ActionGenSt_Init> {
 
     /// modifier-keys to wrap the specified action-function for this combo-action
-    pub mks : Vec<ModKey>,
+    mks : Vec<ModKey>,
 
     /// the wrap_mod_key_guard flag will set the generated action for this combo to be wrapped in activation/inactivation guards
-    pub wrap_mkg : bool,
+    wrap_mkg : bool,
 
     /// internal state specific data .. either the AF supplied, or the key/mbtn and event type to generate an action AF
-    pub st : S,
+    st : S,
 
 }
 
@@ -67,6 +67,9 @@ pub type AG = ActionGen <ActionGenSt_Inited>;
 
 
 
+
+
+/// Methods specific to the Init State ActionGen
 impl ActionGen<ActionGenSt_Init> {
     /// Create a new ActionGen at the _Init state (which is default)
     pub fn new () -> Self {
@@ -112,6 +115,16 @@ impl <S> ActionGen<S>
     pub fn m (mut self, mk:ModKey) -> Self {
         self.mks.push(mk);
         self
+    }
+    /// check if mod-key wrapping is enabled <br>
+    /// (for internal use to restrict access to the underlying flag)
+    pub fn check_mkg_wrap (&self) -> bool {
+        self.wrap_mkg
+    }
+    /// check if mod-key vec contains a specified modkey <br>
+    /// (for internal use to restrict access to underlying modkeys)
+    pub fn check_mks_contains (&self, mk:&ModKey) -> bool {
+        self.mks.contains(mk)
     }
 }
 
@@ -172,7 +185,7 @@ impl ActionGen <ActionGenSt_Wheel> {
 /// methods specific to generating ActionGen for directly specified Action-Function
 impl ActionGen <ActionGenSt_AF> {
     /// Enable wrapping with mod-key guard actions (which accounts for prior modkey active/inactive). <br>
-    /// (The default for ActionGenSt_AF is disabled)
+    /// (The default is DISABLED for ActionGenSt_AF)
     pub fn mkg_w (mut self) -> Self {
         self.wrap_mkg = true;
         self
@@ -197,13 +210,23 @@ impl <S> ActionGen<S>
     where S : ActionGenSt + ActionGenable + ActionGenS_mkgWrapped
 {
     /// Disable wrapping with mod-key guard actions (which accounts for prior modkey active/inactive). <br>
-    /// (The default for ActionGenSt_Key and ActionGenSt_MouseBtn is disabled)
+    /// (The default is ENABLED for ActionGenSt_Key and ActionGenSt_MouseBtn and ActionGenSt_Wheel)
     pub fn mkg_nw (mut self) -> Self {
         self.wrap_mkg = false;
         self
     }
 }
 
+
+
+/// Methods specific to ActionGenSt_Inited
+impl ActionGen <ActionGenSt_Inited> {
+    /// get a clone of the generated Arc-wrapped-Action-Function (AF)
+    /// (for internal use to restrict access to underlying state)
+    pub fn get_af (&self) -> AF {
+        self.st.af.clone()
+    }
+}
 
 
 // So we're allowing the ActionGennable states to directly gen the final _Inited state at any part of process ..

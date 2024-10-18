@@ -17,7 +17,7 @@ pub struct ComboGenSt_Key      { key  : Key,         action : KbdEvCbMapKey_T }
 pub struct ComboGenSt_MouseBtn { mbtn : MouseButton, action : MouseBtnEv_T }
 pub struct ComboGenSt_Wheel    { whl  : MouseWheel,  action : MouseWheelEv_T }
 
-pub struct ComboGenSt_Inited   { pub cmk: EvCbMapKey }
+pub struct ComboGenSt_Inited   { cmk: EvCbMapKey }
 // ^^ The inited state holds the combo-maps-key .. the same structure as we would have as key in input bindings map
 // ^^ note above that the action field when default will make combo-gen that triggers on press, else a release trigger can be specified
 
@@ -84,7 +84,7 @@ pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
     pub dat : Box<_ComboGen>,
 
     /// internal state specific data .. either the combo-map-key, or the requisites to create one
-    pub st  : S,
+    st  : S,
 }
 
 
@@ -218,6 +218,15 @@ impl ComboGen <ComboGenSt_Wheel> {
     pub fn bkwd (mut self) -> Self {
         self.st.action = MouseWheelEv_T::WheelBackwards;
         self
+    }
+}
+
+/// methods specific to the fully Inited ComboGen
+impl ComboGen <ComboGenSt_Inited> {
+    /// get the Combo-Maps-Key (cmk)
+    /// (for internal use restrict cmk access)
+    pub fn get_cmk (&self) -> EvCbMapKey {
+        self.st.cmk
     }
 }
 
