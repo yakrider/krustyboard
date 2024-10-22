@@ -25,6 +25,7 @@ The API further enables one to ..
 - Conditional combos that only trigger on satisfying arbitrary conditions
 - Various 'mode-states' that can further specify the modes during which certain combos are to be enabled
 - Specify wildcards for various modifier keys (e.g. ctrl, alt, shift, win) that can be optional for the combo
+- Define two-stroke combos where the specified combo must immediately follow a specified first stroke combo to trigger
 - Support for defining combos and actions for mouse button and wheel events, and for double-taps on keys/buttons etc
 - Framework for directly binding handling for any of the key/mouse input events, further upstream than the combo registrations (if so desired), which is specially useful for managing actions on actual modifier keys themselves (like Capslock, Alt, Ctrl etc).
 - Framework and examples on setting up various mode-states that allow for second/third/fourth etc layers of hotkey functionality layered on the keyboard

@@ -1,6 +1,7 @@
 #![ allow (non_camel_case_types) ]
 
 use std::sync::Arc;
+use derivative::Derivative;
 use crate::*;
 
 /*
@@ -12,12 +13,12 @@ ComboGen API Type-State machinery notes:
 */
 
 
-pub struct ComboGenSt_Init     { }
-pub struct ComboGenSt_Key      { key  : Key,         action : KbdEvCbMapKey_T }
-pub struct ComboGenSt_MouseBtn { mbtn : MouseButton, action : MouseBtnEv_T }
-pub struct ComboGenSt_Wheel    { whl  : MouseWheel,  action : MouseWheelEv_T }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Init     { }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Key      { key  : Key,         action : KbdEvCbMapKey_T }
+#[derive (Debug, Clone)] pub struct ComboGenSt_MouseBtn { mbtn : MouseButton, action : MouseBtnEv_T }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Wheel    { whl  : MouseWheel,  action : MouseWheelEv_T }
 
-pub struct ComboGenSt_Inited   { cmk: EvCbMapKey }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Inited   { cmk: EvCbMapKey }
 // ^^ The inited state holds the combo-maps-key .. the same structure as we would have as key in input bindings map
 // ^^ note above that the action field when default will make combo-gen that triggers on press, else a release trigger can be specified
 
@@ -41,6 +42,9 @@ impl ComboGenable for ComboGenSt_Inited {}
 
 
 /// Combo-Generator progressive state struct inner data
+//# [ derive (Clone) ]
+# [ derive (Clone, Derivative) ]
+# [ derivative (Debug) ]
 pub struct _ComboGen {
 
     /// modifier keys that should be down to trigger this combo
@@ -56,7 +60,11 @@ pub struct _ComboGen {
     pub wc_modes : Option<Vec<ModeState_T>>,
 
     /// optional condition to check before triggering this combo
-    pub cond     : Option<ComboCond>,
+    # [ derivative (Debug="ignore") ]
+    pub cond : Option<ComboCond>,
+
+    /// optional first-stroke combo that must immediately precede this for this to trigger
+    pub first_stroke : Option<CG>,
 
     /// the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
     pub mod_key_no_consume  : bool,
@@ -69,7 +77,7 @@ impl _ComboGen {
     fn new () -> _ComboGen {
         _ComboGen {
             mks:Vec::new(), modes:Vec::new(),
-            wc_mks:None, wc_modes:None, cond:None,
+            wc_mks:None, wc_modes:None, cond:None, first_stroke:None,
             mod_key_no_consume:false, mode_kdn_no_consume:false,
         }
     }
@@ -78,6 +86,7 @@ impl _ComboGen {
 
 
 /// Combo-Generator progressive state struct
+# [ derive (Debug, Clone) ]
 pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
 
     /// all the data that ComboGen actually holds through the construction states
@@ -172,6 +181,16 @@ impl <S> ComboGen<S>
             let cond_old = self.dat.cond.take().unwrap();
             self.dat.cond = Some ( Arc::new ( move |ks,e| cond_old(ks,e) && cond(ks,e) ) );
         }
+        self
+    }
+
+    /// Require a First-Stroke-Combo (fsc) that must immediately precede (excl modifier keys) this combo for this to trigger <br>
+    /// Note: if the fsc matches, other registered actions for this combo without fsc-match will be ignored
+    /// Note: second-stroke combos with mode-states will never trigger as the mode-state-key would itself be the next stroke!
+    pub fn fsc <ICG> (mut self, cg:&ICG) -> Self
+        where ICG : Into<CG> + Clone
+    {
+        self.dat.first_stroke = Some(cg.clone().into());
         self
     }
 

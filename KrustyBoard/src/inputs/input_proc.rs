@@ -1,7 +1,7 @@
 #![ allow (non_camel_case_types) ]
 
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize};
+use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicUsize};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
 use std::thread;
@@ -62,16 +62,20 @@ impl EvProc_Ds {
 
 
 pub struct _InputProcessor {
-    // we hold handles returned by OS to the lower level kbd/mouse hooks we set (needed to unhook them later)
-    kbd_hook     : AtomicIsize,
-    mouse_hook   : AtomicIsize,
+    /// handle returned by OS to the lower level kbd hook that we set (needed to unhook later)
+    kbd_hook : AtomicIsize,
+    /// handle returned by OS to the lower level mouse hook that we set (needed to unhook later)
+    mouse_hook : AtomicIsize,
+    /// handle to the input-processing thread (so we can send msg to stop it when desired)
     iproc_thread : AtomicU32,
-    // the input bindings hold mapping for kbdkeys/mouse events to bound actions
-    pub input_bindings   : Bindings,
-    // the combos processor, if present, is called after any bindings callbacks are processed
+    /// monotonic counter of input events that can be valid first-strokes (i.e. presses of mouse-btn or non-moidifer kbd-key)
+    stroke_ev_counter : AtomicUsize,
+    /// the input bindings hold mapping for kbdkeys/mouse events to bound actions
+    pub input_bindings : Bindings,
+    /// the combos processor, if present, is called after any bindings callbacks are processed
     pub combos_processor : AtomicRefCell <Option <EvCbFn_ComboProc_T>>,
-    // for queued callback types, send all input events (kbd/mouse) to same processing queue (w event args pre-packaged in it)
-    pub input_af_queue   : SyncSender <EvCbFn_QueuedProc_T>,
+    /// for queued callback types, send all input events (kbd/mouse) to same processing queue (w event args pre-packaged in it)
+    pub input_af_queue : SyncSender <EvCbFn_QueuedProc_T>,
 }
 
 # [ derive (Clone, Deref) ]
@@ -95,9 +99,10 @@ impl InputProcessor {
                 kbd_hook     : AtomicIsize::default(),
                 mouse_hook   : AtomicIsize::default(),
                 iproc_thread : AtomicU32::default(),
-                input_bindings   : Bindings::new(),
-                combos_processor : AtomicRefCell::new (None),
-                input_af_queue   : input_queue_sender,
+                stroke_ev_counter : AtomicUsize::default(),
+                input_bindings    : Bindings::new(),
+                combos_processor  : AtomicRefCell::new (None),
+                input_af_queue    : input_queue_sender,
             } ) )
         } ) .clone()
     }
@@ -110,6 +115,15 @@ impl InputProcessor {
         // Note that this is not really intended to be called at runtime ..
         // if we do want this to be dyanmic behavior, we should replace AtomicRefCell with RwLock in the CombosMap struct for robustness
         *self.combos_processor.borrow_mut() = None;
+    }
+
+    /// increments stroke events counter and returns it (to use as stroke-id)
+    fn incremented_stroke_counter (&self) -> usize {
+        self.stroke_ev_counter .fetch_add (1, Ordering::Relaxed) + 1
+    }
+    /// returns the current stroke events counter value
+    fn _cur_stroke_counter (&self) -> usize {
+        self.stroke_ev_counter .load (Ordering::Relaxed)
     }
 
 
@@ -294,8 +308,14 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
         let extra_info = kb_struct.dwExtraInfo;
 
+        let stroke_id = if key != KbdKey::CapsLock && !key.is_modifier_key()
+            && (ev_t == KbdEvent_KeyDown || ev_t == KbdEvent_SysKeyDown)
+        {
+            iproc.incremented_stroke_counter()
+        } else { 0 };
+
         let dat = EventDat::key_event { key, ev_t, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
-        let event = Event { stamp, injected, extra_info, dat };
+        let event = Event { stroke_id, stamp, injected, extra_info, dat };
 
         //println! ("{:?}", event);
 
@@ -377,8 +397,11 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,
     } {
+        let stroke_id = if let btn_event {ev_t:BtnDown, ..} = dat {
+            iproc.incremented_stroke_counter()
+        } else { 0 };
 
-        let event = Event { stamp, injected, extra_info, dat };
+        let event = Event { stroke_id, stamp, injected, extra_info, dat };
         //print_mouse_ev(event);
 
         if iproc.proc_input_event (event) == EvProp_Stop {

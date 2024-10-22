@@ -14,16 +14,20 @@ use crate::{*, key_utils::*};
 # [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct _CombosMap {
-    // Note that we're using AtomicRefCell instead of Arc-RwLock because we should be donig all the building before
+    // Note that we're using AtomicRefCell instead of Arc-RwLock because we should be doing all the building before
     //   we start running it, so there should never be a write attempted while some other thread is trying to read these
     _private : (),
-    // the combos map itself, mapping key+mod-key+mode-state combos to actions
+
+    /// maps key+mod-key+mode-state combos to actions
     combos_map : AtomicRefCell <FxHashMap <Combo, Vec<ComboValue>>>,
-    // we'll also maintain a separate set (of keys) for combos w wildcards .. (for more efficient wildcard matching)
+
+    /// maintains a separate set (of keys) for combos w wildcards .. (for more efficient wildcard matching)
     wildcard_combos : AtomicRefCell <FxHashMap <EvCbMapKey, Vec<Combo>>>,
-    // we'll maintain a (redundant) mapping of l2-keys for quick checks during fallback processing
+
+    /// maintains a (redundant) mapping of l2-keys for quick checks during fallback processing
     l2_keys_map : AtomicRefCell <FxHashMap <Key, Key>>,
-    // and we'll hold a registry for keys that only need default/fallback bindings
+
+    /// holds a registry for keys that only need default/fallback bindings
     default_bind_keys : AtomicRefCell <FxHashSet <Key>>,
 }
 # [ derive (Clone, Deref) ]
@@ -91,7 +95,7 @@ impl CombosMap {
             // note that we allow multiple conditional or mult non-conditional combos to trigger ..
             // .. but if any conditional combo triggers, then non-conditional combos for that are ignored
             cvs.push(cv);
-            cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.stamp));
+            cvs.sort_by_cached_key (|cv| (cv.first_stroke_cond.is_none(), cv.cond.is_none(), cv.stamp));
             // ^^ we want to sort such that conditionals are up top sorted by timestamp .. (hence the boolean supplied as cond.is_none())
         } else {
             cm.insert (c, vec![cv]);
@@ -176,78 +180,111 @@ impl CombosMap {
 
 
 
+    // Matched Combo-Values/AFs processing : exec applicable combo-actions (w/ conditionals if any), return whether any AF was executed.
+    //
+    // Note that combo-values for each combo-key are prior sorted by .. first-stroke cond, then regular cond, then non-cond, then by timestamp
+    //  .. this ensures determinism, and since the non-conditional AFs are at the end, allows us to only run those if no conditions matched.
+    // First-Stroke Condition (fsc) rules :
+    // - fsc combo-values get sorted topmost .. (but there could be fsc w/ or w/o additional cond)
+    // - if fsc present and doesnt match, we skip that cv
+    // - if fsc matched and execd, we can only go through subset that also have the matching fsc specified
+    // - (note .. given fsc w cond, where fsc matched but cond did not, we'd still continue checking non-fsc .. follows least-surprise)
+    // Condition Matching (cond) rules :
+    // - we execute AFs for all matching coditional-combos OR all matching non-conditional combos
+    // - however, if any conditional combo triggers, then any remaining non-conditional combos are ignored
+    // (This allows for ergonomic declaration and use of base-case actions and special conditional-case actions).
+    //
+    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:&KrustyState) -> bool {
+        let (mut cond_matched, mut combo_execd) = (false, false);
+        for cv in cvs {
+            // first we enforce first-stroke condition rules
+            if let Some(fs_cond) = cv.first_stroke_cond.as_ref() {
+                if !fs_cond(ks,ev) { continue }
+                // ^^ we found a fsc for this cv .. so if we dont match it, we should skip it
+            }
+            else if combo_execd { continue }
+            // ^^ this cv didnt have a fsc, but we've execd on some cv (must've fsc matched) for this combo earlier, so skip this cv
+
+            // so by here, either we're the fsc matched combo, or no fsc existed or matched for this and we're checking non-fsc cvs
+            // so now we can simply process based on regular conditonals rules
+            if let Some(cond) = cv.cond.as_ref() {
+                // all conditional combos that are satisfied can be run
+                if cond(ks,ev) {
+                    cond_matched = true; combo_execd = true;
+                    (cv.af)();
+                }
+            } else if !cond_matched {
+                // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
+                combo_execd = true;
+                (cv.af)();
+            }
+        }
+        combo_execd
+    }
+
+    // Exact Combo Matching : we try directly looking up a combo and executing it
+    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:&KrustyState) -> bool {
+        //let pcm = self.combos_map.borrow();
+        // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
+        // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
+        let pcm  = unsafe { & *self.combos_map.as_ptr() };
+        let mut combo_execd = false;
+        if let Some(cvs) = pcm.get(&combo) {
+            combo_execd = self.process_combo_afs (&cvs, ev, ks);
+        }
+        combo_execd
+    }
+
+    // Wild-Card Combo Matching : we first check the wildcard-combos map to get wildcard combos (if any) for this particular combo-maps-key
+    // this keeps it efficient for most typical use-cases (which have no wildcards) .. and should be adequate for limited/rare wildcards use
+    // todo : however in theory we could make wildcard combo matching much more efficient by doing things like ..
+    // .. using a column-wise bitmap (as in databases), or even just membership maps and progressively filtering matching combos etc
+    // .. or even just actually using packed bitmaps for combos, and storing wildcard combos as a bitmask to 'AND' cur-combo with
+    fn try_proc_wildcard_combo_afs (&self, cmk:&EvCbMapKey, combo:&Combo, ev:&Event, ks:&KrustyState) -> bool {
+        let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
+        let mut combo_execd = false;
+        if let Some(cs) = cwm.get(cmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
+            cs .iter().filter (|c| c.check_wildcard_eqv (&combo)) .for_each (|c| {
+                let wcsc = c.strip_wildcards();
+                if wcsc != *combo && self.try_proc_combo_afs (&wcsc, ev, ks) {
+                    combo_execd = true;
+                }
+            } );
+        }
+        combo_execd
+    }
+
+    fn register_stroke (&self, fsc:&Combo, ev:&Event, ks:&KrustyState) {
+        if ev.stroke_id > 0 {
+            // ^^ the check isnt necessary, but avoids some cycles on wheel/pointer events etc
+            *ks.last_stroke.write().unwrap() = (ev.stroke_id, Some(fsc.clone()))
+        }
+    }
+
+
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
     fn combo_maps_handle_input (&self, cmk:EvCbMapKey, ev:&Event, ks:&KrustyState) {
         //println! ("combo-map-key: {:?}", cmk);
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        // Matched Combo-Values/AFs processing : exec applicable combo-actions (w/ conditionals if any), return whether any AF was executed.
-        // Note that we execute AFs for all matching coditional-combos OR all matching non-conditional combos ..
-        // However, if any conditional combo triggers, then any remaining non-conditional combos are ignored ..
-        // (This allows for ergonomic declaration and use of base-case actions and special conditional-case actions).
-        // Note also that combo-values for each combo-key are previously ordered such that conditional ones are up top sorted by timestamp
-        //  .. this ensures determinism, and since the non-conditional AFs are at the end, allows us to only run those if no conditions matched.
-        fn process_combo_afs (cvs:&Vec<ComboValue>, ev:&Event, ks:&KrustyState) -> bool {
-            let (mut cond_matched, mut combo_execd) = (false, false);
-            cvs.iter() .for_each ( |cv| {
-                if let Some(cond) = cv.cond.as_ref() {
-                    // all conditional combos that are satisfied can be run
-                    if cond(ks,ev) {
-                        cond_matched = true; combo_execd = true;
-                        (cv.af)();
-                    }
-                } else if !cond_matched {
-                    // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
-                    combo_execd = true;
-                    (cv.af)();
-                }
-            } );
-            combo_execd
-        }
+        let combo = Combo::gen_cur_combo (cmk, &ks);
+        let combo_no_latch = Combo::gen_no_latch_combo(combo);
 
-        // Exact Combo Matching : first we try directly looking up a combo and executing it
-        fn try_proc_combo_afs (combo:&Combo, ev:&Event, cm:&CombosMap, ks:&KrustyState) -> bool {
-            //let pcm = self.combos_map.borrow();
-            // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
-            // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
-            let pcm  = unsafe { & *cm.combos_map.as_ptr() };
-            let mut combo_execd = false;
-            if let Some(cvs) = pcm.get(&combo) {
-                combo_execd = process_combo_afs (&cvs, ev, ks);
-            }
-            combo_execd
-        }
-
-        // Wild-Card Combo Matching : we first check the wildcard-combos map to get wildcard combos (if any) for this particular combo-maps-key
-        // this keeps it efficient for most typical use-cases (which have no wildcards) .. and should be adequate for limited/rare wildcards use
-        // todo : however in theory we could make wildcard combo matching much more efficient by doing things like ..
-        // .. using a column-wise bitmap (as in databases), or even just membership maps and progressively filtering matching combos etc
-        // .. or even just actually using packed bitmaps for combos, and storing wildcard combos as a bitmask to 'AND' cur-combo with
-        fn try_proc_wildcard_combo_afs (cmk:&EvCbMapKey, combo:&Combo, ev:&Event, cm:&CombosMap, ks:&KrustyState) -> bool {
-            let cwm = unsafe { & *cm.wildcard_combos.as_ptr() };
-            let mut combo_execd = false;
-            if let Some(cs) = cwm.get(cmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
-                cs .iter().filter (|c| c.check_wildcard_eqv (&combo)) .for_each (|c| {
-                    let wcsc = c.strip_wildcards();
-                    if wcsc != *combo && try_proc_combo_afs (&wcsc, ev, &cm, ks) {
-                        combo_execd = true;
-                    }
-                } );
-            }
-            combo_execd
-        }
-
-        // Combo-matching order :
+        // Combo-processing order :
         // - First we run any exact match combos .. (any conditional combos if satisfied, else non-conditionals if no conditional matched)
         // - Next, we'll run any wildcard combos that might match .. (same with conditionals exclusivity among them)
         // if we found/executed something so far, we dont need any fallback processing, and can return
 
-        let combo = Combo::gen_cur_combo (cmk, &ks);
-        let combo_execd = try_proc_combo_afs (&combo, ev, &self, ks);
-        let wc_combo_execd = try_proc_wildcard_combo_afs (&cmk, &combo, ev, &self, ks);
-        if combo_execd || wc_combo_execd { return }
+        let mut combo_execd = self.try_proc_combo_afs (&combo, ev, ks);
+        let mut wc_combo_execd = self.try_proc_wildcard_combo_afs (&cmk, &combo, ev, ks);
 
+        if combo_execd || wc_combo_execd {
+            // we should short-circut and return since we found a matching/runnable combo ..
+            // .. but we need to update our last first-stroke cache first
+            self.register_stroke (&combo_no_latch, ev, ks);
+            return
+        }
 
         // - Else if some latch state was active, we can try to match a combo ignoring latches (as fallback)
         //   (And we'll do the same as above here, w direct matches first, w exclusivity to conditionals, then check wildcards similarly)
@@ -255,11 +292,16 @@ impl CombosMap {
         // .. coz the cur impl requires linear search to match wildcard combos (within the subset for that particular cmk w wildcard combos)
 
         if ks.mode_states.some_latch_state_active.is_set() {
-            let combo_no_latch = Combo::gen_no_latch_combo(combo);
-            let combo_execd = try_proc_combo_afs (&combo_no_latch, ev, &self, ks);
-            let wc_combo_execd = try_proc_wildcard_combo_afs (&cmk, &combo_no_latch, ev, &self, ks);
-            if combo_execd || wc_combo_execd { return }
+            combo_execd = self.try_proc_combo_afs (&combo_no_latch, ev, ks);
+            wc_combo_execd = self.try_proc_wildcard_combo_afs (&cmk, &combo_no_latch, ev, ks);
         }
+
+        // we're done searching combo matches, we so can update last first-stroke cache
+        self.register_stroke (&combo_no_latch, ev, ks);
+
+        // and if we already found/execd a match, we can return too
+        if combo_execd || wc_combo_execd { return }
+
 
         // - And finally, if neither direct lookups, nor lookups ignoring any active latch state found anything to run (with and without wildcards)
         // .. then we'll resort to fallback action generation and processing
@@ -337,9 +379,9 @@ impl CombosMap {
                 }
             }
             // we queue all combo actions (instead of spawning out) so they dont get out of sequence
-            // todo : warning : note that we're using the same input-af-queue ..
+            // note that we're using the same input-af-queue ..
             // (.. and its non-ideal as some other event might have snuck in between event and its combo proc)
-            // (.. a separate queue woudlnt fix it either, but eitherway shoudlnt be a problem if queue clearance is fast enough)
+            // (.. but a separate queue woudlnt fix it either .. and eitherway shoudlnt be a problem if queue clearance is fast enough)
             let cm_cb = cm_cb.clone();
             let _ = input_af_queue .send (Box::new (move || cm_cb (cmk, &e)));
 
