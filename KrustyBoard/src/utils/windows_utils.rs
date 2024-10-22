@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use windows::core::{PSTR, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_SYSTEM_AWARE, SetThreadDpiAwarenessContext};
+use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
@@ -33,7 +33,7 @@ impl From<Hwnd> for HWND {
 
 
 pub fn win_set_thread_dpi_aware() { unsafe {
-    SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+    SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
 } }
 
 pub fn win_set_cur_process_priority_high() -> bool { unsafe {

@@ -117,6 +117,7 @@ pub enum EventDat {
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct Event {
+    pub stroke_id : usize,
     pub stamp : u32,
     pub injected : bool,
     pub extra_info : usize,
@@ -156,6 +157,15 @@ impl KbdKey {
     /// Returns true if a keyboard key which supports toggling (ScrollLock, NumLock, CapsLock) is on.
     pub fn is_toggled(self) -> bool {
         unsafe { GetKeyState (u64::from(self) as i32) & 0x0F != 0 }
+    }
+
+    /// Returns true if this key is a 'modifier' key (one of left/right/generic versions of [Alt, Ctrl, Shift, Win]
+    pub fn is_modifier_key (self) -> bool {
+        use KbdKey::*;
+        match self {
+            LAlt | RAlt | Alt | LCtrl | RCtrl | Ctrl | LShift | RShift | Shift | LWin | RWin => true,
+            _ => false
+        }
     }
 
 }

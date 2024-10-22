@@ -60,16 +60,14 @@ pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync +
 pub struct ComboValue {
     _private  : (),
     pub stamp : Instant,
-    pub cond  : Option <ComboCond>,
     pub af    : AF,
+    pub cond  : Option <ComboCond>,
+    pub first_stroke_cond : Option <ComboCond>,
 }
 
 impl ComboValue {
-    pub fn new (af:AF) -> ComboValue {
-        ComboValue::new_w_cond (af, None)
-    }
-    pub fn new_w_cond (af:AF, cond:Option<ComboCond>) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), cond, af }
+    pub fn new (af:AF, cond:Option<ComboCond>, first_stroke_cond:Option<ComboCond>) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, first_stroke_cond }
     }
 }
 
@@ -185,9 +183,22 @@ impl Combo {
         mvs
     }
 
+    /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
+    pub fn gen_combos (mut cg:CG) -> Vec<Combo> {
+        // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step
+        // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
+        // (note that these can still be set to no-consume if key-repeat is desired)
+        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
+            if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
+               if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
+            }
+            // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
+            ModKeys::static_dbl_tap_mk_pairs() .iter() .filter ( |(mk,dmk)|
+                cg.dat.mks.contains(dmk) && !cg.dat.mks.contains(mk)
+            ) .map(|(mk,_)| mk) .collect::<Vec<_>>() .into_iter() .for_each (|mk| cg.dat.mks.push(*mk) );
+        }
 
-    fn gen_combos (cg:&CG) -> Vec<Combo> {
-        // we'll have to convert the states bits/flags to the wildcard-supporting enum
+        // now we'll have to convert the states bits/flags to the wildcard-supporting enum
         use ComboStatesBits_T::*;
         fn get_modkey_enum (cg:&CG, emks:&Vec<ModKey>, mk:ModKey) -> ComboStatesBits_T {
             if let Some(v) = cg.dat.wc_mks.as_ref() {
@@ -201,12 +212,13 @@ impl Combo {
             }
             if cg.dat.modes.contains(&md) { Bit_Present } else { Bit_Absent }
         }
+
         // we want to expand the combos for any L/R agnostic mod-keys specified
         Combo::fan_lr (cg.dat.mks.clone()) .iter() .map ( |emks| {
-            let modkey_states = ModKeys::static_combo_bits_mod_keys() .map (|mk| get_modkey_enum (cg,emks,mk));
-            let mode_states   = ModeStates::static_combo_modes()  .map (|md| get_mode_enum (cg,md));
-            let latch_states  = ModeStates::static_latch_states() .map (|md| get_mode_enum (cg,md));
-            let flags_states  = Self::static_flags_modes()        .map (|md| get_mode_enum (cg,md));
+            let modkey_states = ModKeys::static_combo_bits_mod_keys() .map (|mk| get_modkey_enum (&cg,emks,mk));
+            let mode_states   = ModeStates::static_combo_modes()  .map (|md| get_mode_enum (&cg,md));
+            let latch_states  = ModeStates::static_latch_states() .map (|md| get_mode_enum (&cg,md));
+            let flags_states  = Self::static_flags_modes()        .map (|md| get_mode_enum (&cg,md));
 
             Combo { _private:(), cmk: cg.get_cmk(), modkey_states, mode_states, latch_states, flags_states }
         } ) .collect::<Vec<Combo>>()
@@ -246,7 +258,10 @@ impl Combo {
                     if umk.handling.is_managed() && ag.check_mkg_wrap() {
                         af = umk.inactive_action(af.clone())
                         // ^^ for managed mk, as this mod-key was not in the list, we wrap inactive action around it
-                    } else if umk.handling.is_doubled() && ag.check_mkg_wrap() && cgo.is_some_and (|cg| triplet_contains (&cg.dat.mks, lrmk, lmk, rmk) ) {
+                    } else if umk.handling.is_doubled()
+                        && ag.check_mkg_wrap()
+                        && cgo.is_some_and (|cg| triplet_contains (&cg.dat.mks, lrmk, lmk, rmk) )
+                    {
                         af = umk.masked_released_action (af.clone())
                         // ^^ for doubled-mk (e.g. lwin) specified in combo-gen mks but not in action mks, we'll do a masked release here for robustness
                         // .. in theory, we shouldnt need it, but the OS might have gotten at the held key earlier than our hook, so this helps
@@ -273,24 +288,27 @@ impl Combo {
     }
 
 
+    fn gen_first_stroke_cond (cg:&CG) -> ComboCond {
+        let check_combos = Combo::gen_combos (cg.clone()) .into_iter() .map (Combo::gen_no_latch_combo) .collect::<Vec<Combo>>();
+        Arc::new ( move |ks,ev| {
+            //println! ("\nks.lfs : {:?}", *ks.last_stroke.read().unwrap());
+            //println! ("ref-lfs: {:?}", &check_combos.first());
+            //println! ("ev : {:?}",ev);
+            let (lfs_id, lfs) = *ks.last_stroke.read().unwrap();
+            ev.stroke_id == lfs_id + 1
+                && lfs.is_some()
+                && check_combos .iter().any (|c| *c == lfs.unwrap())
+        } )
+
+    }
+
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub fn gen_combo_entries (mut cg:CG, ag:AG) -> Vec<(Combo, ComboValue)> {
-        // before we gen combos/AFs from these, lets make useful updates to the combo-gen as the final prep step
-        // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
-        // (note that these can still be set to no-consume if key-repeat is desired)
-        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
-            if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
-               if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
-            }
-            // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
-            ModKeys::static_dbl_tap_mk_pairs() .iter() .filter ( |(mk,dmk)|
-                cg.dat.mks.contains(dmk) && !cg.dat.mks.contains(mk)
-            ) .map(|(mk,_)| mk) .collect::<Vec<_>>() .into_iter() .for_each (|mk| cg.dat.mks.push(*mk) );
-        }
-        // finally we're ready to gen the combo-AF and the actual combo-entries
+    pub fn gen_combo_entries (cg:CG, ag:AG) -> Vec<(Combo, ComboValue)> {
         let af = Combo::gen_af (&ag, Some(&cg));
-        Self::gen_combos(&cg) .into_iter() .map ( |c|
-            (c, ComboValue::new_w_cond (af.clone(), cg.dat.cond.clone()))
+        let cond = cg.dat.cond.clone();
+        let fsc  = cg.dat.first_stroke .as_ref() .map (Combo::gen_first_stroke_cond);
+        Self::gen_combos(cg) .into_iter() .map ( |c|
+            (c, ComboValue::new (af.clone(), cond.clone(), fsc.clone()))
         ) .collect()
     }
 

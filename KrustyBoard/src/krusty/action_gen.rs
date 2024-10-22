@@ -15,11 +15,11 @@ ActionGen API Type-State machinery notes:
 */
 
 
-pub struct ActionGenSt_Init     { }
-pub struct ActionGenSt_Key      { key  : Key,         action : Option<KbdEvCbMapKey_T> }
-pub struct ActionGenSt_MouseBtn { mbtn : MouseButton, action : Option<MouseBtnEv_T> }
-pub struct ActionGenSt_Wheel    { wheel: MouseWheel,  action : MouseWheelEv_T }
-pub struct ActionGenSt_AF       { af : AF }
+#[derive (Clone)] pub struct ActionGenSt_Init     { }
+#[derive (Clone)] pub struct ActionGenSt_Key      { key   : Key,          action : Option<KbdEvCbMapKey_T> }
+#[derive (Clone)] pub struct ActionGenSt_MouseBtn { mbtn  : MouseButton,  action : Option<MouseBtnEv_T> }
+#[derive (Clone)] pub struct ActionGenSt_Wheel    { wheel : MouseWheel,   action : MouseWheelEv_T }
+#[derive (Clone)] pub struct ActionGenSt_AF       { af : AF }
 
 pub struct ActionGenSt_Inited   { af : AF }
 // ^^ The inited state holds the actual provided AF or an AF generated with the key/mouse action specifications
@@ -48,6 +48,7 @@ impl ActionGenable for ActionGenSt_Inited {}
 
 
 /// Action-Generator progressive state struct
+# [ derive (Clone) ]
 pub struct ActionGen <S: ActionGenSt = ActionGenSt_Init> {
 
     /// modifier-keys to wrap the specified action-function for this combo-action
