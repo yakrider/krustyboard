@@ -184,30 +184,34 @@ pub struct _KrustyState {
     // having this disallows direct instantiation
     _private: (),
 
-    // used for toggling key processing .. should only listen to turn-back-on combo
+    /// used for toggling key processing .. should only listen to turn-back-on combo
     pub in_disabled_state: Flag,
 
-    // mod-keys .. manages the modifier-keys, their flags, and their action-wrapping
+    /// mod_keys obj manage the modifier-keys, their flags, and their action-wrapping
     pub mod_keys: ModKeys,
 
-    // mode states .. manages the flagged caps-mode states, their trigger keys etc
+    /// mode_states obj manage the flagged caps-mode states, their trigger keys etc
     pub mode_states: ModeStates,
 
-    // mouse .. manages the mouse btns, wheels, wheel-spin invalidations etc
+    /// mouse obj manages the mouse btns, wheels, wheel-spin invalidations etc
     pub mouse: Mouse,
 
-    // win-groups .. maanges the three supported window-grouping functionalty
+    /// win-groups obj maanges the three supported window-grouping functionalty
     pub win_groups: WinGroups,
 
-    // since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
+    /// since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
     pub in_ctrl_tab_scroll_state: Flag,
 
-    // and for right-mouse-btn-wheel switche support, we'll track that state too (and send switche specific keys)
-    // note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
+    /// flag marking right-mouse-btn-wheel scroll switche support <br>
+    /// note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
     pub in_right_btn_scroll_state: Flag,
 
-    // we'll hold a win_snap_dat snapshot to support moving/dragging/resizing windows and window-groups
+    /// win_snap_dat snapshot holds data to support moving/dragging/resizing windows and window-groups
     pub win_snap_dat : RwLock <WinSnapDat>,
+
+    /// the latest valid stroke and its stroke-id .. needed to support second-stroke combos <br>
+    /// note that we store the stroke-id in addition to the stroke coz there might be non-bound keys that dont update this
+    pub last_stroke : RwLock <(usize, Option<Combo>)>,
 
 }
 
@@ -257,6 +261,8 @@ impl KrustyState {
                 in_right_btn_scroll_state  : Flag::default(),
 
                 win_snap_dat : RwLock::new (WinSnapDat::default()),
+
+                last_stroke : RwLock::new ((0, None)),
             } ) )
         ) .clone()
     }
