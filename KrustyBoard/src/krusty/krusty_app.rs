@@ -111,15 +111,15 @@ pub fn setup_krusty_board () {
 
     // NOTE that fallback defaults are : ralt-as-shift, caps-as-ctrl, caps-ralt/shift/alt/win as ctrl-shift/shift/alt/win
 
-    let char_keys: Vec<Key> = "qwertasdfgzxcvb`123456yuiop[]\\hjkl;\'nm,./7890-=" .chars() .map (|c| Key::from_char(c)) .flatten() .collect();
-    let fnum_keys: Vec<Key> = (u64::from(F1) .. u64::from(F24)) .map (|v| Key::from(v)) .collect();
+    let char_keys: Vec<Key> = "qwertasdfgzxcvb`123456yuiop[]\\hjkl;\'nm,./7890-=" .chars() .filter_map(Key::from_char) .collect();
+    let fnum_keys: Vec<Key> = (u64::from(F1) .. u64::from(F24)) .map(Key::from) .collect();
     let nav_keys   = vec![Left, Right, Up, Down, PageUp, PageDown, Home, End];
     let spcl_keys  = vec![Backspace, Delete, Space, Tab, Enter, Escape, Insert, Apps];
     //let media_keys = vec![BrowserBack, BrowserForward, BrowserRefresh, VolumeMute, VolumeDown, VolumeUp,
     //                      MediaNextTrack, MediaPrevTrack, MediaStop, MediaPlayPause];
     //let mouse_keys = vec![MouseLeftBtn, MouseRightBtn, MouseMiddleBtn, MouseX1Btn, MouseX1Btn];
 
-    vec![char_keys, fnum_keys, nav_keys, spcl_keys] .concat() .into_iter() .for_each ( |key| {
+    [char_keys, fnum_keys, nav_keys, spcl_keys] .concat() .into_iter() .for_each ( |key| {
         k.cm .register_default_binding_key (key);
     } );
     // ^^ we can ofc put combos for these later in code .. all these do is register for default binding if no combo gets mapped!
@@ -247,7 +247,7 @@ pub fn setup_krusty_board () {
     // NOTE that these could be removed now that we've made win into TMK_dbl ..
     // .. but if we set win-combo single-press fallback to win-combo, these will still be useful, so we'll let them be!,
     // .. note ofc that everything disabled like this will be accessible on win-dbl press combos!
-    "4567890" .chars() .map (|c| Key::from_char(c)) .flatten() .for_each ( |key| {    // 1,2,3 are qks keys, need special handling
+    "4567890" .chars() .filter_map (Key::from_char) .for_each ( |key| {    // 1,2,3 are qks keys, need special handling
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin),                   k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(caps),           k.ks.ag().af(no_action()) );
         k.cm .add_combo ( k.ks.cg().k(key).m(lwin).m(lalt),           k.ks.ag().af(no_action()) );
@@ -450,8 +450,8 @@ pub fn setup_krusty_board () {
             // else if it is active, we'll mask if its marked consumed
             should_mask = true
         }
-        if should_release == true {
-            if should_mask == true { mouse_rbtn_release_masked() }
+        if should_release {
+            if should_mask { mouse_rbtn_release_masked() }
             else { RightButton.release() }
         }
         ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
@@ -533,7 +533,7 @@ pub fn setup_krusty_board () {
         let action_key = if fwd_not_bkwd {VolumeUp} else {VolumeDown};
         //ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
         ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
-            Arc::new ( move || { (0 .. n_skips) .into_iter() .for_each (|_| { action_key.press_release() }) } )
+            Arc::new ( move || { (0 .. n_skips) .for_each (|_| { action_key.press_release() }) } )
     ) ) }
     // ^^ gives an AF with specified number of skips
 
@@ -997,7 +997,7 @@ pub fn setup_krusty_board () {
 
     // and keeping w the theme, set caps-win-F1 (key with vol-mute printed on it) to toggle microphone mute
     //k.cm .add_combo ( k.ks.cg().k(F1).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| {mic_mute_toggle(); open_mic_cpl();})) );
-    k.cm .add_combo ( k.ks.cg().k(F1).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| mic_mute_toggle())) );
+    k.cm .add_combo ( k.ks.cg().k(F1).m(caps).m(lwin),  k.ks.ag().af (action (mic_mute_toggle)) );
 
 
     // want win-f2 for next with some initial skip .. we'll use caps-win-f2 for prev, so we'll set it up for both
@@ -1132,19 +1132,19 @@ pub fn setup_krusty_board () {
     /// then the **_ CAPS WIN combo _** (l4?) actions :
 
     // caps-win-U should vert-max (via shift-win-up) if not already, or else restore window from vert-max
-    k.cm .add_combo ( k.ks.cg().k(U).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_vertmax())) );
+    k.cm .add_combo ( k.ks.cg().k(U).m(caps).m(lwin),  k.ks.ag().af (action (win_fgnd_toggle_vertmax)) );
     // caps-win-m should maximize (via win-m) if not, else restore from max
-    k.cm .add_combo ( k.ks.cg().k(M).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_max())) );
+    k.cm .add_combo ( k.ks.cg().k(M).m(caps).m(lwin),  k.ks.ag().af (action (win_fgnd_toggle_max)) );
     // caps-win-t should toggle always on top for fgnd window
-    k.cm .add_combo ( k.ks.cg().k(T).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
+    k.cm .add_combo ( k.ks.cg().k(T).m(caps).m(lwin),  k.ks.ag().af (action (win_fgnd_toggle_always_on_top)) );
     // caps-win-n should minimize
     //k.cm .add_combo ( k.ks.cg().k(N).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_min())) );
     // ^^ actually, we already do that with win-esc which is easier .. so we'll repurpose that for non-incognito chrome window
-    k.cm .add_combo ( k.ks.cg().k(N).m(caps).m(lwin),  k.ks.ag().af(action(start_chrome)) );
+    k.cm .add_combo ( k.ks.cg().k(N).m(caps).m(lwin),  k.ks.ag().af (action (start_chrome)) );
 
     // we also have some additional more drastic ones with double-caps-win combos
-    k.cm .add_combo ( k.ks.cg().k(T).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_always_on_top())) );
-    k.cm .add_combo ( k.ks.cg().k(B).m(caps_dbl).m(lwin),  k.ks.ag().af (Arc::new (|| win_fgnd_toggle_titlebar())) );
+    k.cm .add_combo ( k.ks.cg().k(T).m(caps_dbl).m(lwin),  k.ks.ag().af (action (win_fgnd_toggle_always_on_top)) );
+    k.cm .add_combo ( k.ks.cg().k(B).m(caps_dbl).m(lwin),  k.ks.ag().af (action (win_fgnd_toggle_titlebar)) );
 
     fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32, side_t:RectEdgeSide) {
         // we'll setup caps-win combos for regular move/stretch etc
@@ -1173,7 +1173,7 @@ pub fn setup_krusty_board () {
 
     // some additional caps-win combos
     // caps-win-c being used to launch winmerge diff from last two clipboard entries
-    k.cm .add_combo ( k.ks.cg().k(C).m(caps).m(lwin),  k.ks.ag().af (Arc::new (|| start_winmerge_clipboard())) );
+    k.cm .add_combo ( k.ks.cg().k(C).m(caps).m(lwin),  k.ks.ag().af (action (start_winmerge_clipboard)) );
     // gaah we'll just throw in iDEA diff for drag-drop diffing (just coz winmerge doesnt do dark mode)
     //k.cm .add_combo  ( k.ks, k.ks.cg().k(C).m(lwin),  k.ks.cg_af (Arc::new (|| start_idea_diff() )));
     // ^^ cant do from here, turns out idea diff from cmd line can ONLY be opened with two files pointed, unlike empty from Idea shortcut!
@@ -1545,8 +1545,8 @@ pub fn setup_krusty_board () {
             win_get_ide_dialog_hwnds() .into_iter() .for_each ( |hwnd| { win_close (hwnd) } );
         } );
     }
-    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(lalt)        .c(intellij_fgnd()),  k.ks.ag().af (Arc::new (move || ide_float_tools_toggle())) );
-    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(lalt).m(caps).c(intellij_fgnd()),  k.ks.ag().af (Arc::new (move || ide_float_tools_clear ())) );
+    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(lalt)        .c(intellij_fgnd()),  k.ks.ag().af (Arc::new (ide_float_tools_toggle)) );
+    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(lalt).m(caps).c(intellij_fgnd()),  k.ks.ag().af (Arc::new (ide_float_tools_clear )) );
 
 
 
@@ -1574,27 +1574,27 @@ pub fn setup_krusty_board () {
         let fi = WinEventsListener::instance(); let fi = fi.fgnd_info.read().unwrap();
         fi.exe == "chrome.exe" && fi.title.contains("Random")
     } ) }
-    k.cm .add_combo ( k.ks.cg().k(Left  ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo + 1 * xd, y, Escape)) );
+    k.cm .add_combo ( k.ks.cg().k(Left  ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo +     xd, y, Escape)) );
     k.cm .add_combo ( k.ks.cg().k(Right ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo + 3 * xd, y, Escape)) );
     k.cm .add_combo ( k.ks.cg().k(Down  ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo + 2 * xd, y, Escape)) );
-    //k.cm .add_combo ( k.ks.cg().k(Slash ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo + 0 * xd, y, Escape)) );
+    //k.cm .add_combo ( k.ks.cg().k(Slash ).s(latch_2).c(pc()),  k.ks.ag().af (gen_pointed_v2 ( xo         , y, Escape)) );
     k.cm .add_combo ( k.ks.cg().k(Up    ).s(latch_2).c(pc()),  k.ks.ag().af ( pointed_3 ) );
-    k.cm .add_combo ( k.ks.cg().k(Left  ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo + 1 * xd, y, Tab)) );
+    k.cm .add_combo ( k.ks.cg().k(Left  ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo +     xd, y, Tab)) );
     k.cm .add_combo ( k.ks.cg().k(Right ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo + 3 * xd, y, Tab)) );
     k.cm .add_combo ( k.ks.cg().k(Down  ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo + 2 * xd, y, Tab)) );
-    k.cm .add_combo ( k.ks.cg().k(Slash ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo + 0 * xd, y, Tab)) );
+    k.cm .add_combo ( k.ks.cg().k(Slash ).s(latch_2).c(pc()).m(caps),  k.ks.ag().af (gen_pointed_v2 ( xo         , y, Tab)) );
 
 
     fn og_setup () -> AF { Arc::new ( || { thread::spawn ( || {
         // assume four sized windows are up, move them to right loc, start em up, deblur,
-        let xd = 940;
+        let _xd = 940;
         for _i in (0 .. 4).rev() {
-            //MousePointer::move_abs (xd*0 + 240, 200);         // home
-            MousePointer::move_abs (xd*0 + 600, 600); s(50);    // video
-            LeftButton.press_release(); s(800);                 //
-            MousePointer::move_abs (xd*0 + 80, 300); s(50);     // unblur
+            //MousePointer::move_abs (240, 200);         // home
+            MousePointer::move_abs (600, 600); s(50);    // video
+            LeftButton.press_release(); s(800);          //
+            MousePointer::move_abs (80, 300); s(50);     // unblur
             LeftButton.press_release(); s(800); LeftButton.press_release(); s(50); s(20);
-            //win_fgnd_move_to (xd*i, 0, 940, 2400); s(500);
+            //win_fgnd_move_to (_xd*_i, 0, 940, 2400); s(500);
             snap_closest_edge_side (&KrustyState::instance(), RectEdgeSide::Left ); s(10);
             snap_closest_edge_side (&KrustyState::instance(), RectEdgeSide::Right); s(10);
         }

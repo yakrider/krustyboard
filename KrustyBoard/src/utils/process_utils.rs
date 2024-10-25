@@ -82,9 +82,9 @@ fn setup_opened_window (win_class_part_match_str: &str) {
                 true
             } else { false }
         }
-        thread::sleep(Duration::from_millis(500 )); if attempt_setup(&match_str) == true { return }
-        thread::sleep(Duration::from_millis(1000)); if attempt_setup(&match_str) == true { return }
-        thread::sleep(Duration::from_millis(2000)); if attempt_setup(&match_str) == true { return }
+        thread::sleep(Duration::from_millis(500 )); if attempt_setup(&match_str) { return }
+        thread::sleep(Duration::from_millis(1000)); if attempt_setup(&match_str) { return }
+        thread::sleep(Duration::from_millis(2000)); if attempt_setup(&match_str) { }
     } );
 }
 

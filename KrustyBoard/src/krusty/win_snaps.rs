@@ -155,12 +155,12 @@ pub fn handle_pointer_action_cancel (ks:&KrustyState) {
 
 pub fn snap_closest_edge_side (ks:&KrustyState, side_t:RectEdgeSide) {
     // first we'll have a helper fn to correctly snap to the nearest edge in the desired direction within workarea-bounds
-    fn snap (win_edge:&Edge, pad_v:i32, edges:&Vec<Edge>, bound:i32, snap_fwd:bool) -> i32 {
+    fn snap (win_edge:&Edge, pad_v:i32, edges:&[Edge], bound:i32, snap_fwd:bool) -> i32 {
         let edges = edges .iter() .filter ( |e| {
             e.xy == bound
             || (snap_fwd && e.xy > win_edge.xy && e.xy < bound)
             || (!snap_fwd && e.xy < win_edge.xy && e.xy > bound)
-        } ) .map (|&e| e) .collect::<Vec<Edge>>();
+        } ) .copied() .collect::<Vec<Edge>>();
         snap_to_edgelist_nearest__delta (win_edge, pad_v, &edges, i32::MAX as u32)
     }
     ks.capture_fgnd_win_snap_dat();
@@ -222,7 +222,7 @@ pub fn capture_win_snap_dat (ks:&KrustyState, hwnd:Hwnd, win_grp:Option<WinGroup
     let snap_thresh = ((workarea.bottom - workarea.top) / 50) as u32;
 
     // we'll filter out grp rects (if applicable) from edgelists calc .. (wont snap to those as they move together)
-    rects = rects.into_iter().filter (|(h,_)| !grp_rects.contains_key(h)).collect();
+    rects .retain (|(h,_)| !grp_rects.contains_key(h));
 
     // lets finally calculate our visible edges lists ..
     let edge_lists = rects_to_viz_edgelists (&mut rects, &workarea);
@@ -254,21 +254,21 @@ fn rect_to_edges (rect:&RECT) -> RectEdges {
     let bottom = Edge { xy: rect.bottom, tl: rect.left, br: rect.right  };
     RectEdges { left, top, right, bottom }
 }
-fn _rects_to_edgelists (rects: &Vec <RECT>) -> RectEdgeLists {
-    let mut rels = rects .iter() .map (|r| rect_to_edges(r)) .fold ( RectEdgeLists::new_w_capacity (rects.len()), |mut rels, re| {
+fn _rects_to_edgelists (rects: &[RECT]) -> RectEdgeLists {
+    let mut rels = rects .iter() .map (rect_to_edges) .fold ( RectEdgeLists::new_w_capacity (rects.len()), |mut rels, re| {
         rels.vert.push(re.left); rels.horiz.push(re.top); rels.vert.push(re.right); rels.horiz.push(re.bottom);
         rels
     } );
     RectEdgeLists { vert: reduce_edge_sects(&mut rels.vert), horiz: reduce_edge_sects(&mut rels.horiz)}
 }
 
-fn rects_to_viz_edgelists (rects: &mut Vec<(Hwnd, RECT)>, wa: &RECT) -> RectEdgeLists {
+fn rects_to_viz_edgelists (rects: &mut [(Hwnd, RECT)], wa: &RECT) -> RectEdgeLists {
     // Note: we rely on the assumption here that the rects are straight from win-enum call and are therefore in z-order
     // we're also going to filter out any edge beyond our work-area, as we want to limit snapping to those bounds
     let mut viz_edge_lists = RectEdgeLists::new_w_capacity (2 * rects.len()); // x2 because we make horiz/vert vecs each w 2 edges per rect
     for i in 0 .. rects.len() {
         let rect_edges = rect_to_edges(&rects[i].1);
-        rects[..i] .sort_unstable_by_key ( |(_,r)| -1 * (r.right - r.left) * (r.bottom - r.top) );
+        rects[..i] .sort_unstable_by_key ( |(_,r)| -(r.right - r.left) * (r.bottom - r.top) );
         // ^^ sorting by decreasing area ensures we check the largest windows first (as they're most likely to occlude)
         // .. (and since we only need to re-sort the section before our cur iteration location, it's safe to do in place!)
         let edges_v = vec![rect_edges.left, rect_edges.right] .into_iter() .filter (|e| e.xy >= wa.left && e.xy <= wa.right) .collect();
@@ -276,7 +276,7 @@ fn rects_to_viz_edgelists (rects: &mut Vec<(Hwnd, RECT)>, wa: &RECT) -> RectEdge
         viz_edge_lists.vert  .append ( &mut calc_edges_viz_sects (edges_v, true,  &rects[..i]) );
         viz_edge_lists.horiz .append ( &mut calc_edges_viz_sects (edges_h, false, &rects[..i]) );
     };
-    let wa_edges = rect_to_edges(&wa);
+    let wa_edges = rect_to_edges(wa);
     viz_edge_lists.vert.push(wa_edges.left); viz_edge_lists.vert.push(wa_edges.right);
     viz_edge_lists.horiz.push(wa_edges.top); viz_edge_lists.horiz.push(wa_edges.bottom);
     viz_edge_lists.vert  = reduce_edge_sects (&mut viz_edge_lists.vert);
@@ -290,9 +290,9 @@ fn calc_edges_viz_sects (sects:Vec<Edge>, is_vert:bool, rects: &[(Hwnd, RECT)]) 
     // if we've already gone through all the rects above us, we're done
     if rects.is_empty() { return sects }
     // else we'll calc the viz results from the current rect
-    let sects_viz = sects .iter() .map (|&edge| {
+    let sects_viz = sects .iter() .flat_map (|&edge| {
         calc_edge_viz_sects_for_rect (&edge, is_vert, rects.first().unwrap())
-    } ) .flatten() .collect::<Vec<Edge>>();
+    } ) .collect::<Vec<Edge>>();
     //println!("\nsects-viz: {:#?}",(sects_viz));
     // and again, if nothing is viz anymore, we're done for this edge
     if sects_viz.is_empty() { return sects_viz }
@@ -322,7 +322,7 @@ fn calc_edge_viz_sects_for_bounds (edge:&Edge, bounds:&Bounds) -> Vec<Edge> {
 }
 
 
-fn reduce_edge_sects(edges: &mut Vec<Edge>) -> Vec<Edge> {
+fn reduce_edge_sects(edges: &mut [Edge]) -> Vec<Edge> {
      use itertools::Itertools;      // for group_by trait
     // Note that this only works for edges of the same type (cant mix horiz and vert edges)
     // Our goal is to make only a single pass through groups of edges at the same displacement sorted by linear dim (x for vert, y for horiz)
@@ -360,7 +360,7 @@ fn snap_to_edge_rect_delta (wr:&RECT, wsd:&WinSnapDat) -> RECT {
 }
 
 
-fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&Vec<Edge>, thresh:u32) -> i32 {
+fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&[Edge], thresh:u32) -> i32 {
     let delta = edges .iter() .fold ( i32::MAX,  |delta_acc, edge| {
         let delta_e = edge.xy - win_edge.xy - pad_v;
         if { delta_e.abs() < delta_acc.abs()
@@ -376,8 +376,9 @@ fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&Vec<Edge>,
 
 
 // we'll use a static rwlocked vec to store child-windows from callbacks, and a mutex to ensure only one child-windows call is active
-static enum_rects_lock : Lazy <Arc <Mutex <()>>> = Lazy::new (|| Arc::new ( Mutex::new(())));
+#[allow (clippy::type_complexity)]
 static enum_rects : Lazy <Arc <RwLock <Vec <(Hwnd,RECT)>>>> = Lazy::new (|| Arc::new ( RwLock::new (vec!()) ) );
+static enum_rects_lock : Lazy <Arc <Mutex <()>>> = Lazy::new (|| Arc::new ( Mutex::new(())));
 
 
 fn gather_win_rects (wsd_hwnd: Hwnd) -> Vec<(Hwnd, RECT)> { unsafe {

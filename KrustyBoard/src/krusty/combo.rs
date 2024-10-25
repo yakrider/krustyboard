@@ -114,7 +114,8 @@ impl Combo {
         Combo { _private:(), cmk, states_bits, wc_mask_bits }
     }
     pub fn gen_no_latch_combo (combo:Combo) -> Combo {
-        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << N__COMBO_STATES_BITS__FLAGS;
+        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << (N__COMBO_STATES_BITS__MODKEYS + N__COMBO_STATES_BITS__MODES);
+        // ^^ note that bits were progressively packed leftwards, so latches are towards leftmost, not rightmost
         let states_bits = combo.states_bits  & (FULL_WILDCARDS_MASK ^ LATCH_MASK);
         Combo { states_bits, ..combo }
     }
@@ -131,7 +132,7 @@ impl Combo {
             mvs .drain(..) .for_each ( |mv| {
                 if mv.contains(lrmk) {
                     // if a vec had this l/r mod (e.g. alt), we'll instead gen three mod vecs having (lalt, ralt, lalt && ralt)
-                    let mut vlr = mv.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .map (|m| *m) .collect::<Vec<ModKey>>();
+                    let mut vlr = mv.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .copied().collect::<Vec<_>>();
                     let (mut vl, mut vr) = (vlr.clone(), vlr.clone());
                     vl.push(*lmk); mvs_exp.push(vl);
                     vr.push(*rmk); mvs_exp.push(vr);
@@ -163,14 +164,14 @@ impl Combo {
         }
 
         // we'll set up helper functions to get the bits for the states bitmap, and the wildcards mask
-        fn get_modkey_bit_n_wc (cg:&CG, emks:&Vec<ModKey>, mk:ModKey) -> (bool, bool) {
+        fn get_modkey_bit_and_wc (cg:&CG, emks:&[ModKey], mk:ModKey) -> (bool, bool) {
             let mut wc = false;
             if let Some(v) = cg.dat.wc_mks.as_ref() {
                 if (v.is_empty() && !emks.contains(&mk)) || v.contains(&mk) { wc = true }
             }
             (wc, emks.contains(&mk))
         }
-        fn get_mode_bit_n_wc (cg:&CG, md:ModeState_T) -> (bool, bool) {
+        fn get_mode_bit_and_wc (cg:&CG, md:ModeState_T) -> (bool, bool) {
             let mut wc = false;
             if let Some(v) = cg.dat.wc_modes.as_ref() {
                 if (v.is_empty() && !cg.dat.modes.contains(&md)) || v.contains(&md) { wc = true }
@@ -179,12 +180,12 @@ impl Combo {
         }
 
         // and a helper fn to generate a combo given a set of lrmk expanded modkeys
-        fn gen_exp_mks_combo (cg:&CG, emks:&Vec<ModKey>) -> Combo {
+        fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey]) -> Combo {
             let (wc_bits, states_bits) = {
-                ModKeys::static_combo_bits_mod_keys()        .map (|mk| get_modkey_bit_n_wc (&cg,emks,mk)) .iter()
-                .chain ( & ModeStates::static_combo_modes()  .map (|md| get_mode_bit_n_wc (&cg,md)) )
-                .chain ( & ModeStates::static_latch_states() .map (|md| get_mode_bit_n_wc (&cg,md)) )
-                .chain ( & Combo::static_flags_modes()        .map (|md| get_mode_bit_n_wc (&cg,md)) )
+                ModKeys::static_combo_bits_mod_keys()        .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) .iter()
+                .chain ( & ModeStates::static_combo_modes()  .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & ModeStates::static_latch_states() .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & Combo::static_flags_modes()       .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
                     let acc_w = aw | ((*w as u64) << (ei as u8));  // accumulate the mask bits
                     let acc_b = ab | ((*b as u64) << (ei as u8));  // accumulate the data bits
@@ -209,11 +210,11 @@ impl Combo {
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
         // note-4: reminder that e.g. we have ralt blocked, and lalt managed .. and its still ok to specify ralt in combo-gen (sending out)
-        fn triplet_contains (mks:&Vec<ModKey>, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
+        fn triplet_contains (mks:&[ModKey], lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
             mks.contains(lrmk) || mks.contains(lmk) || mks.contains(rmk)
         }
         fn ag_triplet_contains (ag:&AG, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
-            ag.check_mks_contains(&lrmk) || ag.check_mks_contains(&lmk) || ag.check_mks_contains(&rmk)
+            ag.check_mks_contains(lrmk) || ag.check_mks_contains(lmk) || ag.check_mks_contains(rmk)
         }
         let ks = KrustyState::instance();
         let mut af = ag.get_af();

@@ -119,7 +119,7 @@ pub struct Bindings (
 impl Bindings {
 
     pub fn new() -> Bindings {
-        Bindings( AtomicRefCell::new ( FxHashMap::default() ) )
+        Bindings ( AtomicRefCell::new ( FxHashMap::default() ) )
     }
 
     pub fn bind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T, cbe:EvCbEntry) {

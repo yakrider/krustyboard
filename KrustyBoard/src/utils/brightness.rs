@@ -21,8 +21,8 @@ mod brightness_ps_wmi {
 
     pub fn incr_brightness (incr:i32) {
         let cur_b = Command::new(PS_LOC).arg(BRIGHT_Q_CMD).output().ok()
-            .map (|o| String::from_utf8(o.stdout).ok()) .flatten()
-            .map (|s| s.lines().next().map(|s| s.to_owned().parse::<i32>().ok()).flatten()) .flatten();
+            .and_then (|o| String::from_utf8(o.stdout).ok())
+            .and_then (|s| s.lines().next().and_then(|s| s.to_owned().parse::<i32>().ok()));
 
         let set_b_cmd = |v:i32| { let _ = Command::new(PS_LOC).arg(set_cmd(v)).spawn(); };
         cur_b .iter() .for_each(|v| set_b_cmd((v + incr).abs()));
@@ -36,9 +36,7 @@ pub mod brightness_utils {
     use futures::{executor::block_on, TryStreamExt};
 
     fn incr_b_limited (v:u32, incr:i32) -> u32 {
-        let res = v as i64 + incr as i64;
-        let res = if res < 0 { 0 } else if res > 100 { 100 } else { res };
-        res as u32
+        (v as i64 + incr as i64) .clamp (0,100) as u32
     }
     async fn incr_disp_brightness_async (incr: i32) -> Result<(), brightness::Error> {
         brightness::brightness_devices().try_for_each(|mut dvc| async move {

@@ -62,7 +62,7 @@ impl WinGroup {
     }
 
     fn get_hwnds (&self) -> Vec<Hwnd> {
-        self.read().unwrap().grp.iter().copied().collect()
+        self.read().unwrap().grp.to_vec()
     }
     pub fn check (&self, hwnd:&Hwnd) -> bool {
         self.read().unwrap().grp_set.contains(hwnd)
@@ -78,7 +78,7 @@ impl WinGroup {
         wg.grp .retain (|h| *h != *hwnd);
         wg.grp_set .remove (hwnd);
     }
-    fn clear_dead (&self, hwnds:&Vec<Hwnd>) {
+    fn clear_dead (&self, hwnds:&[Hwnd]) {
         let wg = &mut self.write().unwrap();
         let hset = hwnds.iter().copied().collect::<FxHashSet<_>>();
         wg.grp .retain (|h| hset.contains(h));
@@ -116,7 +116,7 @@ impl WinGroup {
     }
 
     fn toggle_activation (&self) {
-        if self.read().unwrap().grp.len() == 0 { return }
+        if self.read().unwrap().grp.is_empty() { return }
         let wg = self.clone();
         // this could take long enough that we should get off the events queue thread that called us
         thread::spawn ( move || {
@@ -132,7 +132,7 @@ impl WinGroup {
                     if grp_ztops_count == grp_len {
                         // we found all grp windows at top z-order, means we're active, so send grp back to toggle it
                         //but first, lets activate the next-in-line hwnd so active window focus transfers seamlessly
-                        hwnds .iter() .find (|h| wg.read().unwrap().grp_set.contains(h).not()) .map (|&h| win_activate(h));
+                        if let Some(&h) = hwnds .iter() .find (|h| wg.read().unwrap().grp_set.contains(h).not()) { win_activate(h) };
                         // now we can send our grp hwnds back
                         wg.read().unwrap().grp_set .iter() .for_each (|&h| { win_send_to_back(h); win_minimize(h); } );
                         break;

@@ -43,8 +43,8 @@ pub enum KbdEvent_T {
 /// Intended as a temp hack to send (possibly extended) scan-codes instead of virtual-key-codes for left/right modifier-keys.
 /// .. In particular since machines dont seem to be consistent in what they send, and this ensures the L/R key nature is consistent
 static KEY_SWAPS_MAP: Lazy<FxHashMap<KbdKey,u64>> = Lazy::new ( || {
-    [   (KbdKey::RAlt, 0xE038 as u64), (KbdKey::RCtrl, 0xE01D as u64) , (KbdKey::RShift, 0x0036 as u64),
-        (KbdKey::LAlt, 0x0038 as u64), (KbdKey::LCtrl, 0x001D as u64) , (KbdKey::LShift, 0x002A as u64)
+    [   (KbdKey::RAlt, 0xE038u64), (KbdKey::RCtrl, 0xE01Du64) , (KbdKey::RShift, 0x0036u64),
+        (KbdKey::LAlt, 0x0038u64), (KbdKey::LCtrl, 0x001Du64) , (KbdKey::LShift, 0x002Au64)
     ] .into_iter() .collect::<FxHashMap<KbdKey,u64>>()
 } );
 
@@ -107,7 +107,7 @@ impl From<i32> for MouseWheelEv_T {
 
 
 /// Input event can be a kbd-key-event, mouse-btn-event, mouse-wheel-event, or mouse-pointer-move (with their associated data)
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EventDat {
     key_event   { key:KbdKey, ev_t: KbdEvent_T, vk_code:u32, sc_code:u32 },
     btn_event   { btn:MouseButton, ev_t:MouseBtnEv_T },
@@ -115,7 +115,7 @@ pub enum EventDat {
     move_event  { x_pos:i32, y_pos:i32 },
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct Event {
     pub stroke_id : usize,
     pub stamp : u32,
@@ -162,10 +162,7 @@ impl KbdKey {
     /// Returns true if this key is a 'modifier' key (one of left/right/generic versions of [Alt, Ctrl, Shift, Win]
     pub fn is_modifier_key (self) -> bool {
         use KbdKey::*;
-        match self {
-            LAlt | RAlt | Alt | LCtrl | RCtrl | Ctrl | LShift | RShift | Shift | LWin | RWin => true,
-            _ => false
-        }
+        matches! (self, LAlt | RAlt | Alt | LCtrl | RCtrl | Ctrl | LShift | RShift | Shift | LWin | RWin)
     }
 
 }
@@ -186,7 +183,7 @@ fn send_keybd_input (key_code: u16, up_not_down:bool, sc_not_vk:bool) {
     let (w_vk, w_sc, sc_flag) = {
         if sc_not_vk { (0, key_code, KEYEVENTF_SCANCODE) } else { (key_code, 0, KEYBD_EVENT_FLAGS(0)) }
     };
-    let mut inputs = [ INPUT {
+    let inputs = [ INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
@@ -198,7 +195,7 @@ fn send_keybd_input (key_code: u16, up_not_down:bool, sc_not_vk:bool) {
         } }
     } ];
 
-    unsafe { SendInput (&mut inputs, size_of::<INPUT>() as c_int) };
+    unsafe { SendInput (&inputs, size_of::<INPUT>() as c_int) };
 
 }
 
@@ -249,7 +246,7 @@ impl MouseButton {
             X2Button     => (MOUSEEVENTF_XDOWN,       2),
             _            => (MOUSE_EVENT_FLAGS(0),    0),
         };
-        if abs { ev_flag = ev_flag | MOUSEEVENTF_ABSOLUTE }
+        if abs { ev_flag |= MOUSEEVENTF_ABSOLUTE }
         send_mouse_input (ev_flag, data, x, y)
     }
     pub fn press (self) { self._press (0, 0, false) }
@@ -266,7 +263,7 @@ impl MouseButton {
             X2Button     => (MOUSEEVENTF_XUP,       2),
             _            => (MOUSE_EVENT_FLAGS(0),  0),
         };
-        if abs { ev_flag = ev_flag | MOUSEEVENTF_ABSOLUTE }
+        if abs { ev_flag |= MOUSEEVENTF_ABSOLUTE }
         send_mouse_input (ev_flag, data, x, y)
     }
     pub fn release (self) { self._release (0, 0, false) }
@@ -350,7 +347,7 @@ impl MousePointer {
 /// Send simulated mouse events to OS for injection into events-stream
 fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
 
-    let mut inputs = [ INPUT {
+    let inputs = [ INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi : MOUSEINPUT {
@@ -364,7 +361,7 @@ fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
     } ];
 
     unsafe {
-        SendInput (&mut inputs, size_of::<INPUT>() as c_int)
+        SendInput (&inputs, size_of::<INPUT>() as c_int)
     };
 
 }

@@ -122,7 +122,7 @@ impl ModeState {
 
     /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
-        self.key.borrow().clone()
+        *self.key.borrow()
     }
 
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
@@ -209,7 +209,7 @@ impl LatchState {
 
     /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
-        self.key.borrow().clone()
+        *self.key.borrow()
     }
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
     fn register_key (&self, key:KbdKey) {
@@ -255,17 +255,21 @@ impl LatchState {
 impl ModeStates {
 
     pub fn new() -> ModeStates {
-        let (_msE, _msD, _msF, _msR) = (ModeState::new(msE), ModeState::new(msD), ModeState::new(msF), ModeState::new(msR));
-        let (_qks, _qks1, _qks2, _qks3) = (ModeState::new(qks), ModeState::new(qks1), ModeState::new(qks2), ModeState::new(qks3));
-        let (_l1, _l2, _l3, _l4) = (LatchState::new(latch_1), LatchState::new(latch_2), LatchState::new(latch_3), LatchState::new(latch_4));
-
         ModeStates {
             _private : (),
+            msE  : ModeState::new(msE),        // key :  E
+            msD  : ModeState::new(msD),        // key :  D
+            msF  : ModeState::new(msF),        // key :  F
+            msR  : ModeState::new(msR),        // key :  R            
+            qks  : ModeState::new(qks),        // key :  Q
+            qks1 : ModeState::new(qks1),       // key :  1
+            qks2 : ModeState::new(qks2),       // key :  2
+            qks3 : ModeState::new(qks3),       // key :  3
 
-            msE: _msE, msD:  _msD,  msF: _msF, msR: _msR,
-            qks: _qks, qks1: _qks1, qks2: _qks2, qks3: _qks3,
-
-            latch_1: _l1, latch_2: _l2, latch_3: _l3, latch_4: _l4,
+            latch_1 : LatchState::new(latch_1),       // key :  F1
+            latch_2 : LatchState::new(latch_2),       // key :  F2
+            latch_3 : LatchState::new(latch_3),       // key :  F3
+            latch_4 : LatchState::new(latch_4),       // key :  F4
 
             some_l2_mode_active    : Flag::default(),
             some_qks_mode_active   : Flag::default(),

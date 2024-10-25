@@ -333,9 +333,9 @@ fn handle_lwin_mouse_drag (x:i32, y:i32, ks:&KrustyState) {
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
     if ks.mouse.lbtn.down.is_set() && ks.mouse.lbtn.consumed.is_clear() {
         if ks.mod_keys.caps.down.is_set() && ks.mode_states.some_qks_mode_active.is_clear() {
-            handle_pointer_window_resize_spaced (x, y, &ks)
+            handle_pointer_window_resize_spaced (x, y, ks)
         } else {
-            handle_pointer_window_drag_spaced (x, y, &ks)
+            handle_pointer_window_drag_spaced (x, y, ks)
         }
     }
 }

@@ -42,8 +42,8 @@ impl Flag {
     pub fn toggle (&self) { self.0 .store ( !self.0.load (Ordering::SeqCst), Ordering::SeqCst) }
     pub fn store  (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
 
-    pub fn is_set   (&self) -> bool { true  == self.0 .load (Ordering::SeqCst) }
-    pub fn is_clear (&self) -> bool { false == self.0 .load (Ordering::SeqCst) }
+    pub fn is_set   (&self) -> bool {  self.0 .load (Ordering::SeqCst) }
+    pub fn is_clear (&self) -> bool { !self.0 .load (Ordering::SeqCst) }
 }
 
 
@@ -55,9 +55,6 @@ pub struct TimeStamp (Arc<RwLock<Instant>>);
 impl TimeStamp {
     pub fn new() -> TimeStamp {
         TimeStamp ( Arc::new ( RwLock::new ( Instant::now() ) ) )
-    }
-    pub fn default() -> TimeStamp {
-        TimeStamp::new()
     }
     pub fn capture (&self) -> Instant {
         let stamp = Instant::now();
@@ -71,17 +68,17 @@ impl TimeStamp {
 
 
 
-# [ derive (Debug, Clone) ]
+# [ derive (Debug, Clone, Default) ]
 pub struct EventStamp (Arc<RwLock<u32>>);
 
 impl EventStamp {
     pub fn new() -> EventStamp {
         EventStamp ( Arc::new ( RwLock::new(0) ) )
     }
-    pub fn default() -> EventStamp { EventStamp::new() }
     pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
     pub fn get (&self) -> u32 { *self.0.read().unwrap() }
 }
+
 
 
 
@@ -124,19 +121,19 @@ pub fn jiggle_cursor() {
 # [ derive (Debug, Clone) ]
 struct Cursor (Option<HICON>);
 impl Cursor {
-    unsafe fn load_copy_cursor (id:PCWSTR) -> Option<HICON> { LoadCursorW (HINSTANCE(0), id).ok() .map (|hc| CopyIcon(hc).ok()) .flatten() }
+    unsafe fn load_copy_cursor (id:PCWSTR) -> Option<HICON> { LoadCursorW (HINSTANCE(0), id).ok() .and_then (|hc| CopyIcon(hc).ok()) }
     fn new (id:PCWSTR) -> Cursor { unsafe { Cursor ( Cursor::load_copy_cursor(id) ) } }
-    fn get (&self) -> Option<HICON> { self.0.clone() }
+    fn get (&self) -> Option<HICON> { self.0 }
 
     pub fn swap_cursor ( &self, id:SYSTEM_CURSOR_ID ) { unsafe {
-        self.0 .iter() .map (|&hc| CopyIcon(hc).ok()) .flatten() .for_each (|hc| {SetSystemCursor (HCURSOR(hc.0), id);});
+        self.0 .iter() .filter_map (|&hc| CopyIcon(hc).ok()) .for_each (|hc| {SetSystemCursor (HCURSOR(hc.0), id);});
     } }
     pub fn toggle_cursor ( &self,  id:SYSTEM_CURSOR_ID, cur_restore:&Cursor ) { unsafe {
         let cur = self.get(); let res = cur_restore.get();
         thread::spawn ( move || {
-            cur .map (|hc| CopyIcon(hc).ok()) .flatten() .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
+            cur .and_then (|hc| CopyIcon(hc).ok()) .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
             thread::sleep(Duration::from_millis(300));
-            res .map (|hc| CopyIcon(hc).ok()) .flatten() .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
+            res .and_then (|hc| CopyIcon(hc).ok()) .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
         } );
     } }
 }
@@ -299,10 +296,10 @@ impl KrustyState {
         //thread::spawn ( move || {     // .. nuh uh
         // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
         // .. but also often right after calling this we're doing other related work that expects this to be filled out!
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_fgnd(), None);
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
     }
     pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (&self, utils::win_get_hwnd_from_pointer(), wgo);
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
     /// Utlity function to create a new Combo-Generator
@@ -375,7 +372,7 @@ pub mod key_utils {
     //pub fn action (f:fn()) -> AF { Arc::new (move || f()) }
     pub fn action<F> (f:F) -> AF
         where F: Fn() + Send + Sync + 'static
-    { Arc::new (move || f()) }
+    { Arc::new(f) }
 
     /// wraps a given unitary function closure with ONE input arg into an Arc Fn
     //pub fn action_p1<T> (f:fn(T), t:T) -> AF where T: Copy + Send + Sync + 'static { Arc::new (move || f(t)) }

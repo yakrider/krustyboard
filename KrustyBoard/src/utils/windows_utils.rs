@@ -162,9 +162,7 @@ pub fn win_maximize (hwnd:Hwnd) { unsafe {
 pub fn win_toggle_maximize (hwnd:Hwnd) { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();
     GetWindowPlacement (hwnd, &mut win_state);
-    if win_state.showCmd == SW_SHOWMAXIMIZED {
-        ShowWindowAsync (hwnd, SW_RESTORE);
-    } else if win_state.showCmd == SW_SHOWMINIMIZED {
+    if win_state.showCmd == SW_SHOWMAXIMIZED || win_state.showCmd == SW_SHOWMINIMIZED {
         ShowWindowAsync (hwnd, SW_RESTORE);
     } else {
         ShowWindowAsync (hwnd, SW_SHOWMAXIMIZED);
@@ -325,7 +323,7 @@ pub fn get_exe_by_pid (pid:u32) -> Option<String> { unsafe {
     if handle.is_err() { return None }
     let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
     handle.iter().for_each ( |h| { CloseHandle(*h); } );
-    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .map (|s| s.split("\\").last().map(|s| s.to_string())) .flatten() .into()
+    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .and_then (|s| s.split("\\").last().map(|s| s.to_string()))
 } }
 
 pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {

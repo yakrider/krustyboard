@@ -578,7 +578,7 @@ impl UnifModKey {
 
 
     pub fn paired (&self) -> Option<UnifModKey> {
-        self.pair .map (|p| KrustyState::instance().mod_keys.get_umk(p)) .flatten()
+        self.pair .and_then (|p| KrustyState::instance().mod_keys.get_umk(p))
     }
 
 
@@ -598,7 +598,7 @@ impl UnifModKey {
         // now first lets do some common work (physical state etc) ..
         self.down.set();
         update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
-        ks.mouse.proc_notice__modkey_down (self.modkey, &ks);
+        ks.mouse.proc_notice__modkey_down (self.modkey, ks);
 
         // then for external active state etc updates, we'll call the mgmt specific fns
         self.handling.handle_key_down (self, ks)
@@ -613,7 +613,7 @@ impl UnifModKey {
         }
         // lets do some common work (physical state etc) ..
         self.down.clear(); self.dbl_tap.clear();
-        ks.mouse.proc_notice__modkey_up (self.modkey, &ks);
+        ks.mouse.proc_notice__modkey_up (self.modkey, ks);
 
         // if we were in ctrl-tab-scroll state, we'll clear it if this is ctrl release and caps not still being held
         if ks.in_ctrl_tab_scroll_state.is_set()
@@ -622,7 +622,7 @@ impl UnifModKey {
         { ks.in_ctrl_tab_scroll_state.clear() }
 
         // then for external active state etc updates, we'll call the mgmt specific fns
-        self.handling.handle_key_up (&self, ks)
+        self.handling.handle_key_up (self, ks)
     }
 
 
@@ -647,8 +647,8 @@ impl UnifModKey {
     }
 
 
-    pub fn proc_notice__caps_down (&self, ks:&KrustyState) { self.handling.proc_notice__caps_down (&self, ks) }
-    pub fn proc_notice__caps_up   (&self, ks:&KrustyState) { self.handling.proc_notice__caps_up   (&self, ks) }
+    pub fn proc_notice__caps_down (&self, ks:&KrustyState) { self.handling.proc_notice__caps_down (self, ks) }
+    pub fn proc_notice__caps_up   (&self, ks:&KrustyState) { self.handling.proc_notice__caps_up   (self, ks) }
 
 
 

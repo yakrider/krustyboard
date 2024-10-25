@@ -55,3 +55,22 @@ features = [
     "Win32_UI_HiDpi",
 ]
 
+
+
+# enable when profiling (e.g with FlameGraph)
+#[profile.release]
+#debug = true
+
+
+
+[lints.clippy]
+erasing_op             = "warn"
+missing_safety_doc     = "allow"
+manual_non_exhaustive  = "allow"
+new_without_default    = "allow"
+upper_case_acronyms    = "allow"
+blocks_in_conditions   = "allow"
+needless_else          = "allow"
+collapsible_if         = "allow"
+collapsible_else_if    = "allow"
+

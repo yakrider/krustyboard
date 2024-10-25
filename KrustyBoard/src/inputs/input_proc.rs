@@ -154,7 +154,7 @@ impl InputProcessor {
         } else {
             println!("unhooking attempt .. no prior hook found !!");
         }
-        return false
+        false
     }
     pub fn unset_kbd_hook   (&self) -> bool { InputProcessor::unset_hook (&self.kbd_hook) }
     pub fn unset_mouse_hook (&self) -> bool { InputProcessor::unset_hook (&self.mouse_hook) }
@@ -239,11 +239,11 @@ impl InputProcessor {
                     if ev_proc_ds.ev_prop_d == EvProp_Undet { ev_proc_ds = epds; }
                 }
                 EvCbFn_Spawned(cb) => {
-                    let (cb, kbe) = (cb.clone(), event.clone());    // clone as we'll need the event later again
+                    let (cb, kbe) = (cb.clone(), event);
                     thread::spawn (move || cb(kbe));
                 }
                 EvCbFn_Queued(cb) => {
-                    let (cb, ev) = (cb.clone(), event.clone());
+                    let (cb, ev) = (cb.clone(), event);
                     let _ = self.input_af_queue.send ( Box::new ( move || cb(ev) ) );
                 }
             }
@@ -325,7 +325,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         }
     }
 
-    return return_call()
+    return_call()
 }
 
 
@@ -410,7 +410,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         }
     }
 
-    return return_call();
+    return_call()
 }
 
 

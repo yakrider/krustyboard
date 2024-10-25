@@ -115,7 +115,7 @@ impl CombosMap {
 
         println! ("combo counts by combo-map-key:");
         self.combos_map .borrow() .keys() .map(|c| c.cmk) .counts()
-            .iter() .sorted_by_key (|(_,n)| *n) .for_each (|(cmk,n)| println!("{:3}  {:?}", n, cmk));
+            .iter() .sorted_by_key (|(_,n)| *n) .for_each (|(cmk,n)| println!("  {:3}  {:?}", n, cmk));
 
         println! ("\nwildcarded combos:");
         self.wildcard_combos.borrow() .values() .flatten() .map (|c| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
@@ -267,8 +267,8 @@ impl CombosMap {
         // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
         let pcm  = unsafe { & *self.combos_map.as_ptr() };
         let mut combo_execd = false;
-        if let Some(cvs) = pcm.get(&combo) {
-            combo_execd = self.process_combo_afs (&cvs, ev, ks);
+        if let Some(cvs) = pcm.get(combo) {
+            combo_execd = self.process_combo_afs (cvs, ev, ks);
         }
         combo_execd
     }
@@ -286,7 +286,7 @@ impl CombosMap {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
         let mut combo_execd = false;
         if let Some(cs) = cwm.get(cmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
-            cs .iter().filter (|c| c.check_wildcard_eqv (&combo)) .for_each (|c| {
+            cs .iter().filter (|c| c.check_wildcard_eqv (combo)) .for_each (|c| {
                 // found a match in wc-combos table, now gotta lookup into actual combo table w its wc-stripped version as key
                 // (the wc-stripped-match != cur-combo below is because then we'd have already found/execd it earlier w/o wc-matching)
                 let wcsc = c.strip_wildcards();
@@ -301,7 +301,7 @@ impl CombosMap {
     fn register_stroke (&self, fsc:&Combo, ev:&Event, ks:&KrustyState) {
         if ev.stroke_id > 0 {
             // ^^ the check isnt necessary, but avoids some cycles on wheel/pointer events etc
-            *ks.last_stroke.write().unwrap() = (ev.stroke_id, Some(fsc.clone()))
+            *ks.last_stroke.write().unwrap() = (ev.stroke_id, Some(*fsc))
         }
     }
 
@@ -312,8 +312,10 @@ impl CombosMap {
         // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        let combo = Combo::gen_cur_combo (cmk, &ks);
+        let combo = Combo::gen_cur_combo (cmk, ks);
         let combo_no_latch = Combo::gen_no_latch_combo(combo);
+
+        //std::thread::spawn (move || println! ("{:?}",combo));
 
         // Combo-processing order :
         // - First we run any exact match combos .. (any conditional combos if satisfied, else non-conditionals if no conditional matched)
@@ -350,7 +352,7 @@ impl CombosMap {
         // - And finally, if neither direct lookups, nor lookups ignoring any active latch state found anything to run (with and without wildcards)
         // .. then we'll resort to fallback action generation and processing
 
-        let fbaf = self.gen_fallback_base_af (ks.clone(), &ev);
+        let fbaf = self.gen_fallback_base_af (ks.clone(), ev);
         if fbaf.is_none() { return }
         // ^^ if we explicitly didnt want to do anything, no point trying to wrap mods below etc
         let fbaf = fbaf.unwrap();
