@@ -104,26 +104,21 @@ impl CombosMap {
     }
 
     pub fn _debug_print_combos_map (&self) {
-        // note: in particular, check for things with n > 1 .. would mean multiple actions on same combo
-        fn bstr (vs:&[ComboStatesBits_T]) -> String { vs.iter().map(|b|*b as u8).join("") }
-        // print out all the combos, sorted by the number of combo-values each of them have
+        println! ("\nCombo entries and their counts of non-cond, cond, and first-stroke-cond combo-values:");
         self.combos_map .borrow() .iter() .map ( |(c,cvs)| {
-            let ncs = cvs.iter().filter(|cv| cv.cond.is_some()).count();
-            let nfscs = cvs.iter().filter(|cv| cv.first_stroke_cond.is_some()).count();
-            let n = cvs.len() - ncs - nfscs;
-            let (cmk,mk,ms,l) = (format!("{:?}",c.cmk), bstr(&c.modkey_states), bstr(&c.mode_states), bstr(&c.latch_states));
-            format! ("#(n,nc,nfsc): {:?}  {:40} m:{} s:{} l:{}", (n,ncs,nfscs), cmk,mk,ms,l )
-        } ) .sorted() .for_each (|s| println!("{:}",s));
+            let cs = cvs.iter().filter(|cv| cv.cond.is_some()).count();
+            let fscs = cvs.iter().filter(|cv| cv.first_stroke_cond.is_some()).count();
+            let ncs = cvs.len() - cs - fscs;
+            format! ("#(nc,c,fsc): {:?}   {:?}", (ncs,cs,fscs), c)
+        } ) .sorted() .for_each (|s| println!("{}",s));
         println! ("nTot = {:?}", self.combos_map.borrow().len());
 
-        // we'll also print out a histogram by of number of combos for each map-key (cmk)
+        println! ("combo counts by combo-map-key:");
         self.combos_map .borrow() .keys() .map(|c| c.cmk) .counts()
-            .iter().sorted_by_key(|(_,n)| *n) .for_each (|(e,n)| println!("{:3}  {:?}", n,e));
+            .iter() .sorted_by_key (|(_,n)| *n) .for_each (|(cmk,n)| println!("{:3}  {:?}", n, cmk));
 
-        // and printout the cmks with wildcards too
-        println! ("combo-map-keys with wildcard combos:");
-        self.wildcard_combos.borrow() .iter().map (|(cmk,cs)| format!("  n={:?}  {:?}", cs.len(), cmk))
-            .sorted() .for_each (|s| println!("{}",s))
+        println! ("\nwildcarded combos:");
+        self.wildcard_combos.borrow() .values() .flatten() .map (|c| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
     }
 
     pub fn _info_print_simult_act_combos_check (&self) {
@@ -134,16 +129,10 @@ impl CombosMap {
         println! ("## combo-map-keys with wildcards: {:?}", self.wildcard_combos.borrow().len());
 
         let combos_w_mult_non_cond_cvs = cm .iter() .map ( |(c,cvs)| {
-            let nc_count = cvs.iter() .filter (|cv| cv.cond.is_none() && cv.first_stroke_cond.is_none()) .count();
-            (c,nc_count)
+            (c, cvs.iter() .filter (|cv| cv.cond.is_none() && cv.first_stroke_cond.is_none()) .count())
         } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
         println! ("## combos with multiple non-conditional combo value entries: {:?}", combos_w_mult_non_cond_cvs.len());
-
-        fn bstr (vs:&[ComboStatesBits_T]) -> String { vs.iter().map(|b|*b as u8).join("") }
-        combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| {
-            let (cmk,mk,ms,l) = (format!("{:?}",&c.cmk), bstr(&c.modkey_states), bstr(&c.mode_states), bstr(&c.latch_states));
-            println! ("  n={:?} : {:40} m:{} s:{} l:{}", n, cmk,mk,ms,l)
-        } );
+        combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
     }
 
 
@@ -284,16 +273,14 @@ impl CombosMap {
         combo_execd
     }
 
-    // Wild-Card Combo Matching : we first check the wildcard-combos map to get wildcard combos (if any) for this particular combo-maps-key
-    // this keeps it efficient for most typical use-cases (which have no wildcards) .. and should be adequate for limited/rare wildcards use
-    // todo : however in theory we could make wildcard combo matching much more efficient by doing things like ..
-    // .. using a column-wise bitmap (as in databases), or even just membership maps and progressively filtering matching combos etc
-    // .. or even just actually using packed bitmaps for combos, and storing wildcard combos as a bitmask to 'AND' cur-combo with
-    // For reference, current impl is ..
-    // - actual combos used as keys in combo-maps are stripped of wildcards
-    // - the actual wildcarded combos are stored in the wildcard_combos table, with the EvCbMapKey alone as key (no mk/ms/latch bits)
+    // Wild-Card Combo Matching :
+    // - we first check the wildcard-combos map to get wildcard combos (if any) for this particular combo-maps-key
+    //   .. this keeps it efficient for most typical use-cases (which have no wildcards)
+    // - the wildcards, and the base bits are bit-packed, so a simple bit-and with the wildcards and cur-combo should match the base combo bits
+    // - actual combos used as keys in combo-maps are stripped of wildcards (mask set to FFs)
+    // - the actual wildcarded combos are stored in the wildcard_combos table, with the EvCbMapKey alone as key (no bit-fields)
     // - so for wc proc, we check cur cmk in wc-table, if found, we search through the wc combos under that cmk for wc-match w cur combo
-    // - then if we found a wc combo that matched cur cumbo, we wc-strip it and use that to lookup the actual combos table for the combo-values!
+    // - then if we found a wc combo that matched cur combo, we wc-strip it and use that to lookup the actual combos table for the combo-values!
     //
     fn try_proc_wildcard_combo_afs (&self, cmk:&EvCbMapKey, combo:&Combo, ev:&Event, ks:&KrustyState) -> bool {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };

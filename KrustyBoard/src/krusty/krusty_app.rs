@@ -1409,8 +1409,9 @@ pub fn setup_krusty_board () {
     k.cm .add_combo ( k.ks.cg().k(Comma).m(caps).s(qks3).s(msR),  move_stmt_dn );
 
     k.cm .add_combo ( k.ks.cg().k(Numrow_9).m(caps).s(msE),  toggle_column_mode );
-    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(caps).s(msE),  k.ks.ag().k(Escape) );   // column-mode escape syntactic sugar
-    k.cm .add_combo ( k.ks.cg().k(Numrow_8).m(caps).s(msE),  k.ks.ag().k(Insert) );   // insert-mode toggle syntactic sugar
+    k.cm .add_combo ( k.ks.cg().k(Numrow_0).m(caps).s(msE),  k.ks.ag().k(Escape) );         // column-mode escape sugar
+    k.cm .add_combo ( k.ks.cg().k(Numrow_8).m(caps).s(msE),  k.ks.ag().k(Insert) );         // insert-mode toggle sugar
+    k.cm .add_combo ( k.ks.cg().k(Slash   ).m(caps).s(msE),  k.ks.ag().k(Slash).m(ctrl) );  // block-comment sugar
 
 
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..

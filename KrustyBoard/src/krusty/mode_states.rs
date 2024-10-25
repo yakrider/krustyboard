@@ -1,9 +1,7 @@
 #![ allow (non_camel_case_types, non_snake_case) ]
 
 use std::sync::Arc;
-use std::mem::size_of;
 use atomic_refcell::AtomicRefCell;
-
 use derive_deref::Deref;
 use rustc_hash::FxHashSet;
 use strum_macros::EnumIter;
@@ -288,23 +286,23 @@ impl ModeStates {
         static QKS_MODES : [ModeState_T;4] = [qks, qks1, qks2, qks3];
         QKS_MODES
     }
-    pub fn static_combo_modes() -> [ModeState_T; size_of::<ComboStatesBits_Modes>()] {
-        static COMBO_MODES: [ModeState_T; size_of::<ComboStatesBits_Modes>()] = [msE, msD, msF, msR, qks, qks1, qks2, qks3];
+    pub fn static_combo_modes() -> [ModeState_T; N__COMBO_STATES_BITS__MODES] {
+        static COMBO_MODES: [ModeState_T; N__COMBO_STATES_BITS__MODES] = [msE, msD, msF, msR, qks, qks1, qks2, qks3];
         COMBO_MODES
     }
-    pub fn static_latch_states() -> [ModeState_T; size_of::<ComboStatesBits_Latches>()] {
-        static LATCH_STATES: [ModeState_T; size_of::<ComboStatesBits_Latches>()] = [latch_1, latch_2, latch_3, latch_4];
+    pub fn static_latch_states() -> [ModeState_T; N__COMBO_STATES_BITS__LATCHES] {
+        static LATCH_STATES: [ModeState_T; N__COMBO_STATES_BITS__LATCHES] = [latch_1, latch_2, latch_3, latch_4];
         LATCH_STATES
     }
 
 
-    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); size_of::<ComboStatesBits_Modes>() ] { [
+    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); N__COMBO_STATES_BITS__MODES] { [
         // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (msE, &self.msE), (msD,  &self.msD),  (msF, &self.msF), (msR, &self.msR),
         (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3),
     ] }
-    pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState); size_of::<ComboStatesBits_Latches>()] { [
+    pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState); N__COMBO_STATES_BITS__LATCHES] { [
         // NOTE that the ordering here MUST match that given by the static_latch_states above
         // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
         (latch_1, &self.latch_1), (latch_2,  &self.latch_2),  (latch_3, &self.latch_3), (latch_4, &self.latch_4),

@@ -1,29 +1,16 @@
-#![ allow (non_camel_case_types) ]
+#![ allow (non_camel_case_types, non_upper_case_globals) ]
 
-use std::mem::size_of;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::*;
 
 
-#[derive (Eq, PartialEq, Hash, Copy, Clone, Default)]
-pub enum ComboStatesBits_T {
-    #[default]
-    Bit_Absent  = 0,
-    Bit_Present = 1,
-    Bit_Ignored = 2,
-}
-impl std::fmt::Debug for ComboStatesBits_T {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-       write!(f, "{:?}", *self as u8)
-    }
-}
 
-pub type ComboStatesBits_ModKeys = [ComboStatesBits_T; 18];
-pub type ComboStatesBits_Modes   = [ComboStatesBits_T; 8];
-pub type ComboStatesBits_Latches = [ComboStatesBits_T; 4];
-pub type ComboStatesBits_Flags   = [ComboStatesBits_T; 0];
+pub const N__COMBO_STATES_BITS__MODKEYS : usize = 18;
+pub const N__COMBO_STATES_BITS__MODES   : usize = 8;
+pub const N__COMBO_STATES_BITS__LATCHES : usize = 4;
+pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
 // 4+4=8 modes ( msE / msD / msF / msR,  qks / qks1 / qks2 / qks3),
 // 0 flags () .. mngd-ctrl-dn, ctrl-tab-scrl, right-ms-scrl no longer included in bitmap
@@ -36,17 +23,16 @@ pub type ComboStatesBits_Flags   = [ComboStatesBits_T; 0];
 
 
 
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+# [ derive (Eq, PartialEq, Hash, Copy, Clone) ]
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 pub struct Combo {
     _private:(),
     pub cmk : EvCbMapKey,
-    pub modkey_states : ComboStatesBits_ModKeys,
-    pub mode_states   : ComboStatesBits_Modes,
-    pub latch_states  : ComboStatesBits_Latches,
-    pub flags_states  : ComboStatesBits_Flags,
+    pub states_bits  : u64,
+    pub wc_mask_bits : u64,
 }
 
+pub const FULL_WILDCARDS_MASK: u64 = 0xFFFFFFFFFFFFFFFF;
 
 
 
@@ -82,38 +68,21 @@ impl Combo {
     // ^^ no new fn, as we only want to gen combos via gen_combos which does a bunch of proc first
 
     pub fn has_wildcards (&self) -> bool {
-        use ComboStatesBits_T::*;
-        self.modkey_states.contains(&Bit_Ignored) || self.mode_states.contains(&Bit_Ignored) ||
-            self.latch_states.contains(&Bit_Ignored) || self.flags_states.contains(&Bit_Ignored)
+        self.wc_mask_bits < FULL_WILDCARDS_MASK
     }
     pub fn strip_wildcards (&self) -> Combo {
-        use ComboStatesBits_T::*;
-        let strip = |v| if v == Bit_Ignored { Bit_Absent } else { v };
-        Combo { _private:(), cmk:self.cmk,
-            modkey_states : self.modkey_states.map(strip), mode_states  : self.mode_states.map(strip),
-            latch_states  : self.latch_states.map(strip),  flags_states : self.flags_states.map(strip),
-        }
+        Combo { wc_mask_bits: FULL_WILDCARDS_MASK, ..*self }
     }
     pub fn check_wildcard_eqv (&self, c:&Combo) -> bool {
-        use ComboStatesBits_T::*;
-        fn wc_eqv (a:&[ComboStatesBits_T], b:&[ComboStatesBits_T]) -> bool {
-            a .iter().zip (b) .all (|(&sa, &sb)| {
-                sa == sb || sa == Bit_Ignored || sb == Bit_Ignored
-        } ) }
-        wc_eqv (&self.modkey_states, &c.modkey_states) && wc_eqv (&self.mode_states, &c.mode_states) &&
-            wc_eqv (&self.latch_states, &c.latch_states) && wc_eqv (&self.flags_states, &c.flags_states)
+        self.wc_mask_bits & c.states_bits == self.states_bits
     }
-    // todo: In theory, we could make wildcards matching and filtering more efficient by leaning into bitwise operations ..
-    // .. we'd store combos as actual bit-packed words, along w a bit-mask for the wildcards specified
-    // .. then at runtime, we'd gen cur-combo bit-packed as well, then 'AND' that w the mask, then try and match that in wc combos table
-    // In practice, wcs (under specific cmks) should be rare enough that none of that is prob worth implementing
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    pub fn static_flags_modes () -> [ModeState_T; size_of::<ComboStatesBits_Flags>()] {
+    pub fn static_flags_modes () -> [ModeState_T; N__COMBO_STATES_BITS__FLAGS] {
         // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
         // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
-        static FLAGS_MODES : [ModeState_T; size_of::<ComboStatesBits_Flags>()] = {
+        static FLAGS_MODES : [ModeState_T; N__COMBO_STATES_BITS__FLAGS] = {
             //[mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl];
             //[mngd_ctrl_dn, ctrl_tab_scrl];
             //[mngd_ctrl_dn];
@@ -121,7 +90,7 @@ impl Combo {
         };
         FLAGS_MODES
     }
-    fn get_cur_flags_states_flags (_:&KrustyState) -> [&Flag; size_of::<ComboStatesBits_Flags>()] {
+    fn get_cur_flags_states_flags (_:&KrustyState) -> [&Flag; N__COMBO_STATES_BITS__FLAGS] {
         // note that the order of these must match the order given by the static_flag_modes fn above
         // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
         //[&ks.in_managed_ctrl_down_state, &ks.in_ctrl_tab_scroll_state, &ks.in_right_btn_scroll_state]
@@ -135,25 +104,19 @@ impl Combo {
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
     pub fn gen_cur_combo (cmk:EvCbMapKey, ks:&KrustyState) -> Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
+        let wc_mask_bits = FULL_WILDCARDS_MASK;
+        let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
+            .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
+            .chain ( & ks.mode_states.latch_flag_pairs() .map (|(_,ms)| ms.active.is_set()) )
+            .chain ( & Self::get_cur_flags_states_flags(ks) .map (|flag| flag.is_set()) )
+            .enumerate() .fold ( 0, |a, (ei,e)| a | ((*e as u64) << (ei as u8)) );
 
-        use ComboStatesBits_T::*;
-        let modkey_states = ks.mod_keys.mk_flag_pairs() .map ( |(_,fgo)|
-            if fgo .filter (|fg| fg.is_set()) .is_some() { Bit_Present } else { Bit_Absent }
-        );
-        let mode_states = ks.mode_states.mode_flag_pairs() .map ( |(_,ms)|
-            if ms.down.is_set() { Bit_Present } else { Bit_Absent }
-        );
-        let latch_states = ks.mode_states.latch_flag_pairs() .map ( |(_,ms)|
-            if ms.active.is_set() { Bit_Present } else { Bit_Absent }
-        );
-        let flags_states  = Self::get_cur_flags_states_flags(ks) .map ( |flag|
-            if flag.is_set() { Bit_Present } else { Bit_Absent }
-        );
-
-        Combo { _private:(), cmk, modkey_states, mode_states, latch_states, flags_states }
+        Combo { _private:(), cmk, states_bits, wc_mask_bits }
     }
     pub fn gen_no_latch_combo (combo:Combo) -> Combo {
-        Combo { latch_states: ComboStatesBits_Latches::default(), ..combo }
+        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << N__COMBO_STATES_BITS__FLAGS;
+        let states_bits = combo.states_bits  & (FULL_WILDCARDS_MASK ^ LATCH_MASK);
+        Combo { states_bits, ..combo }
     }
 
 
@@ -183,12 +146,13 @@ impl Combo {
         mvs
     }
 
+
     /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
     pub fn gen_combos (mut cg:CG) -> Vec<Combo> {
         // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step
-        // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
-        // (note that these can still be set to no-consume if key-repeat is desired)
         if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
+            // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
+            // (note that these can still be set to no-consume if key-repeat is desired)
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
             }
@@ -198,31 +162,42 @@ impl Combo {
             ) .map(|(mk,_)| mk) .collect::<Vec<_>>() .into_iter() .for_each (|mk| cg.dat.mks.push(*mk) );
         }
 
-        // now we'll have to convert the states bits/flags to the wildcard-supporting enum
-        use ComboStatesBits_T::*;
-        fn get_modkey_enum (cg:&CG, emks:&Vec<ModKey>, mk:ModKey) -> ComboStatesBits_T {
+        // we'll set up helper functions to get the bits for the states bitmap, and the wildcards mask
+        fn get_modkey_bit_n_wc (cg:&CG, emks:&Vec<ModKey>, mk:ModKey) -> (bool, bool) {
+            let mut wc = false;
             if let Some(v) = cg.dat.wc_mks.as_ref() {
-                if (v.is_empty() && !emks.contains(&mk)) || v.contains(&mk) { return Bit_Ignored }
+                if (v.is_empty() && !emks.contains(&mk)) || v.contains(&mk) { wc = true }
             }
-            if emks.contains(&mk) { Bit_Present } else { Bit_Absent }
+            (wc, emks.contains(&mk))
         }
-        fn get_mode_enum (cg:&CG, md:ModeState_T) -> ComboStatesBits_T {
+        fn get_mode_bit_n_wc (cg:&CG, md:ModeState_T) -> (bool, bool) {
+            let mut wc = false;
             if let Some(v) = cg.dat.wc_modes.as_ref() {
-                if (v.is_empty() && !cg.dat.modes.contains(&md)) || v.contains(&md) { return Bit_Ignored }
+                if (v.is_empty() && !cg.dat.modes.contains(&md)) || v.contains(&md) { wc = true }
             }
-            if cg.dat.modes.contains(&md) { Bit_Present } else { Bit_Absent }
+            (wc, cg.dat.modes.contains(&md))
         }
 
-        // we want to expand the combos for any L/R agnostic mod-keys specified
-        Combo::fan_lr (cg.dat.mks.clone()) .iter() .map ( |emks| {
-            let modkey_states = ModKeys::static_combo_bits_mod_keys() .map (|mk| get_modkey_enum (&cg,emks,mk));
-            let mode_states   = ModeStates::static_combo_modes()  .map (|md| get_mode_enum (&cg,md));
-            let latch_states  = ModeStates::static_latch_states() .map (|md| get_mode_enum (&cg,md));
-            let flags_states  = Self::static_flags_modes()        .map (|md| get_mode_enum (&cg,md));
-
-            Combo { _private:(), cmk: cg.get_cmk(), modkey_states, mode_states, latch_states, flags_states }
-        } ) .collect::<Vec<Combo>>()
+        // and a helper fn to generate a combo given a set of lrmk expanded modkeys
+        fn gen_exp_mks_combo (cg:&CG, emks:&Vec<ModKey>) -> Combo {
+            let (wc_bits, states_bits) = {
+                ModKeys::static_combo_bits_mod_keys()        .map (|mk| get_modkey_bit_n_wc (&cg,emks,mk)) .iter()
+                .chain ( & ModeStates::static_combo_modes()  .map (|md| get_mode_bit_n_wc (&cg,md)) )
+                .chain ( & ModeStates::static_latch_states() .map (|md| get_mode_bit_n_wc (&cg,md)) )
+                .chain ( & Combo::static_flags_modes()        .map (|md| get_mode_bit_n_wc (&cg,md)) )
+                .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
+                    let acc_w = aw | ((*w as u64) << (ei as u8));  // accumulate the mask bits
+                    let acc_b = ab | ((*b as u64) << (ei as u8));  // accumulate the data bits
+                    (acc_w, acc_b)
+                } )
+            };
+            let wc_mask_bits = FULL_WILDCARDS_MASK ^ wc_bits;
+            Combo { _private:(), cmk: cg.get_cmk(), states_bits, wc_mask_bits }
+        }
+        // finally, we can expand on any L/R agnostic mod-keys specified, and collect the generated combos
+        Combo::fan_lr (cg.dat.mks.clone()) .iter() .map (|emks| gen_exp_mks_combo(&cg,emks)) .collect::<Vec<Combo>>()
     }
+
 
 
     /// will wrap an action-gen (typically for key-type), with appropriate active/inactive actions for any
@@ -314,5 +289,23 @@ impl Combo {
 
 }
 
-
+impl std::fmt::Debug for Combo {
+    fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const bits_chars_uc: &str = "CAAWWCCSSCAAWWCCSSEDFRQABCABCD ";
+        const bits_chars_lc: &str = "caawwccsscaawwccssedfrqabcabcd ";
+        fn bits_str (bits:u64) -> String {
+            format! ("{:032b}",bits) .chars().rev()
+                .zip (bits_chars_uc.chars())
+                .zip (bits_chars_lc.chars())
+                .enumerate() .map ( |(i,((b,uc),lc))| {
+                    let c = if b=='1' {uc} else {lc};
+                    let sp = if i==8 || i==17 || i==21 || i==25 {"."} else {""};
+                    c.to_string() + sp
+                } ) .collect::<String>()
+        }
+        write! (f, "{:20}  {}  {}", format!("{:?}",&self.cmk),
+                bits_str(self.states_bits).trim(), bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim()
+        )
+    }
+}
 

@@ -5,7 +5,6 @@ use std::time;
 use std::thread;
 use std::sync::Arc;
 use std::fmt::Debug;
-use std::mem::size_of;
 
 use derive_deref::Deref;
 use once_cell::sync::OnceCell;
@@ -228,10 +227,10 @@ impl ModKeys {
 
 
     /// NOTE: this 'static' will be our source of ordering for the mod-keys in the combo-mod-keys-state bitmap!!
-    pub fn static_combo_bits_mod_keys() -> [ModKey; size_of::<ComboStatesBits_ModKeys>()] {
+    pub fn static_combo_bits_mod_keys() -> [ModKey; N__COMBO_STATES_BITS__MODKEYS] {
         // Note that there are bits in combo-bitmap only for physical keys
         // (i.e. it excludes the virtual l/r agnostic enum-vals used during combo construction)
-        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; size_of::<ComboStatesBits_ModKeys>()] = { [
+        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
             caps,     lalt,     ralt,     lwin,     rwin,     lctrl,     rctrl,     lshift,     rshift,
             caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl,
         ] };
@@ -264,39 +263,39 @@ impl ModKeys {
         (lwin,   &self.lwin  ), (rwin,   &self.rwin  )
     ] }
 
-    pub fn mk_flag_pairs (&self) -> [(ModKey, Option<&Flag>); size_of::<ComboStatesBits_ModKeys>()] { [
-        (caps,   Some(&self.caps.down)),
-        (lalt,   Some(&self.lalt.down)),
-        (ralt,   Some(&self.ralt.down)),
-        (lwin,   Some(&self.lwin.down)),
-        (rwin,   Some(&self.rwin.down)),
-        (lctrl,  Some(&self.lctrl.down)),
-        (rctrl,  Some(&self.rctrl.down)),
-        (lshift, Some(&self.lshift.down)),
-        (rshift, Some(&self.rshift.down)),
+    pub fn mk_flag_pairs (&self) -> [(ModKey, &Flag); N__COMBO_STATES_BITS__MODKEYS] { [
+        (caps,   &self.caps.down),
+        (lalt,   &self.lalt.down),
+        (ralt,   &self.ralt.down),
+        (lwin,   &self.lwin.down),
+        (rwin,   &self.rwin.down),
+        (lctrl,  &self.lctrl.down),
+        (rctrl,  &self.rctrl.down),
+        (lshift, &self.lshift.down),
+        (rshift, &self.rshift.down),
         //
-        (caps_dbl,   Some(&self.caps.dbl_tap)),
-        (lalt_dbl,   Some(&self.lalt.dbl_tap)),
-        (ralt_dbl,   Some(&self.ralt.dbl_tap)),
-        (lwin_dbl,   Some(&self.lwin.dbl_tap)),
-        (rwin_dbl,   Some(&self.rwin.dbl_tap)),
-        (lctrl_dbl,  Some(&self.lctrl.dbl_tap)),
-        (rctrl_dbl,  Some(&self.rctrl.dbl_tap)),
-        (lshift_dbl, Some(&self.lshift.dbl_tap)),
-        (rshift_dbl, Some(&self.rshift.dbl_tap)),
+        (caps_dbl,   &self.caps.dbl_tap),
+        (lalt_dbl,   &self.lalt.dbl_tap),
+        (ralt_dbl,   &self.ralt.dbl_tap),
+        (lwin_dbl,   &self.lwin.dbl_tap),
+        (rwin_dbl,   &self.rwin.dbl_tap),
+        (lctrl_dbl,  &self.lctrl.dbl_tap),
+        (rctrl_dbl,  &self.rctrl.dbl_tap),
+        (lshift_dbl, &self.lshift.dbl_tap),
+        (rshift_dbl, &self.rshift.dbl_tap),
         // ^^ note again, that for the combo bitmap construction, the l/r agnostic keys should have been expanded out and eliminated
     ] }
 
 
     pub fn some_shift_down (&self) -> bool { self.lshift.down.is_set() || self.rshift.down.is_set() }
-    pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set() }
-    pub fn some_alt_down   (&self) -> bool { self.lalt.down.is_set() } // ralt is disabled as an Alt key
-    pub fn some_win_down   (&self) -> bool { self.lwin.down.is_set()  || self.rwin.down.is_set() }
+    pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set()  }
+    pub fn some_alt_down   (&self) -> bool { self.lalt.down.is_set()   || self.ralt.down.is_set()   }
+    pub fn some_win_down   (&self) -> bool { self.lwin.down.is_set()   || self.rwin.down.is_set()   }
 
     pub fn some_shift_dbl (&self) -> bool { self.lshift.dbl_tap.is_set() || self.rshift.dbl_tap.is_set() }
     pub fn some_ctrl_dbl  (&self) -> bool { self.lctrl.dbl_tap.is_set()  || self.rctrl.dbl_tap.is_set()  }
-    pub fn some_alt_dbl   (&self) -> bool { self.lalt.dbl_tap.is_set()   }  // ralt is disabled as an Alt key
-    pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rwin.dbl_tap.is_set()  }
+    pub fn some_alt_dbl   (&self) -> bool { self.lalt.dbl_tap.is_set()   || self.ralt.dbl_tap.is_set()   }
+    pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rwin.dbl_tap.is_set()   }
 
     pub fn unstick_all (&self) {
         // all modkey states .. we'll do two loops to interleave them so they dont activate e.g. start-menu

@@ -31,7 +31,7 @@ impl From<KbdEvent_T> for KbdEvCbMapKey_T {
 
 /// The bindings map key contains the mouse-event-source, and the event-action upon which the callback is to trigger. <br>
 /// (This is defined matching the EventDat types minus the actual event-specific data)
-#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EvCbMapKey {
     key_ev_t   ( KbdKey,       KbdEvCbMapKey_T   ),
     btn_ev_t   ( MouseButton,  MouseBtnEv_T   ),
@@ -46,6 +46,20 @@ impl EvCbMapKey {
             wheel_event {wheel, delta   }  => wheel_ev_t (wheel, delta.into()),
             move_event  {..}               => move_ev_t,
     }  }
+}
+impl std::fmt::Debug for EvCbMapKey {
+    fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use {KbdEvCbMapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
+        match &self {
+            key_ev_t   (key,   KeyEventCb_KeyDown) => write! (f, "Key Dn  {:?}", key),
+            key_ev_t   (key,   KeyEventCb_KeyUp)   => write! (f, "Key Up  {:?}", key),
+            btn_ev_t   (btn,   BtnDown)            => write! (f, "Btn Dn  {:?}", btn),
+            btn_ev_t   (btn,   BtnUp)              => write! (f, "Btn Up  {:?}", btn),
+            wheel_ev_t (wheel, WheelBackwards)     => write! (f, "Whl Bwd {:?}", wheel),
+            wheel_ev_t (wheel, WheelForwards)      => write! (f, "Whl Fwd {:?}", wheel),
+            move_ev_t                              => write! (f, "Mouse Moved"),
+        }
+    }
 }
 
 
