@@ -14,7 +14,7 @@ static IRFAN_VIEW_LOC : &str = r#"C:\Program Files\IrfanView\i_view64.exe"#;
 static VLC_LOC        : &str = r#"C:\Program Files\VideoLAN\VLC\vlc.exe"#;
 static WINMERGE_LOC   : &str = r#"C:\Program Files\WinMerge\WinMergeU.exe"#;
 static Q_DIR_LOC      : &str = r#"C:\Users\yakrider\AppData\Roaming\Q-Dir\Q-Dir.exe"#;
-static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2022.3.3\bin\idea64.exe"#;
+static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJIdea2023.3\bin\idea64.exe"#;
 static CLICK_MONITOR_CDC_LOC : &str = r#"D:\yakdat\downloads\ins-bin\_MONITOR_BRIGHTNESS_UTILS\ClickMonitorDDC_7_2\ClickMonitorDDC_7_2.exe"#;
 
 

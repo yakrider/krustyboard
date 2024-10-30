@@ -8,7 +8,7 @@ use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{*, key_utils::*};
+use crate::*;
 
 
 
@@ -24,9 +24,6 @@ pub struct _CombosMap {
 
     /// maintains a separate set (of keys) for combos w wildcards .. (for more efficient wildcard matching)
     wildcard_combos : AtomicRefCell <FxHashMap <EvCbMapKey, Vec<Combo>>>,
-
-    /// maintains a (redundant) mapping of l2-keys for quick checks during fallback processing
-    l2_keys_map : AtomicRefCell <FxHashMap <Key, Key>>,
 
     /// holds a registry for keys that only need default/fallback bindings
     default_bind_keys : AtomicRefCell <FxHashSet <Key>>,
@@ -47,22 +44,16 @@ impl CombosMap {
                 _private : (),
                 combos_map        : AtomicRefCell::new ( FxHashMap::default() ),
                 wildcard_combos   : AtomicRefCell::new ( FxHashMap::default() ),
-                l2_keys_map       : AtomicRefCell::new ( FxHashMap::default() ),
                 default_bind_keys : AtomicRefCell::new ( FxHashSet::default() ),
             } ) )
         ) .clone()
     }
 
 
-    /// Registers a key for layer-2 functionality, which is used during fallback to layer any pressed mod-keys onto the l2-key
-    pub fn register_l2_key (&self, key:Key, l2k:Key) {
-        self.l2_keys_map .borrow_mut() .insert (key, l2k);
-    }
     /// Registers a key for default binding (without a specific combo)
     pub fn register_default_binding_key (&self, key:Key) {
         self.default_bind_keys .borrow_mut() .insert (key);
     }
-
 
 
     /// Use this fn to register combos <br>
@@ -131,7 +122,7 @@ impl CombosMap {
         let combos_w_mult_non_cond_cvs = cm .iter() .map ( |(c,cvs)| {
             (c, cvs.iter() .filter (|cv| cv.cond.is_none() && cv.first_stroke_cond.is_none()) .count())
         } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
-        println! ("## combos with multiple non-conditional combo value entries: {:?}", combos_w_mult_non_cond_cvs.len());
+        println! ("## combos with multiple non-conditional combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
         combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
     }
 
@@ -147,7 +138,7 @@ impl CombosMap {
                 KbdEvent_T::KbdEvent_KeyDown | KbdEvent_T::KbdEvent_SysKeyDown => {
                     Some ( Arc::new (move || key.press_release()) )
                 }
-                _ => None   // no default fallback for key-releas types (w/ or w/o syskey)
+                _ => None   // no default fallback for key-release types (w/ or w/o syskey)
             } }
             EventDat::btn_event {btn, ev_t} => { match ev_t {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
@@ -174,40 +165,20 @@ impl CombosMap {
 
 
 
-    fn handle_caps_combo_fallback (&self, fbaf:AF, e:&Event, ks:&KrustyState) {
-        // - if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
+    fn handle_caps_combo_fallback (&self, fbaf:AF, _e:&Event, ks:&KrustyState) {
+        // if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
-        // - as to l2 keys (for l3 fallback), we want l2-key expected behavior with other mod key combos ..
-        // in particular, since caps is used up just to trigger l2, we'll let qks1 do ctrl, (and ralt do shift) for the l2 key combos
-        // - and for the mode-keys, we need most caps combos to be silent, so we'll do fallback only when qks1 active, treating that as ctrl
-        // (note that for mode-keys, w/o caps down we can ofc do arbitrary mix of natural ctrl/alt/shift/win etc combos)
+        // Note that caps combo with mode-state active (incl modekeys themselves) have no fallbacks, they wont even get here
+        // further, we'll assume all l2k keys are configured through combo, and we need no fallbacks for them here
 
-        // if we're in some caps mode-state, but not qks1, we do nothing for fallback (i.e. only registered combos allowed)
-        let qks1_active = ks.mode_states.qks1.down.is_set();
-        if ks.mode_states.some_combo_mode_active.is_set() && !qks1_active { return }
-
-        // now for all non-kbd events, we can simply use the provided default action ..
-        let (mut af, mut qks1_ctrl) = (fbaf, false);
-        // .. but for kbd events, we do special handling for mode-keys
-        if let EventDat::key_event {key, ev_t, ..} = e.dat {
-            // caps fallback for kbd-key-up is to do nothing (we typically do both press/rel action on press)
-            if ev_t == KbdEvent_T::KbdEvent_KeyUp || ev_t == KbdEvent_T::KbdEvent_SysKeyUp { return }
-            // if its the actual qks-1 trigger key, its always disabled (as qks1-down is when we want other l2/mode keys to do their l2-eqv modes)
-            if let Some(msk) = ks.mode_states.qks1.key() { if msk == key { return } }
-            // else, we do fallback for the key, but if its l2k, the fallback output should be on its l2-key
-            let l2k_opt = self.l2_keys_map.borrow().get(&key).copied();
-            af = base_action (l2k_opt.unwrap_or(key));
-            // and for either l2k or mode-keys, we wont wrap w ctrl just from being in caps fallback here (unless actual ctrl or qks1-down)
-            qks1_ctrl = ks.mode_states.check_if_mode_key(key) || l2k_opt.is_some();
-        }
-        // we can now start progressively wrapping the actions with the appropriate mod-key actions
-        if ks.mod_keys.some_ctrl_down() || qks1_active || !qks1_ctrl { af = ks.mod_keys.lctrl.active_action(af) } //CombosMap::wrapped_bfn (Key::LCtrl, bfn) }
-        // ^^ if its l2-key or mode-key (i.e qks1-ctrl), we wont ctrl wrap just from being here (unless there's actual ctrl or qks1-down)
-        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() { af = ks.mod_keys.lshift.active_action(af) }
+        // we'll progressively wrap the actions with the appropriate mod-key actions ..
+        let mut af = ks.mod_keys.lctrl.active_action(fbaf);
         if ks.mod_keys.lalt.down.is_set() { af = ks.mod_keys.lalt.active_action(af) }
-        if ks.mod_keys.some_win_down()   { af = ks.mod_keys.lwin.active_action(af) }
-
-        // aight, now we exec the layered action we built, and we're done
+        if ks.mod_keys.some_win_down()    { af = ks.mod_keys.lwin.active_action(af) }
+        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
+            af = ks.mod_keys.lshift.active_action(af)
+        }
+        // and finally we just exec the layered action
         af();
     }
 
@@ -348,23 +319,26 @@ impl CombosMap {
         // and if we already found/execd a match, we can return too
         if combo_execd || wc_combo_execd { return }
 
-
         // - And finally, if neither direct lookups, nor lookups ignoring any active latch state found anything to run (with and without wildcards)
         // .. then we'll resort to fallback action generation and processing
+
+        // but first, lets also filter out any automatic fallbacks for ..
+        // .. caps-dbl, ralt-dbl combos in all cases, some mode-state active and caps down
+        // .. mode-state-dbl combos only if some modkey (incl caps) down .. (we need to allow normal quick tapping on [E,D,F,R,Q,1,2,3,4])
+        if ks.mod_keys.caps.dbl_tap.is_set()
+            || ks.mod_keys.ralt.dbl_tap.is_set()
+            || ( ks.mode_states.some_mode_state_active.is_set() && ks.mod_keys.caps.down.is_set() )
+            || ( ks.mode_states.some_mode_dbl_active.is_set() && ks.mod_keys.some_mk_down() )
+        { return }
 
         let fbaf = self.gen_fallback_base_af (ks.clone(), ev);
         if fbaf.is_none() { return }
         // ^^ if we explicitly didnt want to do anything, no point trying to wrap mods below etc
         let fbaf = fbaf.unwrap();
 
-        if ks.mod_keys.caps.dbl_tap.is_set() {
-            // no fallback for double-tap combos that arent explicitly registered
-            // in the few cases (like maybe caps/ctrl-f etc) we can set them individually in code ourselves
-        } else if ks.mod_keys.caps.down.is_set() {
+        if ks.mod_keys.caps.down.is_set() {
             // unregistered caps-combos have extensive fallback setups
             self.handle_caps_combo_fallback (fbaf, ev, ks);
-        } else if ks.mod_keys.ralt.dbl_tap.is_set() {
-            // no fallback for double-tap combos that arent explicitly registered
         } else if ks.mod_keys.ralt.down.is_set() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
             ks.mod_keys.lshift.active_action(fbaf)()
@@ -375,7 +349,7 @@ impl CombosMap {
             // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
             ks.mod_keys.lwin.active_action(fbaf)()       // <-- temp hopefully until we get used to double-tap ??
         } else {    //println!("passthrough: {:?}",key);
-            // others, incl single/double ctrl/shift/no-mod presses should all work naturally via passthrough
+            // others, incl single/double ctrl/shift/lalt/no-mod presses should all work naturally via passthrough
             fbaf()
         }
     }

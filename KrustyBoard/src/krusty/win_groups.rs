@@ -13,21 +13,21 @@ use crate::Flag;
 use crate::utils::*;
 
 
-pub const NUM_WIN_GROUPS : usize = 3;
+pub const NUM_WIN_GROUPS : usize = 4;
 
 # [ derive (Debug, Copy, Clone, Eq, PartialEq) ]
-pub enum WinGroups_E { wg1, wg2, wg3 }
+pub enum WinGroups_E { wg1, wg2, wg3, wg4 }
 impl WinGroups_E {
     pub fn idx (&self) -> usize {
         use WinGroups_E::*;
-        match self { wg1 => 0, wg2 => 1, wg3 => 2 }
+        match self { wg1 => 0, wg2 => 1, wg3 => 2, wg4 => 3 }
     }
 }
 impl TryFrom<usize> for WinGroups_E {
     type Error = ();
     fn try_from (idx: usize) -> Result <Self, Self::Error> {
         use WinGroups_E::*;
-        match idx { 0 => Ok(wg1), 1 => Ok(wg2), 2 => Ok(wg3), _ => Err(()) }
+        match idx { 0 => Ok(wg1), 1 => Ok(wg2), 2 => Ok(wg3), 3 => Ok(wg4), _ => Err(()) }
     }
 }
 
@@ -157,31 +157,31 @@ impl WinGroup {
 impl WinGroups {
 
     pub fn new() -> WinGroups {
-        WinGroups { grps : [ WinGroup::new(), WinGroup::new(), WinGroup::new() ] }
+        WinGroups { grps : [ WinGroup::new(), WinGroup::new(), WinGroup::new(), WinGroup::new() ] }
     }
     pub fn grp_contains (&self, wg:WinGroups_E, hwnd:Hwnd) -> bool {
-        self.grps [wg.idx()] .get_hwnds() .contains(&hwnd)
+        self.grps .get(wg.idx()) .is_some_and (|wg| wg.get_hwnds().contains(&hwnd))
     }
     pub fn get_grp_hwnds (&self, wg:WinGroups_E) -> Vec<Hwnd> {
-        self .grps [wg.idx()] .get_hwnds()
+        self.grps .get(wg.idx()) .map (|wg| wg.get_hwnds()) .unwrap_or_default()
     }
     pub fn add_to_group (&self, wg: WinGroups_E, hwnd:Hwnd) {
-        self .grps [wg.idx()] .add(&hwnd);
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.add(&hwnd));
     }
     pub fn remove_from_group (&self, wg:WinGroups_E, hwnd:Hwnd) {
-        self .grps [wg.idx()] .remove(&hwnd);
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.remove(&hwnd));
     }
     pub fn toggle_grp_always_on_top (&self, wg:WinGroups_E) {
-        self .grps [wg.idx()] .toggle_always_on_top();
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.toggle_always_on_top());
     }
     pub fn activate_win_group (&self, wg:WinGroups_E) {
-        self .grps [wg.idx()] .activate();
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.activate());
     }
     pub fn toggle_grp_activation (&self, wg:WinGroups_E) {
-        self .grps [wg.idx()] .toggle_activation();
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.toggle_activation());
     }
     pub fn close_grp_windows (&self, wg:WinGroups_E) {
-        self .grps [wg.idx()] .close();
+        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.close());
     }
 
 }

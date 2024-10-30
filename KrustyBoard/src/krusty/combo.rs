@@ -7,14 +7,14 @@ use crate::*;
 
 
 
-pub const N__COMBO_STATES_BITS__MODKEYS : usize = 18;
-pub const N__COMBO_STATES_BITS__MODES   : usize = 8;
+pub const N__COMBO_STATES_BITS__MODKEYS : usize = 9;    // x2 = 18  (from dbl-tap flags)
+pub const N__COMBO_STATES_BITS__MODES   : usize = 9;    // x2 = 18  (from dbl-tap flags)
 pub const N__COMBO_STATES_BITS__LATCHES : usize = 4;
 pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
-// 4+4=8 modes ( msE / msD / msF / msR,  qks / qks1 / qks2 / qks3),
+// 4+5=9 modes ( msE, msD, msF, msR,  qks, qks1, qks2, qks3, qks4), x2 adding double-taps
+// 4 latched layer combo states (latch_1, latch_2, latch_3, latch_4)
 // 0 flags () .. mngd-ctrl-dn, ctrl-tab-scrl, right-ms-scrl no longer included in bitmap
-// 4 latched layer combo states
 //
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
 // note also that rght-ms-scrl and some other flags are not included in combo maps .. just check them at use
@@ -106,15 +106,18 @@ impl Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let wc_mask_bits = FULL_WILDCARDS_MASK;
         let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
+            .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
+            .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.dbl_tap.is_set()) )
             .chain ( & ks.mode_states.latch_flag_pairs() .map (|(_,ms)| ms.active.is_set()) )
-            .chain ( & Self::get_cur_flags_states_flags(ks) .map (|flag| flag.is_set()) )
+            .chain ( & Self::get_cur_flags_states_flags(ks) .map (|fg| fg.is_set()) )
             .enumerate() .fold ( 0, |a, (ei,e)| a | ((*e as u64) << (ei as u8)) );
 
         Combo { _private:(), cmk, states_bits, wc_mask_bits }
     }
     pub fn gen_no_latch_combo (combo:Combo) -> Combo {
-        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << (N__COMBO_STATES_BITS__MODKEYS + N__COMBO_STATES_BITS__MODES);
+        const LATCH_MASK_SHIFT : usize = 2 * N__COMBO_STATES_BITS__MODKEYS + 2 * N__COMBO_STATES_BITS__MODES;
+        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << LATCH_MASK_SHIFT;
         // ^^ note that bits were progressively packed leftwards, so latches are towards leftmost, not rightmost
         let states_bits = combo.states_bits  & (FULL_WILDCARDS_MASK ^ LATCH_MASK);
         Combo { states_bits, ..combo }
@@ -147,22 +150,29 @@ impl Combo {
         mvs
     }
 
-
-    /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub fn gen_combos (mut cg:CG) -> Vec<Combo> {
-        // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step
+    fn finalize_combo_gen (mut cg:CG) -> CG {
+        // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step ..
+        // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
+        // (note that these can still be set to no-consume if key-repeat is desired)
         if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
-            // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
-            // (note that these can still be set to no-consume if key-repeat is desired)
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
             }
-            // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
-            ModKeys::static_dbl_tap_mk_pairs() .iter() .filter ( |(mk,dmk)|
-                cg.dat.mks.contains(dmk) && !cg.dat.mks.contains(mk)
-            ) .map(|(mk,_)| mk) .collect::<Vec<_>>() .into_iter() .for_each (|mk| cg.dat.mks.push(*mk) );
         }
+        // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
+        for (mk,dmk) in ModKeys::static_ordered_mod_keys().iter() .zip (ModKeys::static_ordered_mod_keys_dbl().iter()) {
+            if cg.dat.mks.contains(dmk) && !cg.dat.mks.contains(mk) { cg.dat.mks.push(*mk) }
+        }
+        // and for double-taps on mode-states too
+        for (ms,dms) in ModeStates::static_ordered_modes().iter() .zip (ModeStates::static_ordered_modes_dbl().iter()) {
+            if cg.dat.modes.contains(dms) && !cg.dat.modes.contains(ms) { cg.dat.modes.push(*ms) }
+        }
+        cg
+    }
 
+
+    /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
+    pub fn gen_combos (mut cg:CG) -> Vec<Combo> {
         // we'll set up helper functions to get the bits for the states bitmap, and the wildcards mask
         fn get_modkey_bit_and_wc (cg:&CG, emks:&[ModKey], mk:ModKey) -> (bool, bool) {
             let mut wc = false;
@@ -182,10 +192,12 @@ impl Combo {
         // and a helper fn to generate a combo given a set of lrmk expanded modkeys
         fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey]) -> Combo {
             let (wc_bits, states_bits) = {
-                ModKeys::static_combo_bits_mod_keys()        .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) .iter()
-                .chain ( & ModeStates::static_combo_modes()  .map (|md| get_mode_bit_and_wc (cg,md)) )
-                .chain ( & ModeStates::static_latch_states() .map (|md| get_mode_bit_and_wc (cg,md)) )
-                .chain ( & Combo::static_flags_modes()       .map (|md| get_mode_bit_and_wc (cg,md)) )
+                ModKeys::static_ordered_mod_keys()                .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) .iter()
+                .chain ( & ModKeys::static_ordered_mod_keys_dbl() .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) )
+                .chain ( & ModeStates::static_ordered_modes()     .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & ModeStates::static_ordered_modes_dbl() .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & ModeStates::static_latch_states()      .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & Combo::static_flags_modes()            .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
                     let acc_w = aw | ((*w as u64) << (ei as u8));  // accumulate the mask bits
                     let acc_b = ab | ((*b as u64) << (ei as u8));  // accumulate the data bits
@@ -195,7 +207,19 @@ impl Combo {
             let wc_mask_bits = FULL_WILDCARDS_MASK ^ wc_bits;
             Combo { _private:(), cmk: cg.get_cmk(), states_bits, wc_mask_bits }
         }
-        // finally, we can expand on any L/R agnostic mod-keys specified, and collect the generated combos
+
+        // before sending off to combo lrmk expansion, lets expand any specified wildcard L/R agnostic modkeys
+        // (note that leaving the l/r agnostic versions (alt,ctrl,shift,win) in the vec is fine, as they get ignored during bitmap generation
+        if let Some(ref mut mks) = cg.dat.wc_mks {
+            ModKeys::static_lr_mods_triplets() .iter() .for_each ( |&(lrmk, lmk, rmk)| {
+                if mks.contains(&lrmk) {
+                    if !mks.contains(&lmk) { mks.push(lmk) };
+                    if !mks.contains(&rmk) { mks.push(rmk) };
+                }
+            } );
+        }
+        //cg.dat.wc_mks = cg.dat.wc_mks .map(Self::exp_wildcard_lrmks);
+        // finally, we can expand on specified L/R agnostic mod-keys if any, and collect the generated combos
         Combo::fan_lr (cg.dat.mks.clone()) .iter() .map (|emks| gen_exp_mks_combo(&cg,emks)) .collect::<Vec<Combo>>()
     }
 
@@ -265,7 +289,7 @@ impl Combo {
 
 
     fn gen_first_stroke_cond (cg:&CG) -> ComboCond {
-        let check_combos = Combo::gen_combos (cg.clone()) .into_iter() .map (Combo::gen_no_latch_combo) .collect::<Vec<Combo>>();
+        let check_combos = Self::gen_combos (Self::finalize_combo_gen(cg.clone())) .into_iter() .map (Combo::gen_no_latch_combo) .collect::<Vec<Combo>>();
         Arc::new ( move |ks,ev| {
             //println! ("\nks.lfs : {:?}", *ks.last_stroke.read().unwrap());
             //println! ("ref-lfs: {:?}", &check_combos.first());
@@ -280,7 +304,8 @@ impl Combo {
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
     pub fn gen_combo_entries (cg:CG, ag:AG) -> Vec<(Combo, ComboValue)> {
-        let af = Combo::gen_af (&ag, Some(&cg));
+        let cg = Self::finalize_combo_gen(cg);
+        let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
         let fsc  = cg.dat.first_stroke .as_ref() .map (Combo::gen_first_stroke_cond);
         Self::gen_combos(cg) .into_iter() .map ( |c|
@@ -292,20 +317,22 @@ impl Combo {
 
 impl std::fmt::Debug for Combo {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const bits_chars_uc: &str = "CAAWWCCSSCAAWWCCSSEDFRQABCABCD ";
-        const bits_chars_lc: &str = "caawwccsscaawwccssedfrqabcabcd ";
+        const bits_chars_uc: &str = "CAAWWCCSSCAAWWCCSSEDFRQABCDEDFRQABCDABCD ";
+        const bits_chars_lc: &str = "caawwccsscaawwccssedfrqabcdedfrqabcdabcd ";
         fn bits_str (bits:u64) -> String {
-            format! ("{:032b}",bits) .chars().rev()
+            format! ("{:064b}",bits) .chars().rev()
                 .zip (bits_chars_uc.chars())
                 .zip (bits_chars_lc.chars())
                 .enumerate() .map ( |(i,((b,uc),lc))| {
                     let c = if b=='1' {uc} else {lc};
-                    let sp = if i==8 || i==17 || i==21 || i==25 {"."} else {""};
+                    let sp = if i==8 || i==17 || i==21 || i==26 || i==30 || i==35 {"."} else {""};
                     c.to_string() + sp
                 } ) .collect::<String>()
         }
-        write! (f, "{:20}  {}  {}", format!("{:?}",&self.cmk),
-                bits_str(self.states_bits).trim(), bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim()
+        write! (f, "{:20} {}  {}",
+                format! ("{:?}", &self.cmk),
+                bits_str(self.states_bits).trim(),
+                bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim(),
         )
     }
 }

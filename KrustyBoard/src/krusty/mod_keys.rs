@@ -227,14 +227,19 @@ impl ModKeys {
 
 
     /// NOTE: this 'static' will be our source of ordering for the mod-keys in the combo-mod-keys-state bitmap!!
-    pub fn static_combo_bits_mod_keys() -> [ModKey; N__COMBO_STATES_BITS__MODKEYS] {
+    pub fn static_ordered_mod_keys() -> [ModKey; N__COMBO_STATES_BITS__MODKEYS] {
         // Note that there are bits in combo-bitmap only for physical keys
         // (i.e. it excludes the virtual l/r agnostic enum-vals used during combo construction)
-        static COMBO_STATE_BITS_MOD_KEYS: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
-            caps,     lalt,     ralt,     lwin,     rwin,     lctrl,     rctrl,     lshift,     rshift,
-            caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl,
+        static ORDERED_MOD_KEYS: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
+            caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift
         ] };
-        COMBO_STATE_BITS_MOD_KEYS
+        ORDERED_MOD_KEYS
+    }
+    pub fn static_ordered_mod_keys_dbl() -> [ModKey; N__COMBO_STATES_BITS__MODKEYS] {
+        static ORDERED_MOD_KEYS_DBL: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
+            caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl
+        ] };
+        ORDERED_MOD_KEYS_DBL
     }
 
     /// NOTE: the ordering in this 'static' tuples array will be used to expand the l/r agnostic combo keys into their specialized versions
@@ -250,11 +255,6 @@ impl ModKeys {
         ];
         LR_MODS_TRIPLETS
     }
-    pub fn static_dbl_tap_mk_pairs () -> [(ModKey,ModKey);9] {
-        let mks = ModKeys::static_combo_bits_mod_keys();
-        mks[0..9] .iter().copied() .zip (mks[9..18].iter().copied()) .collect::<Vec<(ModKey,ModKey)>>() .try_into().unwrap()
-    }
-
 
     pub fn mod_umk_pairs (&self) -> [(ModKey, &UnifModKey);8] { [
         (lalt,   &self.lalt  ), (ralt,   &self.ralt  ),
@@ -273,7 +273,8 @@ impl ModKeys {
         (rctrl,  &self.rctrl.down),
         (lshift, &self.lshift.down),
         (rshift, &self.rshift.down),
-        //
+    ] }
+    pub fn mk_dbl_flag_pairs (&self) -> [(ModKey, &Flag); N__COMBO_STATES_BITS__MODKEYS] { [
         (caps_dbl,   &self.caps.dbl_tap),
         (lalt_dbl,   &self.lalt.dbl_tap),
         (ralt_dbl,   &self.ralt.dbl_tap),
@@ -296,6 +297,15 @@ impl ModKeys {
     pub fn some_ctrl_dbl  (&self) -> bool { self.lctrl.dbl_tap.is_set()  || self.rctrl.dbl_tap.is_set()  }
     pub fn some_alt_dbl   (&self) -> bool { self.lalt.dbl_tap.is_set()   || self.ralt.dbl_tap.is_set()   }
     pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rwin.dbl_tap.is_set()   }
+
+    pub fn some_mk_down (&self) -> bool {
+        self.mk_flag_pairs() .iter() .any (|(_,fg)| fg.is_set())
+        // ^^ dont need to check _dbl, as if some mk_dbl is active, the mk will also be active
+        // .. also note that mk_flag_pairs includes caps too
+    }
+    pub fn some_mk_dbl_down (&self) -> bool {
+        self.mk_dbl_flag_pairs() .iter() .any (|(_,fg)| fg.is_set())
+    }
 
     pub fn unstick_all (&self) {
         // all modkey states .. we'll do two loops to interleave them so they dont activate e.g. start-menu

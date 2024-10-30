@@ -51,12 +51,12 @@ impl std::fmt::Debug for EvCbMapKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use {KbdEvCbMapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
         match &self {
-            key_ev_t   (key,   KeyEventCb_KeyDown) => write! (f, "Key Dn  {:?}", key),
-            key_ev_t   (key,   KeyEventCb_KeyUp)   => write! (f, "Key Up  {:?}", key),
-            btn_ev_t   (btn,   BtnDown)            => write! (f, "Btn Dn  {:?}", btn),
-            btn_ev_t   (btn,   BtnUp)              => write! (f, "Btn Up  {:?}", btn),
-            wheel_ev_t (wheel, WheelBackwards)     => write! (f, "Whl Bwd {:?}", wheel),
-            wheel_ev_t (wheel, WheelForwards)      => write! (f, "Whl Fwd {:?}", wheel),
+            key_ev_t   (key,   KeyEventCb_KeyDown) => write! (f, "Down  {:?}", key),
+            key_ev_t   (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {:?}", key),
+            btn_ev_t   (btn,   BtnDown)            => write! (f, "Down  {:?}", btn),
+            btn_ev_t   (btn,   BtnUp)              => write! (f, "  Up  {:?}", btn),
+            wheel_ev_t (wheel, WheelBackwards)     => write! (f, "Bkwd  {:?}", wheel),
+            wheel_ev_t (wheel, WheelForwards)      => write! (f, " Fwd  {:?}", wheel),
             move_ev_t                              => write! (f, "Mouse Moved"),
         }
     }

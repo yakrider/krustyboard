@@ -24,11 +24,12 @@ The API further enables one to ..
 - Directly define arbitrary code fragments to trigger upon combo activation.
 - Conditional combos that only trigger on satisfying arbitrary conditions
 - Various 'mode-states' that can further specify the modes during which certain combos are to be enabled
-- Specify wildcards for various modifier keys (e.g. ctrl, alt, shift, win) that can be optional for the combo
 - Define two-stroke combos where the specified combo must immediately follow a specified first stroke combo to trigger
+- Define separate combo actions for single-tap and double-tap combinations on modifier-keys and mode-state-keys 
+- Specify wildcards for various modifier keys (e.g. left/right ctrl, alt, shift, win) and the mode-states that can be optional for the combo
 - Support for defining combos and actions for mouse button and wheel events, and for double-taps on keys/buttons etc
 - Framework for directly binding handling for any of the key/mouse input events, further upstream than the combo registrations (if so desired), which is specially useful for managing actions on actual modifier keys themselves (like Capslock, Alt, Ctrl etc).
-- Framework and examples on setting up various mode-states that allow for second/third/fourth etc layers of hotkey functionality layered on the keyboard
+- Framework and examples on setting up various on-press and latched mode-states that allow for second/third/fourth etc layers of hotkey functionality layered on the keyboard
 - A set of utility functions for interacting with and managing .. windows, volume, brightness, media player, alt-tab, window-groups etc etc
 
 To make things even more accessible, a comprehensive snapshot of remappings I used personally is included in krusty_app.rs.
