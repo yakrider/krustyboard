@@ -215,8 +215,8 @@ impl ModKeys {
             // the other modifier-keys are fully managed
             lalt   : UnifModKey::new (lalt,   Box::new(ModKey_Managed), None),
             lctrl  : UnifModKey::new (lctrl,  Box::new(ModKey_Managed), Some(rctrl)),
-            rctrl  : UnifModKey::new (rctrl,  Box::new(ModKey_Managed), Some(lctrl)),
             lshift : UnifModKey::new (lshift, Box::new(ModKey_Managed), Some(rshift)),
+            rctrl  : UnifModKey::new (rctrl,  Box::new(ModKey_Managed), Some(lctrl)),
             rshift : UnifModKey::new (rshift, Box::new(ModKey_Managed), Some(lshift)),
         }
     }
@@ -231,13 +231,13 @@ impl ModKeys {
         // Note that there are bits in combo-bitmap only for physical keys
         // (i.e. it excludes the virtual l/r agnostic enum-vals used during combo construction)
         static ORDERED_MOD_KEYS: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
-            caps, lalt, ralt, lwin, rwin, lctrl, rctrl, lshift, rshift
+            caps, lalt, lctrl, lshift, lwin, ralt, rctrl, rshift, rwin
         ] };
         ORDERED_MOD_KEYS
     }
     pub fn static_ordered_mod_keys_dbl() -> [ModKey; N__COMBO_STATES_BITS__MODKEYS] {
         static ORDERED_MOD_KEYS_DBL: [ModKey; N__COMBO_STATES_BITS__MODKEYS] = { [
-            caps_dbl, lalt_dbl, ralt_dbl, lwin_dbl, rwin_dbl, lctrl_dbl, rctrl_dbl, lshift_dbl, rshift_dbl
+            caps_dbl, lalt_dbl, lctrl_dbl, lshift_dbl, lwin_dbl, ralt_dbl, rctrl_dbl, rshift_dbl, rwin_dbl
         ] };
         ORDERED_MOD_KEYS_DBL
     }
@@ -248,54 +248,52 @@ impl ModKeys {
     // also, we'd rather have win at the end here (and wrap outermost), because that has a spawn and delay in reactivation .. still ok but still
     pub fn static_lr_mods_triplets () -> [(ModKey,ModKey,ModKey);4] {
         static LR_MODS_TRIPLETS : [(ModKey,ModKey,ModKey);4] = [
+            (alt,   lalt,   ralt),
             (ctrl,  lctrl,  rctrl),
             (shift, lshift, rshift),
-            (alt,   lalt,   ralt),
             (win,   lwin,   rwin),
         ];
         LR_MODS_TRIPLETS
     }
 
     pub fn mod_umk_pairs (&self) -> [(ModKey, &UnifModKey);8] { [
-        (lalt,   &self.lalt  ), (ralt,   &self.ralt  ),
-        (lctrl,  &self.lctrl ), (rctrl,  &self.rctrl ),
-        (lshift, &self.lshift), (rshift, &self.rshift),
-        (lwin,   &self.lwin  ), (rwin,   &self.rwin  )
+        (lalt, &self.lalt), (lctrl, &self.lctrl), (lshift, &self.lshift), (lwin, &self.lwin),
+        (ralt, &self.ralt), (rctrl, &self.rctrl), (rshift, &self.rshift), (rwin, &self.rwin)
     ] }
 
     pub fn mk_flag_pairs (&self) -> [(ModKey, &Flag); N__COMBO_STATES_BITS__MODKEYS] { [
         (caps,   &self.caps.down),
         (lalt,   &self.lalt.down),
-        (ralt,   &self.ralt.down),
-        (lwin,   &self.lwin.down),
-        (rwin,   &self.rwin.down),
         (lctrl,  &self.lctrl.down),
-        (rctrl,  &self.rctrl.down),
         (lshift, &self.lshift.down),
+        (lwin,   &self.lwin.down),
+        (ralt,   &self.ralt.down),
+        (rctrl,  &self.rctrl.down),
         (rshift, &self.rshift.down),
+        (rwin,   &self.rwin.down),
     ] }
     pub fn mk_dbl_flag_pairs (&self) -> [(ModKey, &Flag); N__COMBO_STATES_BITS__MODKEYS] { [
         (caps_dbl,   &self.caps.dbl_tap),
         (lalt_dbl,   &self.lalt.dbl_tap),
-        (ralt_dbl,   &self.ralt.dbl_tap),
-        (lwin_dbl,   &self.lwin.dbl_tap),
-        (rwin_dbl,   &self.rwin.dbl_tap),
         (lctrl_dbl,  &self.lctrl.dbl_tap),
-        (rctrl_dbl,  &self.rctrl.dbl_tap),
         (lshift_dbl, &self.lshift.dbl_tap),
+        (lwin_dbl,   &self.lwin.dbl_tap),
+        (ralt_dbl,   &self.ralt.dbl_tap),
+        (rctrl_dbl,  &self.rctrl.dbl_tap),
         (rshift_dbl, &self.rshift.dbl_tap),
+        (rwin_dbl,   &self.rwin.dbl_tap),
         // ^^ note again, that for the combo bitmap construction, the l/r agnostic keys should have been expanded out and eliminated
     ] }
 
 
-    pub fn some_shift_down (&self) -> bool { self.lshift.down.is_set() || self.rshift.down.is_set() }
-    pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set()  }
     pub fn some_alt_down   (&self) -> bool { self.lalt.down.is_set()   || self.ralt.down.is_set()   }
+    pub fn some_ctrl_down  (&self) -> bool { self.lctrl.down.is_set()  || self.rctrl.down.is_set()  }
+    pub fn some_shift_down (&self) -> bool { self.lshift.down.is_set() || self.rshift.down.is_set() }
     pub fn some_win_down   (&self) -> bool { self.lwin.down.is_set()   || self.rwin.down.is_set()   }
 
-    pub fn some_shift_dbl (&self) -> bool { self.lshift.dbl_tap.is_set() || self.rshift.dbl_tap.is_set() }
-    pub fn some_ctrl_dbl  (&self) -> bool { self.lctrl.dbl_tap.is_set()  || self.rctrl.dbl_tap.is_set()  }
     pub fn some_alt_dbl   (&self) -> bool { self.lalt.dbl_tap.is_set()   || self.ralt.dbl_tap.is_set()   }
+    pub fn some_ctrl_dbl  (&self) -> bool { self.lctrl.dbl_tap.is_set()  || self.rctrl.dbl_tap.is_set()  }
+    pub fn some_shift_dbl (&self) -> bool { self.lshift.dbl_tap.is_set() || self.rshift.dbl_tap.is_set() }
     pub fn some_win_dbl   (&self) -> bool { self.lwin.dbl_tap.is_set()   || self.rwin.dbl_tap.is_set()   }
 
     pub fn some_mk_down (&self) -> bool {

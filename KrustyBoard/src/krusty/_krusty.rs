@@ -302,12 +302,6 @@ impl KrustyState {
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
-    /// Utlity function to create a new Combo-Generator
-    pub fn cg (&self) -> ComboGen { ComboGen::new() }
-
-    /// Utility function to create a new Combo-Action-Generator
-    pub fn ag (&self) -> ActionGen { ActionGen::new() }
-
 }
 
 

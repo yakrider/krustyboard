@@ -11,12 +11,12 @@ Krusty makes keyboard remapping and automation very straightforward with fluent 
 Consider a simple example :
 
 ```rust
-let combo  = k.ks.cg().k(L).m(caps).m(alt);
-let action = k.ks.ag().k(F20).m(alt).m(shift);
+let combo  = cg().k(L).m(caps).m(alt);
+let action = ag().k(F20).m(alt).m(shift);
 k .cm .add_combo (combo, action);
 ```
 
-The above uses a Combo-Generator (cg) and an Action-Generator (ag) from KrustyBoard (k) state (ks) to build a combo (Capslock+Alt+L) and its action (send out Alt+Shift+F20), and register them to our combos-mapping table (cm). 
+The above uses a Combo-Generator (cg) and an Action-Generator (ag) to build a combo (Capslock+Alt+L) and its action (send out Alt+Shift+F20), and register them to our combos-mapping table (cm). 
 
 When using with an IDE, the API methods will show up with doc-comments explaining their usage and capabilities, making even complex tasks accessible, easy, quick, yet still robust and reliable. 
 

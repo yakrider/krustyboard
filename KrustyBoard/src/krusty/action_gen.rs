@@ -66,6 +66,9 @@ pub struct ActionGen <S: ActionGenSt = ActionGenSt_Init> {
 /// alias for the finalied ActionGen state, since we'll be passing that around to downstream processing fns
 pub type AG = ActionGen <ActionGenSt_Inited>;
 
+/// Utility function to create a new Combo-Action-Generator. <br>
+/// (Note that ActionGen might access the singleton KrustyState for internal referencing.
+pub fn ag() -> ActionGen { ActionGen::new() }
 
 
 

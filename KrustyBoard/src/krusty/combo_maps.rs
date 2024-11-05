@@ -95,12 +95,12 @@ impl CombosMap {
     }
 
     pub fn _debug_print_combos_map (&self) {
-        println! ("\nCombo entries and their counts of non-cond, cond, and first-stroke-cond combo-values:");
+        println! ("\nCombo entries and their combo-values counts \n# (non-cond, cond, first-stroke-cond)");
         self.combos_map .borrow() .iter() .map ( |(c,cvs)| {
             let cs = cvs.iter().filter(|cv| cv.cond.is_some()).count();
             let fscs = cvs.iter().filter(|cv| cv.first_stroke_cond.is_some()).count();
             let ncs = cvs.len() - cs - fscs;
-            format! ("#(nc,c,fsc): {:?}   {:?}", (ncs,cs,fscs), c)
+            format! ("{:?} {:?}", (ncs,cs,fscs), c)
         } ) .sorted() .for_each (|s| println!("{}",s));
         println! ("nTot = {:?}", self.combos_map.borrow().len());
 

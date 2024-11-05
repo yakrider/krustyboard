@@ -100,6 +100,9 @@ pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
 /// alias for the finalied ComboGen state, since we'll be passing that around to downstream processing fns
 pub type CG = ComboGen <ComboGenSt_Inited>;
 
+/// Utlity function to create a new Combo-Generator. <br>
+/// (Note that ComboGen might access the singleton KrustyState for internal referencing.
+pub fn cg() -> ComboGen { ComboGen::new() }
 
 
 impl ComboGen <ComboGenSt_Init> {

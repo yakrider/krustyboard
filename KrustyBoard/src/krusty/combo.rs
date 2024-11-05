@@ -106,8 +106,8 @@ impl Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let wc_mask_bits = FULL_WILDCARDS_MASK;
         let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
-            .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
+            .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.dbl_tap.is_set()) )
             .chain ( & ks.mode_states.latch_flag_pairs() .map (|(_,ms)| ms.active.is_set()) )
             .chain ( & Self::get_cur_flags_states_flags(ks) .map (|fg| fg.is_set()) )
@@ -129,17 +129,17 @@ impl Combo {
         // we'll expand out this mod-vec into vec-of-vec with all L/R optional mods fanned out into vec-of-vecs with L, R, or L+R versions
         let mut mvs : Vec<Vec<ModKey>> = Vec::new();
         mvs.push(mks);      // prepare seed vec-of-vec with initial mods-vec
-        ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk, lmk, rmk)| {
+        ModKeys::static_lr_mods_triplets() .iter() .for_each ( |&(lrmk, lmk, rmk)| {
             // expand repeatedly for each lrmk, consuming the list and replacing with expanded version (w/o cloning)
             let mut mvs_exp: Vec<Vec<ModKey>> = Vec::new();
             mvs .drain(..) .for_each ( |mv| {
-                if mv.contains(lrmk) {
+                if mv.contains(&lrmk) {
                     // if a vec had this l/r mod (e.g. alt), we'll instead gen three mod vecs having (lalt, ralt, lalt && ralt)
-                    let mut vlr = mv.iter() .filter (|m| *m != lrmk && *m != lmk && *m != rmk) .copied().collect::<Vec<_>>();
+                    let mut vlr = mv.iter() .filter (|&&m| m != lrmk && m != lmk && m != rmk) .copied().collect::<Vec<_>>();
                     let (mut vl, mut vr) = (vlr.clone(), vlr.clone());
-                    vl.push(*lmk); mvs_exp.push(vl);
-                    vr.push(*rmk); mvs_exp.push(vr);
-                    vlr.push(*lmk); vlr.push(*rmk); mvs_exp.push(vlr);
+                    vl.push(lmk); mvs_exp.push(vl);
+                    vr.push(rmk); mvs_exp.push(vr);
+                    vlr.push(lmk); vlr.push(rmk); mvs_exp.push(vlr);
                 } else {
                     mvs_exp.push(mv)
                 }
@@ -193,8 +193,8 @@ impl Combo {
         fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey]) -> Combo {
             let (wc_bits, states_bits) = {
                 ModKeys::static_ordered_mod_keys()                .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) .iter()
-                .chain ( & ModKeys::static_ordered_mod_keys_dbl() .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) )
                 .chain ( & ModeStates::static_ordered_modes()     .map (|md| get_mode_bit_and_wc (cg,md)) )
+                .chain ( & ModKeys::static_ordered_mod_keys_dbl() .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) )
                 .chain ( & ModeStates::static_ordered_modes_dbl() .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .chain ( & ModeStates::static_latch_states()      .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .chain ( & Combo::static_flags_modes()            .map (|md| get_mode_bit_and_wc (cg,md)) )
@@ -317,22 +317,23 @@ impl Combo {
 
 impl std::fmt::Debug for Combo {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const bits_chars_uc: &str = "CAAWWCCSSCAAWWCCSSEDFRQABCDEDFRQABCDABCD ";
-        const bits_chars_lc: &str = "caawwccsscaawwccssedfrqabcdedfrqabcdabcd ";
+        use colored::*;
+        const bits_chars_uc: &str = "CACSWACSWEDFRQ1234CACSWACSWEDFRQ1234LLLL";
+        const bits_chars_lc: &str = "cacswacswedfrq1234cacswacswedfrq1234llll";
         fn bits_str (bits:u64) -> String {
             format! ("{:064b}",bits) .chars().rev()
                 .zip (bits_chars_uc.chars())
                 .zip (bits_chars_lc.chars())
                 .enumerate() .map ( |(i,((b,uc),lc))| {
-                    let c = if b=='1' {uc} else {lc};
-                    let sp = if i==8 || i==17 || i==21 || i==26 || i==30 || i==35 {"."} else {""};
-                    c.to_string() + sp
+                    let c = if b=='1' {uc.to_string().yellow()} else {lc.to_string().dimmed()};
+                    let sp = if i==0 || i==4 || i==8 || i==12 || i==17 || i==18 || i==22 || i==26 || i==30 || i==35 {"."} else {""};
+                    c.to_string() + &sp.dimmed().to_string()
                 } ) .collect::<String>()
         }
         write! (f, "{:20} {}  {}",
-                format! ("{:?}", &self.cmk),
-                bits_str(self.states_bits).trim(),
-                bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim(),
+            format! ("{:?}", &self.cmk) .magenta(),
+            bits_str(self.states_bits).trim(),
+            bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim(),
         )
     }
 }
