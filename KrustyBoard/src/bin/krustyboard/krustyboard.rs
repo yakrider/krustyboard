@@ -190,11 +190,11 @@ fn setup_unstick_all  (k:&Krusty) {
 
     /// debug printout of cur state
     let ks = k.ks.clone(); let print_ks = Arc::new (move || println!("{:#?}",ks));
-    k.cm .add_combo ( cg().k(F10).m(caps_dbl),  ag().af (print_ks.clone()) );     // caps-dbl-F10 -> debug-printout_ks
-    k.cm .add_combo ( cg().k(F10).m(lalt_dbl),  ag().af (print_ks.clone()) );     // lalt-dbl-F10 -> debug-printout_ks
+    k.cm .add_combo ( cg().k(F10).no_rpt().m(caps_dbl),  ag().af (print_ks.clone()) );     // caps-dbl-F10 -> debug-printout_ks
+    k.cm .add_combo ( cg().k(F10).no_rpt().m(lalt_dbl),  ag().af (print_ks.clone()) );     // lalt-dbl-F10 -> debug-printout_ks
     // and of the combo-maps table itself
     let cm = k.cm.clone(); let print_cm = Arc::new (move || { cm._debug_print_combos_map(); cm._info_print_simult_act_combos_check(); } );
-    k.cm .add_combo ( cg().k(F9).m(caps_dbl),  ag().af (print_cm) );             // caps-dbl-F9 -> debug-printout_cm
+    k.cm .add_combo ( cg().k(F9).no_rpt().m(caps_dbl),  ag().af (print_cm) );             // caps-dbl-F9 -> debug-printout_cm
 }
 
 
@@ -211,15 +211,15 @@ fn setup_mode_keys (k:&Krusty) {
         k.cm.add_to_handled_keys_set (key);
 
         // since pressing mode-keys sets their flags first, we want to map their own presses w their own flags back to base-action
-        // (note the mode-state-kdn_no-consume (msk_nc) specified below so we're not disabling key-repeats for base action)
-        k.cm .add_combo ( cg().k(key).s(ms_t).msk_nc(),  ag().k(key).mkg_nw() );
+        // (note the mode-state-kdn_no-consume gets auto added for mode-key triggered combos .. so key-repeats are enabled for base action)
+        k.cm .add_combo ( cg().k(key).s(ms_t),  ag().k(key).mkg_nw() );
         // ^^ the modkey-guard-no-wrap is specified to make it explicit, but isnt strictly necessary here as there are no mod-keys when this triggers
 
         // to avoid stragglers, we'll set the mode-keys pressed w caps to disable their repeat until release (ie. even after caps is released!)
         // note that the following works because any mode-state specified in combo-gen is auto marked for consumption (unless do .msk_nc())
         //k.cm .add_combo ( cg().k(key).m(caps).s(ms_t),  ag().af(no_action()) );
         // ^^ no longer necessary as we disable modkey repeat by default in bindings when w caps
-        // (note that repeats are suppressed, but first presses would still come in, but mode-keys w caps dont get any fallback proc)
+        // (note that repeats are suppressed, but first presses would still come in, but mode-keys w caps dont get any fallback proc either)
 
         // and we could do the same for alt/win etc, but we'd rather leave those open and they can be done later when/if such combos are set
         // (this allows mod-key combos for mode-keys, and we can disable it only for specific cases (e.g. qks1 during vol ctrl etc)
@@ -277,12 +277,12 @@ fn setup_mode_keys (k:&Krusty) {
     // ^^ naah, we'd rather keep these silent for valuable caps-lalt-ms<?>-<key> combos
 
     // since F is in caret mode, we'll remap some of the other combos to replace ctr-f etc
-    k.cm .add_combo ( cg().k(F).m(lalt),          ag().k(F).m(ctrl) );     // alt-f --> ctrl-f
-    k.cm .add_combo ( cg().k(F).m(caps).m(lalt),  ag().k(F).m(lalt) );     // caps-lalt-f --> alt-f, though it goes against typical mode-key usage
+    k.cm .add_combo ( cg().k(F).no_rpt().m(lalt),          ag().k(F).m(ctrl) );     // alt-f --> ctrl-f
+    k.cm .add_combo ( cg().k(F).no_rpt().m(caps).m(lalt),  ag().k(F).m(lalt) );     // caps-lalt-f --> alt-f, though it goes against typical mode-key usage
 
     // e in caret mode, so we'll put our left-handed-enter on alt-e instead .. (note that there are also caps-space-* combos for *-enter)
-    k.cm .add_combo ( cg().k(E).msk_nc().m(lalt),             ag().k(Enter) );    // alt-e   --> Enter
-    k.cm .add_combo ( cg().k(E).msk_nc().m(lalt).s(msE_dbl),  ag().k(Enter) );    // alt-e-e --> Enter
+    k.cm .add_combo ( cg().k(E).m(lalt),             ag().k(Enter) );    // alt-e   --> Enter
+    k.cm .add_combo ( cg().k(E).m(lalt).s(msE_dbl),  ag().k(Enter) );    // alt-e-e --> Enter
 
 
     //k.cm .add_combo ( cg().k(E).msk_nc().m(caps).m(lalt),   ag().k(Enter).m(ctrl) );    // caps-alt-e --> ctrl-Enter
@@ -317,7 +317,7 @@ fn disable_win_num_combos (k:&Krusty) {
         k.cm .add_combo ( cg().k(key).m(lwin).m(caps),   ag().af(no_action()) );
     } );
     // win-1,2,3 are separately setup for vol  plus caps-win-1,2,3,4 are used for win-grps
-    // .. that leaves just the win-4, which and we'll set it here
+    // .. that leaves just the win-4, which we'll set it here
     k.cm .add_combo ( cg().k(Numrow_4).m(lwin),   ag().af(no_action()) );
 
     // we'll disable win-d too, as I never use that show/hide desktop and it's disruptive
@@ -961,8 +961,8 @@ fn setup_escape_key (k:&Krusty) {
     k.cm .add_combo ( cg().k(Q).m(lwin).m(caps),       ag().af (gen_cancel_win_mouse_action (Q, &k.ks)) );
 
     // in the same vein, we'll let win-q to everything-search (to match other win-a/s etc)
-    k.cm .add_combo ( cg().k(Q).m(lwin),               ag().k(Q).m(win).m(alt) );
-    k.cm .add_combo ( cg().k(Q).m(lwin).m(shift),      ag().k(Q).m(win).m(alt).m(shift) );
+    k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin),               ag().k(Q).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).m(shift),      ag().k(Q).m(win).m(alt).m(shift) );
     // ^^ note that alt-q is set in 'everything' as global invocation hotkey, and alt-ctrl-q as new search window hotkey
 
 }
@@ -988,22 +988,22 @@ fn setup_win_key_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(M).m(lwin),  ag().af(no_action()) );
 
     // win-f can toggle window full-screen .. (the OS default feedback-hub will stay on double-win-f)
-    k.cm .add_combo ( cg().k(F).m(lwin),  ag().k(F11) );
+    k.cm .add_combo ( cg().k(F).no_rpt().m(lwin),  ag().k(F11) );
 
     // win-e should bring up whatever we configured for file-explorer alternative
-    k.cm .add_combo ( cg().k(E).m(lwin),  ag().af(action(start_alt_file_explorer)) );
+    k.cm .add_combo ( cg().k(E).no_rpt().m(lwin),  ag().af(action(start_alt_file_explorer)) );
 
     // win-i should start irfanview
-    k.cm .add_combo ( cg().k(I).m(lwin),  ag().af(action(start_irfanview)) );
+    k.cm .add_combo ( cg().k(I).no_rpt().m(lwin),  ag().af(action(start_irfanview)) );
 
     // win-n should start chrome-incognitoa
-    k.cm .add_combo ( cg().k(N).m(lwin),  ag().af(action(start_chrome_incognito)) );
+    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af(action(start_chrome_incognito)) );
 
     // win-caps-b for bard .. hah we'll see
-    k.cm .add_combo ( cg().k(B).m(lwin).m(caps),  ag().af(action(start_chrome_bard)) );
+    k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af(action(start_chrome_bard)) );
 
     // win-v can bring up vlc .. note that this will override native win-c for win clipboard (can get that win dbl-win-v)
-    k.cm .add_combo ( cg().k(V).m(lwin),  ag().af(action(start_vlc)) );
+    k.cm .add_combo ( cg().k(V).no_rpt().m(lwin),  ag().af(action(start_vlc)) );
 
     // we'll set win-s to quickly bringup the windows start menu via ctrl-esc shortcut (what double win press also does)
     k.cm .add_combo ( cg().k(S).m(lwin),  ag().k(Escape).m(lctrl) );
@@ -1018,7 +1018,7 @@ fn setup_win_key_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(A).m(lwin),  ag().k(A).m(win).m(shift) );
 
     // we'll setup win-w for closing windows (via alt-f4)
-    k.cm .add_combo ( cg().k(W).m(lwin),  ag().k(F4).m(lalt) );
+    k.cm .add_combo ( cg().k(W).no_rpt().m(lwin),  ag().k(F4).m(lalt) );
 
     // we'll also setup a shortcut to pull up our taskbar shortcuts folder ...
     // (by focusing on tray btn first, then nav to our toolbar)
@@ -1089,8 +1089,8 @@ fn setup_brightness_vol_media (k:&Krusty) {
     } );
     fn setup_fine_mode_ms_key (k:&Krusty, ms:&ModeState, mk:ModKey, fine_ms_t:ModeState_T, af:AF) {
         if let Some(key) = ms.key() {
-            k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_t    ).s(fine_ms_t).msk_nc(),  ag().af (af.clone()) );
-            k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_dbl_t).s(fine_ms_t).msk_nc(),  ag().af (af.clone()) );
+            k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_t    ).s(fine_ms_t),  ag().af (af.clone()) );
+            k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_dbl_t).s(fine_ms_t),  ag().af (af.clone()) );
         }
     }
     // alt-2 is brightness down, alt-3 is brightness up .. (fine mode when 1 is held)
@@ -1108,7 +1108,7 @@ fn setup_brightness_vol_media (k:&Krusty) {
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke, ralt for actual F1
     // (Note that there also a bunch of F1 and F2 combos in switche sections)
 
-    k.cm .add_combo ( cg().k(F1).m(caps),  ag().k(VolumeMute) );
+    k.cm .add_combo ( cg().k(F1).no_rpt().m(caps),  ag().k(VolumeMute) );
     //k.cm .add_combo ( cg().k(F1).m(lwin),  ag().k(MediaPlayPause) );
     // ^^ media keys seems to get captured by elev apps in fgnd (e.g. switche) and not pass to musicbee .. so we'll setup alts
     k.cm .add_combo ( cg().k(F1).m(lwin), ag().k(VolumeUp).m(lctrl).m(lshift) );  // gotta match w music-bee/winamp settings
@@ -1252,15 +1252,15 @@ fn setup_caps_win_combos (k:&Krusty) {
     // caps-win-m should maximize (via win-m) if not, else restore from max
     k.cm .add_combo ( cg().k(M).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_max)) );
     // caps-win-t should toggle always on top for fgnd window
-    k.cm .add_combo ( cg().k(T).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
+    k.cm .add_combo ( cg().k(T).no_rpt().m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
     // caps-win-n should minimize
     //k.cm .add_combo ( cg().k(N).m(caps).m(lwin),  ag().af (Arc::new (|| win_fgnd_min())) );
     // ^^ actually, we already do that with win-esc which is easier .. so we'll repurpose that for non-incognito chrome window
-    k.cm .add_combo ( cg().k(N).m(caps).m(lwin),  ag().af (action (start_chrome)) );
+    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
 
     // we also have some additional more drastic ones with double-caps-win combos
-    k.cm .add_combo ( cg().k(T).m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
-    k.cm .add_combo ( cg().k(B).m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_titlebar)) );
+    k.cm .add_combo ( cg().k(T).no_rpt().m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
+    k.cm .add_combo ( cg().k(B).no_rpt().m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_titlebar)) );
 
     fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32, side_t:RectEdgeSide) {
         // we'll setup caps-win combos for regular move/stretch etc
@@ -1289,7 +1289,7 @@ fn setup_caps_win_combos (k:&Krusty) {
 
     // some additional caps-win combos
     // caps-win-c being used to launch winmerge diff from last two clipboard entries
-    k.cm .add_combo ( cg().k(C).m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
+    k.cm .add_combo ( cg().k(C).no_rpt().m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
     // gaah we'll just throw in iDEA diff for drag-drop diffing (just coz winmerge doesnt do dark mode)
     //k.cm .add_combo  ( k.ks, cg().k(C).m(lwin),  k.ks.cg_af (Arc::new (|| start_idea_diff() )));
     // ^^ cant do from here, turns out idea diff from cmd line can ONLY be opened with two files pointed, unlike empty from Idea shortcut!

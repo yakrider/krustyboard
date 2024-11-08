@@ -140,6 +140,7 @@ impl CombosMap {
 
 
 
+
     /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
     /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
     /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
@@ -194,6 +195,14 @@ impl CombosMap {
     }
 
 
+    fn exec_combo_value (&self, cv:&ComboValue, ev:&Event) {
+        if cv.repeat_suppressed {
+            if let EventDat::key_event {is_repeat, ..} = ev.dat {
+                if is_repeat { return }
+            }
+        }
+        cv.af.as_ref()();
+    }
 
 
     // Matched Combo-Values/AFs processing : exec applicable combo-actions (w/ conditionals if any), return whether any AF was executed.
@@ -231,12 +240,12 @@ impl CombosMap {
                 // all conditional combos that are satisfied can be run
                 if cond(ks,ev) {
                     cond_matched = true; combo_execd = true;
-                    (cv.af)();
+                    self.exec_combo_value (&cv, ev);
                 }
             } else if !cond_matched {
                 // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
                 combo_execd = true;
-                (cv.af)();
+                self.exec_combo_value (&cv, ev);
             }
         }
         combo_execd
@@ -298,7 +307,7 @@ impl CombosMap {
         let combo = Combo::gen_cur_combo (cmk, ks);
         let combo_no_latch = Combo::gen_no_latch_combo(combo);
 
-        //std::thread::spawn (move || println! ("{:?}",combo));
+        //println! ("{:?}",combo);
 
         // Combo-processing order :
         // - First we run any exact match combos .. (any conditional combos if satisfied, else non-conditionals if no conditional matched)
@@ -335,12 +344,11 @@ impl CombosMap {
         // .. then we'll resort to fallback action generation and processing
 
         // but first, lets also filter out any automatic fallbacks for ..
-        // .. caps-dbl, ralt-dbl combos in all cases, some mode-state active and caps down
-        // .. mode-state-dbl combos only if some modkey (incl caps) down .. (we need to allow normal quick tapping on [E,D,F,R,Q,1,2,3,4])
+        // .. caps-dbl, ralt-dbl combos in all cases .. and some mode-state (and mode-state-dbl) when with caps down
+        // .. (reminder that [EDFRQ1234]_dbl, potentially w shift/ralt etc can trigger during normal typing and must be allowed)
         if ks.mod_keys.caps.dbl_tap.is_set()
             || ks.mod_keys.ralt.dbl_tap.is_set()
             || ( ks.mode_states.some_mode_state_active.is_set() && ks.mod_keys.caps.down.is_set() )
-            || ( ks.mode_states.some_mode_dbl_active.is_set() && ks.mod_keys.some_mk_down() )
         { return }
 
         let fbaf = self.gen_fallback_base_af (ks.clone(), ev);

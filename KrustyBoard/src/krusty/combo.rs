@@ -49,11 +49,12 @@ pub struct ComboValue {
     pub af    : AF,
     pub cond  : Option <ComboCond>,
     pub first_stroke_cond : Option <ComboCond>,
+    pub repeat_suppressed : bool,
 }
 
 impl ComboValue {
-    pub fn new (af:AF, cond:Option<ComboCond>, first_stroke_cond:Option<ComboCond>) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), af, cond, first_stroke_cond }
+    pub fn new (af:AF, cond:Option<ComboCond>, first_stroke_cond:Option<ComboCond>, repeat_suppressed:bool) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, first_stroke_cond, repeat_suppressed }
     }
 }
 
@@ -153,10 +154,11 @@ impl Combo {
     fn finalize_combo_gen (mut cg:CG) -> CG {
         // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step ..
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
-        // (note that these can still be set to no-consume if key-repeat is desired)
+        // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
         if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
+                cg = cg.msk_nc();
             }
         }
         // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
@@ -289,6 +291,8 @@ impl Combo {
 
 
     fn gen_first_stroke_cond (cg:&CG) -> ComboCond {
+        // since first-stroke-combos could be specified l/r agnostic, we might have multiple possible fscs to check against
+        // .. so we'll generate and package these with the closure so this doesnt have to be done at runtime
         let check_combos = Self::gen_combos (Self::finalize_combo_gen(cg.clone())) .into_iter() .map (Combo::gen_no_latch_combo) .collect::<Vec<Combo>>();
         Arc::new ( move |ks,ev| {
             //println! ("\nks.lfs : {:?}", *ks.last_stroke.read().unwrap());
@@ -308,8 +312,9 @@ impl Combo {
         let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
         let fsc  = cg.dat.first_stroke .as_ref() .map (Combo::gen_first_stroke_cond);
+        let repeat_suppressed = cg.dat.repeat_suppressed;
         Self::gen_combos(cg) .into_iter() .map ( |c|
-            (c, ComboValue::new (af.clone(), cond.clone(), fsc.clone()))
+            (c, ComboValue::new (af.clone(), cond.clone(), fsc.clone(), repeat_suppressed))
         ) .collect()
     }
 
@@ -330,11 +335,11 @@ impl std::fmt::Debug for Combo {
                     c.to_string() + &sp.dimmed().to_string()
                 } ) .collect::<String>()
         }
-        write! (f, "{:20} {}  {}",
-            format! ("{:?}", &self.cmk) .magenta(),
-            bits_str(self.states_bits).trim(),
-            bits_str(self.wc_mask_bits ^ FULL_WILDCARDS_MASK).trim(),
-        )
+        let mask_str = if self.wc_mask_bits != FULL_WILDCARDS_MASK {
+            bits_str (self.wc_mask_bits ^ FULL_WILDCARDS_MASK)
+        } else { "".into() };
+
+        write! ( f, "{:20} {}  {}", format! ("{:?}", &self.cmk).magenta(), bits_str(self.states_bits).trim(), mask_str.trim() )
     }
 }
 

@@ -47,30 +47,36 @@ impl ComboGenable for ComboGenSt_Inited {}
 # [ derivative (Debug) ]
 pub struct _ComboGen {
 
-    /// modifier keys that should be down to trigger this combo
+    /// Modifier keys that should be down to trigger this combo
     pub mks      : Vec<ModKey>,
 
-    /// mode-states that should match for this combo to trigger
+    /// Mode-states that should match for this combo to trigger
     pub modes    : Vec<ModeState_T>,
 
-    /// modifier keys that can be ignored (marked as wildcard) .. (defined but empty-list means global wc)
+    /// Modifier keys that can be ignored (marked as wildcard) .. (defined but empty-list means global wc)
     pub wc_mks   : Option<Vec<ModKey>>,
 
-    /// mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
+    /// Mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
     pub wc_modes : Option<Vec<ModeState_T>>,
 
-    /// optional condition to check before triggering this combo
+    /// Optional condition to check before triggering this combo
     # [ derivative (Debug="ignore") ]
     pub cond : Option<ComboCond>,
 
-    /// optional first-stroke combo that must immediately precede this for this to trigger
+    /// Optional first-stroke combo that must immediately precede this for this to trigger
     pub first_stroke : Option<CG>,
 
-    /// the modifier-key consume flag marks that the release of mod-keys in this combo should be masked
+    /// The modifier-key consume flag marks that the release of mod-keys in this combo should be masked
     pub mod_key_no_consume  : bool,
 
-    /// the mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released
+    /// The mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released. <br>
+    /// (This is useful to  avoid stragglers .. e.g say Alt-qks1-wheel for brightness, if alt is released first, we dont want '1's spamming out). <br>
+    /// (This is less important for caps-modekey-<?>combos, as modekdy bindings now auto set consumption flag when it is seen w caps).
     pub mode_kdn_no_consume : bool,
+
+    /// The repeat-suppresed flag marks that this combo should not trigger on key-repeats, only on fresh key presses. <br>
+    /// (This applies to the combo trigger key even if the key is not a tracked key like mode-keys).
+    pub repeat_suppressed : bool,
 }
 
 impl _ComboGen {
@@ -78,7 +84,7 @@ impl _ComboGen {
         _ComboGen {
             mks:Vec::new(), modes:Vec::new(),
             wc_mks:None, wc_modes:None, cond:None, first_stroke:None,
-            mod_key_no_consume:false, mode_kdn_no_consume:false,
+            mod_key_no_consume:false, mode_kdn_no_consume:false, repeat_suppressed:false,
         }
     }
 }
@@ -203,7 +209,9 @@ impl <S> ComboGen<S>
         self.dat.mod_key_no_consume = true; self
     }
     /// Disable consuming mode-trigger-key key-downs for this combo. <br>
-    /// (The default is to consume (i.e. disable further key-events until released) any mode-trigger-key kdn on registered combos)
+    /// (The default is to consume (i.e. disable further key-events until released) any mode-trigger-key kdn on registered combos). <br>
+    /// (However, if the combo key is a mode-state-key itself, they will be set to no-consume by default). <br>
+    /// (There should seldom be need to use this, as the default behavior should be ideal for almost all usecases!)
     pub fn msk_nc (mut self) -> Self {
         self.dat.mode_kdn_no_consume = true; self
     }
@@ -217,6 +225,11 @@ impl ComboGen <ComboGenSt_Key> {
     pub fn rel (mut self) -> Self {
         self.st.action = KbdEvCbMapKey_T::KeyEventCb_KeyUp;
         self
+    }
+    /// Enable triggering this combo on key-repeats without having to press the key again. <br>
+    /// (The default is to allow repeated combo activation on key-repeats)
+    pub fn no_rpt (mut self) -> Self {
+        self.dat.repeat_suppressed = true; self
     }
 }
 
