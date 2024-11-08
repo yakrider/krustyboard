@@ -26,7 +26,7 @@ pub struct _CombosMap {
     wildcard_combos : AtomicRefCell <FxHashMap <EvCbMapKey, Vec<Combo>>>,
 
     /// holds a registry for keys that only need default/fallback bindings
-    default_bind_keys : AtomicRefCell <FxHashSet <Key>>,
+    handled_keys_set : AtomicRefCell <FxHashSet <Key>>,
 }
 # [ derive (Clone, Deref) ]
 pub struct CombosMap ( Arc <_CombosMap> );
@@ -44,15 +44,21 @@ impl CombosMap {
                 _private : (),
                 combos_map        : AtomicRefCell::new ( FxHashMap::default() ),
                 wildcard_combos   : AtomicRefCell::new ( FxHashMap::default() ),
-                default_bind_keys : AtomicRefCell::new ( FxHashSet::default() ),
+                handled_keys_set  : AtomicRefCell::new ( FxHashSet::default() ),
             } ) )
         ) .clone()
     }
 
 
-    /// Registers a key for default binding (without a specific combo)
-    pub fn register_default_binding_key (&self, key:Key) {
-        self.default_bind_keys .borrow_mut() .insert (key);
+    /// Add key to the handled-keys-set ..<br>
+    /// A key in the handled-set w/o bindings will go through combo processing with fallback handling
+    pub fn add_to_handled_keys_set (&self, key:Key) {
+        self.handled_keys_set .borrow_mut() .insert (key);
+    }
+
+    /// Check if a key is in the handled-keys-set of the combos-map
+    pub fn check_if_handled_key (&self, key:&Key) -> bool {
+        self.handled_keys_set .borrow() .contains (key)
     }
 
 
@@ -81,6 +87,11 @@ impl CombosMap {
             self.add_to_wildcards_map(c);
             c = c.strip_wildcards();
         }
+        // we'll also add the KbdKey of this combo (if any) to our handled keys cache
+        if let EvCbMapKey::key_ev_t (key, ..) = c.cmk {
+            self.add_to_handled_keys_set (key);
+        }
+        // and finally, we can add the combo to our combos map
         let mut cm = self.combos_map.borrow_mut();
         //self.combos_map.write().unwrap() .insert (c, cv);
         if let Some(cvs) = cm.get_mut(&c) {
@@ -278,11 +289,12 @@ impl CombosMap {
 
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
-    fn combo_maps_handle_input (&self, cmk:EvCbMapKey, ev:&Event, ks:&KrustyState) {
+    pub fn combo_maps_handle_input (&self, cmk:EvCbMapKey, ev:&Event) {
         //println! ("combo-map-key: {:?}", cmk);
-        // note that we assume by the time we're here, callbacks for modifier-keys and mode-keys have already been called (and so flags updated)
+        // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
+        let ks = &KrustyState::instance();
         let combo = Combo::gen_cur_combo (cmk, ks);
         let combo_no_latch = Combo::gen_no_latch_combo(combo);
 
@@ -354,72 +366,6 @@ impl CombosMap {
         }
     }
 
-
-
-    /// generates the full combo-maps processing AF for use by lower level events processor (which sets the processor enabled)
-    pub fn enable_combos_map_events_processor (&self, k:&Krusty) {
-        use crate::EvProp_D::*;
-
-        //self._debug_print_combos_map();
-        self._info_print_simult_act_combos_check();
-
-        // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
-        // and for all keys whitelisted for combo-maps style handling, we do complete block on both keydown/keyup and gen all events ourselves!
-        // note that we want a whitelist instead of covering everything since unknown apps (incl switche) send unknown keys for valid reasons!
-
-        // and for non-key events (mouse btn/wheel/move), we want to allow combo proc only for those that have binding entries registered
-        // (this means they would have had combo-proc directives specified in the binding anyway)
-        // (this is 'friendlier' as w/o explicitly configuring the bindings, btns etc wont auto get combo-checked to potentially unpopulated table)
-
-        let mut handled_keys : FxHashSet<Key> = FxHashSet::default();
-        self.combos_map .borrow() .keys() .for_each ( |c| {
-            if let EvCbMapKey::key_ev_t (key, ..) = c.cmk { handled_keys.insert(key); }
-        } );
-        self.default_bind_keys .borrow() .iter() .for_each ( |key| { handled_keys.insert(*key); } );
-        k .ks .mode_states .mode_flag_pairs()  .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
-        k .ks .mode_states .latch_flag_pairs() .iter() .for_each ( |(_,ms)| ms.key() .iter() .for_each (|key| {handled_keys.insert(*key);}) );
-
-        // lets prep the AF to send into kbd-events-queue
-        let (ks, cm) = (k.ks.clone(), self.clone());
-        let cm_cb = Arc::new ( move |cmk:EvCbMapKey, e:&Event| { cm.combo_maps_handle_input (cmk, e, &ks) } );
-
-        // then we'll build the actual combo-processor AF
-        let input_af_queue = k.iproc.input_af_queue.clone();
-        let cb = Arc::new ( move |cmk:EvCbMapKey, had_binding:bool, e:Event| {  //println! ("combo-map-key: {:#?}", cmk);
-            match e.dat {
-                EventDat::key_event {key, ..} => {
-                    // we'll let injected events pass through (both kdn/kup) .. note that modifier keys deal w injected events separately
-                    if e.injected { return EvProp_Continue }
-                    // if its not in the combo-proc handled-keys whitelist, we should just let it pass through
-                    if !handled_keys.contains(&key) { return EvProp_Continue }
-                }
-                _ => {
-                    // note that we're not rejecting injected events here, as looks like x1/x2 mbtns come as injected, (at least in MX mouse)
-                    // note also, that unlike for keys we're letting both press/rel go through separately for mouse-btns here
-                    // (.. meaning, its fully upto the bindings set up to manage sensible mix between bindings and combo entries)
-                    if !had_binding { return EvProp_Continue }
-                }
-            }
-            // we queue all combo actions (instead of spawning out) so they dont get out of sequence
-            // note that we're using the same input-af-queue ..
-            // (.. and its non-ideal as some other event might have snuck in between event and its combo proc)
-            // (.. but a separate queue woudlnt fix it either .. and eitherway shoudlnt be a problem if queue clearance is fast enough)
-            let cm_cb = cm_cb.clone();
-            let _ = input_af_queue .send (Box::new (move || cm_cb (cmk, &e)));
-
-            // either way, combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup etc)
-            // (not least because the actual combo proc is queued for later .. so either we bail early, or we combo-proc and stop cur event)
-            EvProp_Stop
-        } );
-        k.iproc.set_combo_processor(cb);
-    }
-
-
-    pub fn disable_combos_map_events_processor (&self, k:&Krusty) {
-        // Note that this is not really intended to be called at runtime ..
-        // if we do want this to be dyanmic behavior, we should replace AtomicRefCell with RwLock in the CombosMap struct for robustness
-        k.iproc.clear_combo_processor()
-    }
 
 
 }

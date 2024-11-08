@@ -171,7 +171,7 @@ fn setup_default_keys  (k:&Krusty) {
     //let mouse_keys = [MouseLeftBtn, MouseRightBtn, MouseMiddleBtn, MouseX1Btn, MouseX1Btn];
 
     char_keys .chain (fnum_keys) .chain (nav_keys) .chain (spcl_keys) .for_each ( |key| {
-        k.cm .register_default_binding_key (key);
+        k.cm .add_to_handled_keys_set (key);
     } );
     // ^^ we can ofc put combos for these later in code .. all these do is register for default binding if no combo gets mapped!
 
@@ -207,6 +207,9 @@ fn setup_mode_keys (k:&Krusty) {
         // note that mode-keys down flag will track its physical state, but combo trigger on mode-state requires caps to be down too
         k.ks.mode_states .register_mode_key (key, ms_t);
 
+        // we'll also include this in handled keys (in case it isnt already)
+        k.cm.add_to_handled_keys_set (key);
+
         // since pressing mode-keys sets their flags first, we want to map their own presses w their own flags back to base-action
         // (note the mode-state-kdn_no-consume (msk_nc) specified below so we're not disabling key-repeats for base action)
         k.cm .add_combo ( cg().k(key).s(ms_t).msk_nc(),  ag().k(key).mkg_nw() );
@@ -238,7 +241,8 @@ fn setup_mode_keys (k:&Krusty) {
 
     fn register_latch_key (k:&Krusty, key:Key, ms_t:ModeState_T) {
         // latch key registration are much simpler than mode keys, as they only trigger on dbl-caps, so normal behavior is unimpeded
-        k.ks.mode_states.register_latch_key (key, ms_t)
+        k.ks.mode_states.register_latch_key (key, ms_t);
+        k.cm.add_to_handled_keys_set (key);
     }
 
     // setup keys for layer-2 caret nav msE/msD/msF/msR mode states (typically for l2 sel/del/word/fast nav)
@@ -284,8 +288,6 @@ fn setup_mode_keys (k:&Krusty) {
     //k.cm .add_combo ( cg().k(E).msk_nc().m(caps).m(lalt),   ag().k(Enter).m(ctrl) );    // caps-alt-e --> ctrl-Enter
     // ^^ nah we want to keep caps-lalt-E-<key> combos .. (plus we have other decent ctrl-Enter options)
 
-
-    // todo .. if we're ok with E for Enter no longer being the case, we should remove much of the  stuff above
 }
 
 
@@ -1911,9 +1913,7 @@ pub fn setup_krusty_board () {
     k.ks.mode_states.bind_mode_keys_actions(&k);
 
     //k.cm._debug_print_combos_map();
-
-    // then setup the combo-processor itself .. (note that modifier key handlers were already set up earlier)
-    k.cm.enable_combos_map_events_processor(&k);
+    k.cm._info_print_simult_act_combos_check();
 
 
 

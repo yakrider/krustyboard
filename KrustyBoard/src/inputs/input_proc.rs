@@ -5,7 +5,6 @@ use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicUsize};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
 use std::thread;
-use atomic_refcell::AtomicRefCell;
 
 use derive_deref::Deref;
 
@@ -14,10 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use once_cell::sync::{OnceCell};
 
-use crate::{
-    *, MouseButton::*, MouseWheel::*,
-    EvProp_D::*, ComboProc_D::*, EvCbFn_T::*,
-};
+use crate::{ *, EvCbFn_T::* };
 
 
 // this is used for identifying the fake keypresses we insert, so we don't process them in an infinite loop
@@ -72,8 +68,6 @@ pub struct _InputProcessor {
     stroke_ev_counter : AtomicUsize,
     /// the input bindings hold mapping for kbdkeys/mouse events to bound actions
     pub input_bindings : Bindings,
-    /// the combos processor, if present, is called after any bindings callbacks are processed
-    pub combos_processor : AtomicRefCell <Option <EvCbFn_ComboProc_T>>,
     /// for queued callback types, send all input events (kbd/mouse) to same processing queue (w event args pre-packaged in it)
     pub input_af_queue : SyncSender <EvCbFn_QueuedProc_T>,
 }
@@ -93,29 +87,22 @@ impl InputProcessor {
             // we'll create and spawn out channel for kbd and mouse queued events, and get it started
             // (we expect queue drained asap, but we'll keep excess slots as wheel-events on spin can get quite bursty)
             // the processor will hold the sender to this queue for everyone to clone/use
-            let (input_queue_sender, input_queue_receiver) = sync_channel::<EvCbFn_QueuedProc_T>(100);
-            thread::spawn (move || { utils::win_set_thread_dpi_aware(); while let Ok(af) = input_queue_receiver.recv() { af() } });
+            let (input_queue_sender, input_queue_receiver) = sync_channel::<EvCbFn_QueuedProc_T> (100);
+            thread::spawn (move || {
+                utils::win_set_thread_dpi_aware();
+                while let Ok(af) = input_queue_receiver.recv() { af() }
+            });
             InputProcessor ( Arc::new ( _InputProcessor {
                 kbd_hook     : AtomicIsize::default(),
                 mouse_hook   : AtomicIsize::default(),
                 iproc_thread : AtomicU32::default(),
                 stroke_ev_counter : AtomicUsize::default(),
                 input_bindings    : Bindings::new(),
-                combos_processor  : AtomicRefCell::new (None),
                 input_af_queue    : input_queue_sender,
             } ) )
         } ) .clone()
     }
 
-
-    pub fn set_combo_processor (&self, cb: EvCbFn_ComboProc_T) {
-        *self.combos_processor.borrow_mut() = Some(cb);
-    }
-    pub fn clear_combo_processor (&self) {
-        // Note that this is not really intended to be called at runtime ..
-        // if we do want this to be dyanmic behavior, we should replace AtomicRefCell with RwLock in the CombosMap struct for robustness
-        *self.combos_processor.borrow_mut() = None;
-    }
 
     /// increments stroke events counter and returns it (to use as stroke-id)
     fn incremented_stroke_counter (&self) -> usize {
@@ -185,10 +172,6 @@ impl InputProcessor {
 
         thread::spawn ( move || unsafe {
 
-            if iproc.input_bindings.borrow().is_empty() && iproc.combos_processor.borrow().is_none() {
-                return
-            } // ^^ no hooks to set, so exit before starting forever-loop waiting for events
-
             iproc.set_kbd_hook();
             iproc.set_mouse_hook();
 
@@ -217,15 +200,15 @@ impl InputProcessor {
 
 
 
-    /// common input events processor <br> ..
-    /// both kbd and mouse events from hooks get packaged into an InputEvent and sent here for processing
+    /// Common input events processor .. <br>
+    /// Both kbd and mouse events from hooks get packaged into an InputEvent and sent here for processing
     pub fn proc_input_event (&self, event:Event) -> EvProp_D {
 
+        use { EvProp_D::*, ComboProc_D::* };
         let mut ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
 
-        let cmk = EvCbMapKey::from_event(&event);   // lookup-key into bindings table as well as combo-maps
-
-        let mut had_binding = false;    // we'll update and pass this as combo proc can use this for some filtering
+        let cmk = EvCbMapKey::from_event(&event);
+        let mut had_binding = false;
 
         // first route it through any per-key registered callbacks
         //if let Some(cbe) = self.input_bindings .borrow() .get (&cmk) {
@@ -249,17 +232,39 @@ impl InputProcessor {
             }
         }
 
-        // now lets call the bulk defaults/combos processor if its available, and if combo_proc for this event not disabled from above
-        if ev_proc_ds.combo_proc_d == ComboProc_Enable {
-            //if let Some (cb) = self.combos_processor.borrow().as_ref() {
-            if let Some (cproc) = unsafe { (*self.combos_processor.as_ptr()).as_ref() } {
-                // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
-                ev_proc_ds.ev_prop_d = cproc (cmk, had_binding, event)
-            }
+        // if combo_proc for this event is already disabled, we can return early .. (else we'll go through combo processing)
+        if ev_proc_ds.combo_proc_d != ComboProc_Enable {
+            return ev_proc_ds.ev_prop_d
         }
 
-        ev_proc_ds.ev_prop_d
+        let cm = CombosMap::instance();
+        if let EventDat::key_event {key, ..} = event.dat {
+            // we'll let injected events pass through (both kdn/kup) .. note that modifier keys already dealt w injected events above
+            if event.injected { return EvProp_Continue }
+            // if its not in the combo-proc handled-keys whitelist, we should just let it pass through
+            // (whitelist coz unknown apps (incl switche) send unknown keys for valid reasons, and they should passthrough)
+            if !cm.check_if_handled_key (&key) { return EvProp_Continue }
+        } else {
+            // for non-key events (mouse btn/wheel/move), we want to allow combo proc only for those that have binding entries registered ..
+            // .. and therefore have combo-proc directives specified in the binding .. this is 'friendlier' as w/o explicitly
+            // .. configuring the bindings, btns etc wont auto get combo-searched in a potentially unpopulated table)
+            // note that we're not rejecting injected events here, as looks like x1/x2 mbtns come as injected, (at least in MX mouse)
+            if !had_binding { return EvProp_Continue }
+        }
+
+        // if we got this far, we can queue this up for combos processing ..
+        // .. we queue all combo actions (instead of spawning out) so they dont get out of sequence
+        // note that we're using the same input-af-queue ..
+        // .. and its non-ideal as some other event might have snuck in between event and its combo proc
+        // .. but a separate queue woudlnt fix it either .. and eitherway shoudlnt be a problem if queue clearance is fast enough
+        let _ = self.input_af_queue .send (Box::new (move || cm.combo_maps_handle_input (cmk, &event)));
+
+        // combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup etc)
+        // (not least because the actual combo proc is queued for later .. so either we bail early, or we combo-proc and stop cur event)
+        EvProp_Stop
+
     }
+
 
 }
 
@@ -319,7 +324,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
         //println! ("{:?}", event);
 
-        if iproc.proc_input_event (event) == EvProp_Stop {
+        if iproc.proc_input_event (event) == EvProp_D::EvProp_Stop {
             return LRESULT(1);
             // ^^ returning with non-zero code signals OS to block further processing on the input event
         }
@@ -371,7 +376,8 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     let extra_info = mh_struct.dwExtraInfo;
 
     //println!("{:#?}", mh_struct);
-    use {EventDat::*, MouseBtnEv_T::*};
+
+    use { MouseButton::*, MouseWheel::*, EventDat::*, MouseBtnEv_T::* };
     if let Some (dat) = match w_param.0 as u32 {
         WM_LBUTTONDOWN => Some ( btn_event { btn: LeftButton,   ev_t: BtnDown } ),
         WM_RBUTTONDOWN => Some ( btn_event { btn: RightButton,  ev_t: BtnDown } ),
@@ -404,7 +410,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let event = Event { stroke_id, stamp, injected, extra_info, dat };
         //print_mouse_ev(event);
 
-        if iproc.proc_input_event (event) == EvProp_Stop {
+        if iproc.proc_input_event (event) == EvProp_D::EvProp_Stop {
             return LRESULT(1);
             // ^^ returning with non-zero code signals OS to block further processing on the input event
         }
