@@ -24,7 +24,7 @@ The API further enables one to ..
 - Directly define arbitrary code fragments to trigger upon combo activation.
 - Conditional combos that only trigger on satisfying arbitrary conditions
 - Various 'mode-states' that can further specify the modes during which certain combos are to be enabled
-- Define two-stroke combos where the specified combo must immediately follow a specified first stroke combo to trigger
+- Define two-stroke combos where the specified combo must follow a specified first stroke combo to trigger
 - Define separate combo actions for single-tap and double-tap combinations on modifier-keys and mode-state-keys 
 - Specify wildcards for various modifier keys (e.g. left/right ctrl, alt, shift, win) and the mode-states that can be optional for the combo
 - Support for defining combos and actions for mouse button and wheel events, and for double-taps on keys/buttons etc

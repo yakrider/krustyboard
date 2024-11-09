@@ -117,7 +117,6 @@ pub enum EventDat {
 
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct Event {
-    pub stroke_id : usize,
     pub stamp : u32,
     pub injected : bool,
     pub extra_info : usize,

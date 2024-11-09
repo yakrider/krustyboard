@@ -375,6 +375,7 @@ impl CapsModKey {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
+        ks.clear_first_stroke();
         ks.mouse.proc_notice__modkey_up(self.modkey, ks);
         if ks.in_ctrl_tab_scroll_state.is_set() {
             if !ks.mod_keys.some_ctrl_down() { ks.in_ctrl_tab_scroll_state.clear() }
@@ -498,7 +499,7 @@ impl KeyHandling for ModKey_Managed {
             // caps isnt down (and its repeat filtered), so record it and let it through (or send replacment as detailed above)
             bmk.active.set();
             let key = bmk.modkey.key();
-            thread::spawn (move || key.press());
+            key.press();
         } // else if caps was down, we just block it
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
@@ -520,15 +521,13 @@ impl KeyHandling for ModKey_Managed {
             if bmk.is_keyup_unified() && bmk.paired_down() {
                 // for shift (w/ keyup state unified), ONLY send up a keyup if the other key isnt down .. so do nothing, not even clear active
             } else {
-                let umk = bmk.clone();
-                thread::spawn ( move || {
-                    umk.release_w_masking();  // this checks/updates flags too
-                    if umk.is_keyup_unified() { // and for up-unified, try and clear the other too
-                        umk.paired() .iter() .for_each (|p| {
-                            if !p.down.is_set() && p.active.is_set() { p.release_w_masking(); }
-                    } ) }
-                } );
-        }  }
+                bmk.release_w_masking();  // this checks/updates flags too
+                if bmk.is_keyup_unified() { // and for up-unified, try and clear the other too
+                    bmk.paired() .iter() .for_each (|p| {
+                        if !p.down.is_set() && p.active.is_set() { p.release_w_masking(); }
+                } ) }
+            }
+        }
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
@@ -538,13 +537,10 @@ impl KeyHandling for ModKey_Managed {
         // note also that each of paired mod-keys will get their own notification too
         if bmk.down.is_set() && bmk.active.is_set() {
             bmk.consumed.set();
-            let umk = bmk.clone();
-            thread::spawn ( move || {
-                // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
-                if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" {
-                    umk.release_w_masking()   // this will update flags too
-                }
-            } );
+            // we want to release mod-key upon caps .. (unless it would interfere w/ switch alt-tab)
+            if WinEventsListener::instance().fgnd_info.read().unwrap().exe != "Switche.exe" {
+                bmk.release_w_masking()   // this will update flags too
+            }
         }
     }
 

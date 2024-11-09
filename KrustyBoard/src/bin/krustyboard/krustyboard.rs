@@ -1375,34 +1375,34 @@ fn setup_latch_combos (_k:&Krusty) {
 
 
 
+
 fn setup_two_stroke_combos (_k:&Krusty) {
 
     // we'll leave a set up for a demo/test here
     fn _setup_two_stroke_combo_tests (k:&Krusty) {
-        let fsc1 = cg().k(D).m(caps_dbl);   // first stroke combo .. (doesnt have to be on caps-dbl or mode-state key ofc)
-        let fsc2 = cg().k(F).m(caps_dbl);   // alternate first-stroke combo
+        let fsc1 = k.cm.register_first_stroke_combo (cg().k(O).m(caps).s(msF_dbl));
+        let fsc2 = k.cm.register_first_stroke_combo (cg().k(P).m(caps).s(msF_dbl));
 
-        k.cm .add_combo ( cg().k(F9)                 .fsc (&fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps)         .fsc (&fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps_dbl)     .fsc (&fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(alt)          .fsc (&fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps).m(alt)  .fsc (&fsc1),   ag().k(F19) );
+        k.cm .add_combo ( cg().k(F9)                 .fsc (fsc1),   ag().k(F19) );
+        k.cm .add_combo ( cg().k(F9).m(caps)         .fsc (fsc1),   ag().k(F19) );
+        k.cm .add_combo ( cg().k(F9).m(caps_dbl)     .fsc (fsc1),   ag().k(F19) );
+        k.cm .add_combo ( cg().k(F9).m(alt)          .fsc (fsc1),   ag().k(F19) );
+        k.cm .add_combo ( cg().k(F9).m(caps).m(alt)  .fsc (fsc1),   ag().k(F19) );
 
-        k.cm .add_combo ( cg().k(Right) .fsc (&fsc1) .c (c_true() ),   ag().k(F20) );
-        k.cm .add_combo ( cg().k(Left ) .fsc (&fsc1) .c (c_false()),   ag().k(F20) );
+        k.cm .add_combo ( cg().k(Right).m(caps).s(msF) .fsc (fsc1),   ag().k(F20) );
+        k.cm .add_combo ( cg().k(Left ).m(caps).s(msF) .fsc (fsc1),   ag().k(F20) );
 
-        k.cm .add_combo ( cg().k(Right) .fsc (&fsc2) .c (c_true() ),   ag().k(F21) );
-        k.cm .add_combo ( cg().k(Left ) .fsc (&fsc2) .c (c_false()),   ag().k(F21) );
+        k.cm .add_combo ( cg().k(Right).m(caps) .fsc (fsc2),   ag().k(F21) );
+        k.cm .add_combo ( cg().k(Left ).m(caps) .fsc (fsc2),   ag().k(F21) );
 
-        k.cm .add_combo ( cg().k(Right),   ag().k(F22) );
-        k.cm .add_combo ( cg().k(Left ),   ag().k(F22) );
+        k.cm .add_combo ( cg().k(Right).m(caps).s(msF),   ag().k(F22) );
+        k.cm .add_combo ( cg().k(Left ).m(caps).s(msF),   ag().k(F22) );
 
-        k.cm .add_combo ( cg().k(F).m(caps_dbl) .fsc(&fsc1),   ag().k(F23) );
+        k.cm .add_combo ( cg().k(F).m(caps_dbl) .fsc(fsc1),   ag().k(F23) );
     }
     //_setup_two_stroke_combo_tests (&_k);
 
 }
-
 
 
 
@@ -1485,14 +1485,10 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     let goto_ref_usage  =  ag().k(ExtDown).m(alt).m(ctrl);
     let goto_impl_decl  =  ag().k(ExtUp  ).m(alt).m(ctrl);
 
-    let bookmark_next  =  ag().k(ExtDown).m(alt).m(ctrl).m(shift);
-    let bookmark_prev  =  ag().k(ExtUp  ).m(alt).m(ctrl).m(shift);
-
-    let expand_selection  =  ag().k(ExtUp  ).m(alt).m(shift);
-    let shrink_selection  =  ag().k(ExtDown).m(alt).m(shift);
-
-    let caret_bookmark_toggle   =  ag().k(F11).m(ctrl).m(shift);
     let popup_bookmarks_viewer  =  ag().k(F11).m(shift);
+    let caret_bookmark_toggle   =  ag().k(F11).m(ctrl).m(shift);
+    let bookmark_next           =  ag().k(ExtDown).m(alt).m(ctrl).m(shift);
+    let bookmark_prev           =  ag().k(ExtUp  ).m(alt).m(ctrl).m(shift);
 
     let collapse_nav_tree  =  ag().k(Slash    ).m(ctrl).m(alt).m(shift);
     let expand_nav_tree    =  ag().k(Backslash).m(ctrl).m(alt).m(shift);
@@ -1505,6 +1501,13 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     let caret_to_matching_brace  =  ag().k(P).m(ctrl).m(shift);
     // unfortunately, there's no support in IDE for selecting while moving to matching brace .. :(
 
+    let expand_selection  =  ag().k(ExtUp  ).m(alt).m(shift);
+    let shrink_selection  =  ag().k(ExtDown).m(alt).m(shift);
+
+    let toggle_column_mode   =  ag().k(C).m(alt).m(shift);
+    let extend_caret_above   =  ag().af (ide_two_stroke_combo (F13, F19));
+    let extend_caret_below   =  ag().af (ide_two_stroke_combo (F13, F20));
+
     let duplicate_line  =  ag().k(L    ).m(alt).m(ctrl);
     let move_line_up    =  ag().k(I    ).m(alt).m(ctrl);
     let move_line_dn    =  ag().k(Comma).m(alt).m(ctrl);
@@ -1514,9 +1517,8 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     let show_file_git_diff   =  ag().k(D).m(ctrl).m(alt).m(shift);
     let toggle_diff_preview  =  ag().af (ide_two_stroke_combo (F13, F18));
 
-    let toggle_column_mode   =  ag().k(C).m(alt).m(shift);
-    let extend_caret_above   =  ag().af (ide_two_stroke_combo (F13, F19));
-    let extend_caret_below   =  ag().af (ide_two_stroke_combo (F13, F20));
+    let tab_nav_left  = ag().k(Left ).m(alt).m(ctrl);
+    let tab_nav_right = ag().k(Right).m(alt).m(ctrl);
 
 
     k.cm .add_combo ( cg().k(G).m(caps).s(msE),   show_file_git_diff );
@@ -1528,15 +1530,11 @@ fn setup_IDE_specific_combos (k:&Krusty) {
 
     // .. note that there's natural caps-alt-<l2> that does nav among last caret locations (via alt-left/right)
 
+    k.cm .add_combo ( cg().k(K).m(caps).s(qks2),  popup_bookmarks_viewer );
+    k.cm .add_combo ( cg().k(U).m(caps).s(qks2),  caret_bookmark_toggle  );
+
     k.cm .add_combo ( cg().k(I    ).m(caps).s(qks2),  bookmark_prev );
     k.cm .add_combo ( cg().k(Comma).m(caps).s(qks2),  bookmark_next );
-
-    k.cm .add_combo ( cg().k(Equal).m(caps).s(msE),  expand_selection );
-    k.cm .add_combo ( cg().k(Minus).m(caps).s(msE),  shrink_selection );
-
-    k.cm .add_combo ( cg().k(U).m(caps).s(qks2),  caret_bookmark_toggle  );
-    k.cm .add_combo ( cg().k(K).m(caps).s(qks2),  popup_bookmarks_viewer );
-
 
     k.cm .add_combo ( cg().k(Backslash).m(caps).s(msF),  expand_nav_tree.clone() );
     k.cm .add_combo ( cg().k(Numrow_8 ).m(caps).s(msF),  expand_nav_tree );
@@ -1550,7 +1548,9 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(LBracket).m(caps).s(msE),  sel_to_block_start );
     k.cm .add_combo ( cg().k(RBracket).m(caps).s(msE),  sel_to_block_end   );
 
-    k.cm .add_combo ( cg().k(L).m(caps).s(qks3),  duplicate_line.clone() );
+    k.cm .add_combo ( cg().k(Equal).m(caps).s(msE),  expand_selection );
+    k.cm .add_combo ( cg().k(Minus).m(caps).s(msE),  shrink_selection );
+
     k.cm .add_combo ( cg().k(N).m(caps).s(qks3),  duplicate_line.clone() );
     k.cm .add_combo ( cg().k(N).m(caps).s(msE ),  duplicate_line.clone() );
 
@@ -1569,6 +1569,12 @@ fn setup_IDE_specific_combos (k:&Krusty) {
 
     k.cm .add_combo ( cg().k(Numrow_8).m(caps).s(msE),  ag().k(Insert) );         // insert-mode toggle
     k.cm .add_combo ( cg().k(Slash   ).m(caps).s(msE),  ag().k(Slash).m(ctrl) );  // block-comment
+
+
+    // we'll setup some easy caps-sticky two-stroke combos for IDE tabs nav
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(T).m(caps).s(msE) );
+    k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  tab_nav_left );
+    k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  tab_nav_right );
 
 
 

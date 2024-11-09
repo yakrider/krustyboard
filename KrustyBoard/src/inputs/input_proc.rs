@@ -1,7 +1,7 @@
 #![ allow (non_camel_case_types) ]
 
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicUsize, AtomicU64};
+use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
 use std::thread;
@@ -65,15 +65,13 @@ pub struct _InputProcessor {
     /// handle to the input-processing thread (so we can send msg to stop it when desired)
     iproc_thread : AtomicU32,
 
-    /// cached last-kbd-event (digest) .. used for setting is_repeat flag for kbd events
-    last_kbd_event : AtomicU64,
-    /// monotonic counter of input events that can be valid first-strokes (i.e. presses of mouse-btn or non-moidifer kbd-key)
-    stroke_ev_counter : AtomicUsize,
-
     /// the input bindings hold mapping for kbdkeys/mouse events to bound actions
     pub input_bindings : Bindings,
     /// for queued callback types, send all input events (kbd/mouse) to same processing queue (w event args pre-packaged in it)
     pub input_af_queue : SyncSender <EvCbFn_QueuedProc_T>,
+
+    /// cached last-kbd-event (digest) .. used for setting is_repeat flag for kbd events
+    last_kbd_event : AtomicU64,
 }
 
 # [ derive (Clone, Deref) ]
@@ -97,22 +95,17 @@ impl InputProcessor {
                 while let Ok(af) = input_queue_receiver.recv() { af() }
             });
             InputProcessor ( Arc::new ( _InputProcessor {
-                kbd_hook          : AtomicIsize::default(),
-                mouse_hook        : AtomicIsize::default(),
-                iproc_thread      : AtomicU32::default(),
-                last_kbd_event    : AtomicU64::default(),
-                stroke_ev_counter : AtomicUsize::default(),
-                input_bindings    : Bindings::new(),
-                input_af_queue    : input_queue_sender,
+                kbd_hook       : AtomicIsize::default(),
+                mouse_hook     : AtomicIsize::default(),
+                iproc_thread   : AtomicU32::default(),
+                input_bindings : Bindings::new(),
+                input_af_queue : input_queue_sender,
+                last_kbd_event : AtomicU64::default(),
             } ) )
         } ) .clone()
     }
 
 
-    /// increments stroke events counter and returns it (to use as stroke-id)
-    fn incremented_stroke_counter (&self) -> usize {
-        self.stroke_ev_counter .fetch_add (1, Ordering::Relaxed) + 1
-    }
     /// caches kbd-ev in compact form, and returns whether the new and old values match
     pub fn cache_kbd_event (&self, vk_code:u32, ev_t: KbdEvent_T ) -> bool {
         let digest = ((ev_t as u64) << 32) | (vk_code as u64);
@@ -321,15 +314,9 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let is_repeat = iproc.cache_kbd_event (kb_struct.vkCode, ev_t);
         // ^^ note that currently we're allowing injected events to affect key-repeat flag
 
-        let stroke_id = if key != KbdKey::CapsLock && !key.is_modifier_key()
-            && (ev_t == KbdEvent_KeyDown || ev_t == KbdEvent_SysKeyDown)
-        {
-            iproc.incremented_stroke_counter()
-        } else { 0 };
-
         let dat = EventDat::key_event { key, ev_t, is_repeat, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
 
-        let event = Event { stroke_id, stamp, injected, extra_info, dat };
+        let event = Event { stamp, injected, extra_info, dat };
 
         //println! ("{:?}", event);
 
@@ -412,11 +399,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,
     } {
-        let stroke_id = if let btn_event {ev_t:BtnDown, ..} = dat {
-            iproc.incremented_stroke_counter()
-        } else { 0 };
-
-        let event = Event { stroke_id, stamp, injected, extra_info, dat };
+        let event = Event { stamp, injected, extra_info, dat };
         //print_mouse_ev(event);
 
         if iproc.proc_input_event (event) == EvProp_D::EvProp_Stop {

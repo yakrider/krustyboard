@@ -3,7 +3,7 @@
 use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
@@ -206,9 +206,8 @@ pub struct _KrustyState {
     /// win_snap_dat snapshot holds data to support moving/dragging/resizing windows and window-groups
     pub win_snap_dat : RwLock <WinSnapDat>,
 
-    /// the latest valid stroke and its stroke-id .. needed to support second-stroke combos <br>
-    /// note that we store the stroke-id in addition to the stroke coz there might be non-bound keys that dont update this
-    pub last_stroke : RwLock <(usize, Option<Combo>)>,
+    /// the active first-stroke for caps-sticky-two-stroke-combos .. will clear when caps is released
+    pub first_stroke : AtomicU64,
 
 }
 
@@ -259,9 +258,30 @@ impl KrustyState {
 
                 win_snap_dat : RwLock::new (WinSnapDat::default()),
 
-                last_stroke : RwLock::new ((0, None)),
+                first_stroke : AtomicU64::default(),
             } ) )
         ) .clone()
+    }
+
+    pub fn record_first_stroke (&self, fsc:ComboHash) {
+        self.first_stroke.store (fsc.0, Ordering::Relaxed)
+    }
+    pub fn check_first_stroke (&self, fsc:ComboHash) -> bool {
+        fsc.0 == self.first_stroke.load (Ordering::Relaxed)
+    }
+    pub fn clear_first_stroke (&self) {
+        self.first_stroke.store (0, Ordering::Relaxed)
+    }
+
+
+    pub fn capture_fgnd_win_snap_dat (&self) {
+        //thread::spawn ( move || {     // .. nuh uh
+        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
+        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
+    }
+    pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
     /// Goes through all keys and mouse-btns doing press/rel, and clears out all internal states
@@ -270,6 +290,7 @@ impl KrustyState {
 
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
+        self.clear_first_stroke();
 
         use MouseButton::*;
         RightButton.press(); LeftButton.press(); RightButton.release(); LeftButton.release();
@@ -290,16 +311,6 @@ impl KrustyState {
             InputProcessor::instance().re_set_hooks();
         } );
 
-    }
-
-    pub fn capture_fgnd_win_snap_dat (&self) {
-        //thread::spawn ( move || {     // .. nuh uh
-        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
-        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
-    }
-    pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
 }

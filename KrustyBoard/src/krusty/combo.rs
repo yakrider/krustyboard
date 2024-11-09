@@ -21,8 +21,6 @@ pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
 
 
 
-
-
 # [ derive (Eq, PartialEq, Hash, Copy, Clone) ]
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 pub struct Combo {
@@ -36,28 +34,48 @@ pub const FULL_WILDCARDS_MASK: u64 = 0xFFFFFFFFFFFFFFFF;
 
 
 
-
-/// represents arc wrapped condition fn to trigger combo .. should return true if combo trigger condition is satisfied
+/// ComboCond is an arc wrapped fn that should return true if the combo's trigger pre-condition is satisfied
 pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync + 'static >;
+
+
+
+#[derive (Debug, Default, Copy, Clone)]
+/// ComboHash is a simple new-type containing the hash value of the combo
+pub struct ComboHash (pub u64);
+
+impl ComboHash {
+    pub fn is_zero (&self) -> bool { self.0 == 0 }
+}
+
 
 
 # [ derive () ]
 /// ComboValue is the 'value' part of the combos_map entry that holds the AF, the combo creation time, and the optional trigger condition
 pub struct ComboValue {
-    _private  : (),
+    _private : (),
+
+    /// The timestamp Instant of creation .. useful for sorting
     pub stamp : Instant,
-    pub af    : AF,
-    pub cond  : Option <ComboCond>,
-    pub first_stroke_cond : Option <ComboCond>,
-    pub repeat_suppressed : bool,
+
+    /// The action function to be executed when this combo triggers
+    pub af : AF,
+
+    /// Optional condition that must be valid for this combo to trigger
+    pub cond : Option <ComboCond>,
+
+    /// Optional ComboHash of any first-stroke that must be active for this combo to trigger <br>
+    /// (A default zeroed ComboHash indicates no first-stroke requirement)
+    pub fsc : ComboHash,
+
+    /// The no_rpt flag when enabled, suppresses activation of this combo for triggering key-repeats
+    pub no_rpt : bool,
 }
 
 impl ComboValue {
-    pub fn new (af:AF, cond:Option<ComboCond>, first_stroke_cond:Option<ComboCond>, repeat_suppressed:bool) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), af, cond, first_stroke_cond, repeat_suppressed }
+    pub fn new (af:AF, cond:Option<ComboCond>, fsc:ComboHash, no_rpt:bool) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, fsc, no_rpt }
     }
 }
-
 
 
 
@@ -168,6 +186,10 @@ impl Combo {
         // and for double-taps on mode-states too
         for (ms,dms) in ModeStates::static_ordered_modes().iter() .zip (ModeStates::static_ordered_modes_dbl().iter()) {
             if cg.dat.modes.contains(dms) && !cg.dat.modes.contains(ms) { cg.dat.modes.push(*ms) }
+        }
+        // and finally, add caps to all combos with a fsc requirement (i.e. two-stroke-combos)
+        if !cg.dat.first_stroke.is_zero() {
+            if !cg.dat.mks.contains (&ModKey::caps) { cg.dat.mks.push(ModKey::caps) }
         }
         cg
     }
@@ -290,20 +312,15 @@ impl Combo {
     }
 
 
-    fn gen_first_stroke_cond (cg:&CG) -> ComboCond {
-        // since first-stroke-combos could be specified l/r agnostic, we might have multiple possible fscs to check against
-        // .. so we'll generate and package these with the closure so this doesnt have to be done at runtime
-        let check_combos = Self::gen_combos (Self::finalize_combo_gen(cg.clone())) .into_iter() .map (Combo::gen_no_latch_combo) .collect::<Vec<Combo>>();
-        Arc::new ( move |ks,ev| {
-            //println! ("\nks.lfs : {:?}", *ks.last_stroke.read().unwrap());
-            //println! ("ref-lfs: {:?}", &check_combos.first());
-            //println! ("ev : {:?}",ev);
-            let (lfs_id, lfs) = *ks.last_stroke.read().unwrap();
-            ev.stroke_id == lfs_id + 1
-                && lfs.is_some()
-                && check_combos .iter().any (|c| *c == lfs.unwrap())
-        } )
-
+    pub(crate) fn gen_fsc_hash (cg:CG) -> ComboHash {
+        // gen combos will generate a bunch of l/r expanded combos, but for matching up a caps-sticky first-stroke, we just need one shared truth
+        let hash = Self::gen_combos (Self::finalize_combo_gen(cg)) .first() .map (|c| {
+            use std::hash::*;
+            let mut hasher = DefaultHasher::new();
+            c.hash (&mut hasher);
+            hasher.finish()
+        } ) .unwrap_or_default();
+        ComboHash (hash)
     }
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
@@ -311,14 +328,18 @@ impl Combo {
         let cg = Self::finalize_combo_gen(cg);
         let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
-        let fsc  = cg.dat.first_stroke .as_ref() .map (Combo::gen_first_stroke_cond);
-        let repeat_suppressed = cg.dat.repeat_suppressed;
+        let fsc = cg.dat.first_stroke;
+        let no_rpt = cg.dat.repeat_suppressed;
+
         Self::gen_combos(cg) .into_iter() .map ( |c|
-            (c, ComboValue::new (af.clone(), cond.clone(), fsc.clone(), repeat_suppressed))
+            (c, ComboValue::new (af.clone(), cond.clone(), fsc, no_rpt))
         ) .collect()
     }
 
 }
+
+
+
 
 impl std::fmt::Debug for Combo {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -12,6 +12,8 @@ use crate::{
     EvProp_D::*, ComboProc_D::*, EvCbFn_T::*
 };
 
+pub const DEFAULT_MOUSE_WHEEL_DELTA: i32 = 120;
+
 
 # [ derive (Debug) ]
 pub struct _MouseBtnState {
@@ -72,7 +74,7 @@ impl MouseWheelState {
         MouseWheelState ( Arc::new ( _MouseWheelState {
             wheel,
             last_stamp       : TimeStamp::new(),
-            last_delta       : Default::default(),
+            last_delta       : AtomicI32::from(DEFAULT_MOUSE_WHEEL_DELTA),
             spin_invalidated : Flag::default(),
         } ) )
     }

@@ -63,8 +63,8 @@ pub struct _ComboGen {
     # [ derivative (Debug="ignore") ]
     pub cond : Option<ComboCond>,
 
-    /// Optional first-stroke combo that must immediately precede this for this to trigger
-    pub first_stroke : Option<CG>,
+    /// Optional hash of caps-sticky first-stroke combo that must be active for this combo to trigger
+    pub first_stroke : ComboHash,
 
     /// The modifier-key consume flag marks that the release of mod-keys in this combo should be masked
     pub mod_key_no_consume  : bool,
@@ -83,7 +83,7 @@ impl _ComboGen {
     fn new () -> _ComboGen {
         _ComboGen {
             mks:Vec::new(), modes:Vec::new(),
-            wc_mks:None, wc_modes:None, cond:None, first_stroke:None,
+            wc_mks:None, wc_modes:None, cond:None, first_stroke:ComboHash::default(),
             mod_key_no_consume:false, mode_kdn_no_consume:false, repeat_suppressed:false,
         }
     }
@@ -193,15 +193,14 @@ impl <S> ComboGen<S>
         self
     }
 
-    /// Require a First-Stroke-Combo (fsc) that must immediately precede (excl modifier keys) this combo for this to trigger <br>
-    /// Note: if the fsc matches, other registered actions for this combo without fsc-match will be ignored
-    /// Note: second-stroke combos with mode-states aren't advisable as a mode-state-key press would itself be the next stroke!
-    pub fn fsc <ICG> (mut self, cg:&ICG) -> Self
-        where ICG : Into<CG> + Clone
-    {
-        self.dat.first_stroke = Some(cg.clone().into());
+    /// Require a caps-sticky first-stroke-combo (fsc) that must be active for this combo to trigger. <br>
+    /// The fsc remains active after the first-stroke is pressed until caps is released next. <br>
+    /// Note: if the fsc matches, other registered actions for this combo without fsc-match will be ignored.
+    pub fn fsc (mut self, fsc:ComboHash) -> Self {
+        self.dat.first_stroke = fsc;
         self
     }
+
 
     /// Disable consuming mod-key key-downs for this combo. <br>
     /// (The default is to consume (i.e. do masking when releasing modkey) any modkey kdn on registered combos)
