@@ -142,12 +142,6 @@ fn gen_af_switche_snap_switch (dir_down:bool, flag:Flag) -> AF {
 
 
 
-// and this one is for window-move operations for snap-to-edge
-fn gen_af_edge_snap (ks:&KrustyState, side_t:RectEdgeSide) -> AF {
-    let ks = ks.clone();
-    Arc::new ( move || snap_closest_edge_side (&ks, side_t))
-}
-
 
 fn setup_default_keys  (k:&Krusty) {
 
@@ -585,6 +579,15 @@ fn setup_middle_and_xbtn_combos (k:&Krusty) {
 
 
 
+// helper fn to set both frwd/bkwd CG mappings with a parameterized CG gen fn
+fn setup_frwd_bkwd_whl <CGF, ICG, P, AGPF, IAG> (k:&Krusty, cgFn:CGF, bkwd_p:P, frwd_p:P, agFn:AGPF) where
+    ICG : Into<CG>,  IAG : Into<AG>,
+    CGF  : Fn(ComboGen<ComboGenSt_Wheel>) -> ICG,
+    AGPF : Fn(ActionGen, P) -> IAG,
+{
+    k.cm .add_combo ( cgFn (cg().whl().bkwd()),  agFn (ag(), bkwd_p) );
+    k.cm .add_combo ( cgFn (cg().whl().frwd()),  agFn (ag(), frwd_p) );
+}
 
 fn setup_vert_wheel (k:&Krusty) {
 
@@ -605,22 +608,36 @@ fn setup_vert_wheel (k:&Krusty) {
     /* General mouse wheel setup guidelines
         - wheel         -->  wheel       .. (via fallback)
         - caps/ctrl-wh  -->  ctrl wheel  .. (plus switche and ctrl-tab overloads)
+        - caps-x2-wh    -->  horiz-wheel
+
         - alt-wh        -->  brightness  .. (plus switche and alt-tab overloads)
         - alt-1-wh      -->  fine-mode brightness
         - win-wh        -->  volume
         - caps-win-3-wh -->  media skip fwd/bkwd
 
-        - caps-win-wh   -->  nav desktops
-        - caps-alt-d-wh -->  nav desktops
         - caps-d-wh     -->  nav windows (via switche snapshots)
-        - caps-e-wh     -->  nav tabs    .. (plus IDE tab nav overloads)
         - caps-r-wh     -->  fast scrolls
 
         - caps-3-wh     -->  IDE last-loc nav
         - caps-3-e-wh   -->  IDE last-edit-loc nav
 
-        - caps-win-d/e-wh   -->  window-move left/right, up/down
-        - caps-win-dd/ee-wh -->  window-edge-snap left/right, up/down
+        - caps-win-w  based two-stroke-combos  .. (in separate tscs block)
+            - caps-wh       -->  move window left/right
+            - caps-d-wh     -->  move window left/right
+            - caps-e-wh     -->  move window up/down
+            - caps-f-wh     -->  snap window left/right
+            - caps-f-d-wh   -->  snap window left/right
+            - caps-f-e-wh   -->  snap window up/down
+            - caps-r-wh     -->  resize window width
+            - caps-r-d-wh   -->  resize window width
+            - caps-r-e-wh   -->  resize window height
+
+        - caps-win-d based two-stroke-combos  .. (in separate tscs block)
+            - caps-wh  -->  nav desktops
+
+        - caps-e-t based two-stroke-combos .. (in separate tscs block)
+            - caps-wh  -->  nav tabs (in ide, npp, chrome)
+
 
         (now a whole pile to gen up/dn, left/right arrows w layered mods)
         (note that qks1 combos are special here as for ergo reasons, they can be pressed w/o Q)
@@ -642,15 +659,6 @@ fn setup_vert_wheel (k:&Krusty) {
         - caps-11-e-wh   -->  ctrl-shift l/r
         - caps-11-A-e-wh -->  ctrl-alt-shift l/r
      */
-    // helper fn to set both frwd/bkwd CG mappings with a parameterized CG gen fn
-    fn setup_frwd_bkwd <CGF, ICG, P, AGPF, IAG> (k:&Krusty, cgFn:CGF, bkwd_p:P, frwd_p:P, agFn:AGPF) where
-        ICG : Into<CG>,  IAG : Into<AG>,
-        CGF  : Fn(ComboGen<ComboGenSt_Wheel>) -> ICG,
-        AGPF : Fn(ActionGen, P) -> IAG,
-    {
-        k.cm .add_combo ( cgFn (cg().whl().bkwd()),  agFn (ag(), bkwd_p) );
-        k.cm .add_combo ( cgFn (cg().whl().frwd()),  agFn (ag(), frwd_p) );
-    }
 
     fn gen_af_base_wheel (dir_is_down:bool, ks:KrustyState) -> AF {
         // we want to mark when we enter switche right-btn-scroll .. but otherwise, we just send regular wheel scrolls
@@ -662,7 +670,7 @@ fn setup_vert_wheel (k:&Krusty) {
             // .. because in cases when our hooks are ahead of switche hooks, it wouldn't otherwise get there
         } )
     }
-    setup_frwd_bkwd ( k,  |wg| wg,   true, false,   |ag,p| ag.af (gen_af_base_wheel (p, k.ks.clone()) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg,   true, false,   |ag,p| ag.af (gen_af_base_wheel (p, k.ks.clone()) ) );
 
 
     fn gen_af_caps_wheel (dir_is_down:bool, ks:KrustyState) -> AF {
@@ -684,9 +692,13 @@ fn setup_vert_wheel (k:&Krusty) {
         } )
     }
     // we'll also do this for actual ctrl-wheel so the behavior is consistent ('ctrl' expands out to both lctrl and rctrl)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(ctrl),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(ctrl),  true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(ctrl),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(ctrl),  true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks.clone()) ) );
+
+    // caps-dbl wheel can simply translate to horiz-wheel
+    k.cm .add_combo ( cg().whl().bkwd().m(caps_dbl),   ag().hwhl().frwd() );
+    k.cm .add_combo ( cg().whl().frwd().m(caps_dbl),   ag().hwhl().bkwd() );
 
 
     fn gen_af_alt_wheel (dir_is_down:bool) -> AF {
@@ -700,10 +712,10 @@ fn setup_vert_wheel (k:&Krusty) {
             else { af_brightness() }
         } )
     }
-    setup_frwd_bkwd ( k,  |wg| wg.m(lalt),   true, false,   |ag,p| ag.af (gen_af_alt_wheel (p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt),   true, false,   |ag,p| ag.af (gen_af_alt_wheel (p)) );
 
     // and for alt-wheel w qks1 (i.e. alt+1+wheel), we do finer brightness adjustments
-    setup_frwd_bkwd ( k,  |wg| wg.m(lalt).s(qks1),    -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),    -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
 
     fn gen_af_caps_alt_wheel (dir_is_down:bool) -> AF {
@@ -718,95 +730,67 @@ fn setup_vert_wheel (k:&Krusty) {
             else { af_normal() }
         } )
     }
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(lalt),   true, false,   |ag,p| ag.af (gen_af_caps_alt_wheel (p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(lalt),   true, false,   |ag,p| ag.af (gen_af_caps_alt_wheel (p)) );
 
 
     /// setups for **_ Arrow-Up/Down nav _** (in addn to some portions above)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(shift) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt).m(shift) );
 
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1),                  ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(shift) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1),                  ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
 
 
     /// setups for **_ LEFT-RIGHT nav _** (reminscent of h-wheel, useful to nav sidebar trees etc)
     // we'll set Left/Right up on sensible _dbl taps on the mod-keys we use for Up/Down nav combos
     // (we're trying to avoid wildcards on wheel itself, and would rather do this)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks_dbl),                  ExtRight, ExtLeft,   |ag,key| ag.k(key) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks_dbl).s(msE),           ExtRight, ExtLeft,   |ag,key| ag.k(key).m(shift) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt).s(msE),   ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl),                  ExtRight, ExtLeft,   |ag,key| ag.k(key) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).s(msE),           ExtRight, ExtLeft,   |ag,key| ag.k(key).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt).s(msE),   ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
 
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1_dbl),                 ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt),         ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1_dbl).s(msE),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(shift) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt).s(msE),  ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl),                 ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt),         ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).s(msE),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt).s(msE),  ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
 
 
 
     /// for win-wheel, we'll do **_ VOLUME control _**
-    setup_frwd_bkwd ( k,  |wg| wg.m(lwin),    VolumeDown, VolumeUp,   |ag,key| ag.k(key).mkg_nw() );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin),    VolumeDown, VolumeUp,   |ag,key| ag.k(key).mkg_nw() );
 
     /// caps-win-3 wheel .. **_ media FWD-BKWD SKIP _** .. (cf win-3 for vol, win-f3 skip-fwd)
-    setup_frwd_bkwd ( k,  |wg| wg.m(lwin).m(caps).s(qks3),    true, false,   |ag,p| ag.af (media_skips_action (1, &k.ks, p)) );
-
-    /// and with win-caps-wheel, we'll **_ navigate across DESKTOPS _** (via win combo ctrl-win-left/right)
-    setup_frwd_bkwd ( k,  |wg| wg.m(lwin).m(caps),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(win).m(ctrl) );
-
-    /// and we'll do the same for caps-alt-D + wheel .. (similar to that with j/k further down)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(lalt).s(msD),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(win).m(ctrl) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).m(caps).s(qks3),    true, false,   |ag,p| ag.af (media_skips_action (1, &k.ks, p)) );
 
     /// caps-d-wheel, we'll **_ navigate across WINDOWS _** (via switche snapshots)
     let ssf = get_switche_snap_switch_flag();
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(msD),    true, false,   |ag,p| ag.af (gen_af_switche_snap_switch (p, ssf.clone())) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msD),    true, false,   |ag,p| ag.af (gen_af_switche_snap_switch (p, ssf.clone())) );
 
     // and once we're done w the switching, we clear the flag so we'll check and refresh the snap next time we start
     k.cm .add_combo (cg().k(D).rel()         .c(c_flag(ssf.clone())), ag().af (af_clear_flag(ssf.clone())) );
     k.cm .add_combo (cg().k(D).rel().m(caps) .c(c_flag(ssf.clone())), ag().af (af_clear_flag(ssf.clone())) );
 
 
-    /// caps-e wheel for **_ TAB_NAV _** .. .. e as that is row 'above', and tabs are usually up above .. oh well
-    fn gen_af_caps_e_wheel (dir_is_down:bool) -> AF {
-        // we'll setup generally for browser, explorer etc (ctrl-tab, ctrl-shift-tab)
-        // and setup special case for IDE (alt-ctrl-left/right)
-        let af_normal = if dir_is_down { ag().k(Tab).m(ctrl).gen_af() } else { ag().k(Tab).m(ctrl).m(shift).gen_af() };
-        let af_ide    = if dir_is_down { ag().k(ExtRight).m(alt).m(ctrl).gen_af() } else { ag().k(ExtLeft).m(alt).m(ctrl).gen_af() };
-        Arc::new ( move || {
-            if check_intellij_fgnd() { af_ide() }
-            else { af_normal() }
-        } )
-    }
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(msE),    true, false,   |ag,p| ag.af (gen_af_caps_e_wheel (p)) );
-
     /// caps-f (i.e word mode) wheel, we'll set as **_ nav through SEARCH (F3, Shift-F3) _**
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(msF),    no_mk, shift,   |ag,p| ag.k(F3).m(p) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msF),    no_mk, shift,   |ag,p| ag.k(F3).m(p) );
 
     /// we'll let caps-R-wheel do **_ FASTER SCROLL _**
     fn gen_af_fast_scroll (ks:KrustyState) -> AF { Arc::new ( move || {
         ks.mouse.vwheel.wheel.scroll (3 * ks.mouse.vwheel.last_delta.load (Ordering::Relaxed));
     } ) }
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(msR),    (), (),   |ag,_| ag.af (gen_af_fast_scroll (k.ks.clone())) );
-
-
-    /// with caps-win-e/d-combos, we'll add **_ WINDOW MOVE _** functionality, similar to what was done w kbd l2 keys
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(win).s(msD),    10, -10,   |ag,p| ag.af ( Arc::new (move || win_fgnd_move_rel (p, 0)) ) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(win).s(msE),    10, -10,   |ag,p| ag.af ( Arc::new (move || win_fgnd_move_rel (0, p)) ) );
-
-    /// for caps-win 'ee/dd' variants, we'll impl **_ WINDOW MOVE SNAP _** to the closest edge in the specified side
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(win).s(msD_dbl),  RectEdgeSide::Right, RectEdgeSide::Left,  |ag,p| ag.af (gen_af_edge_snap (&k.ks, p)) );
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).m(win).s(msE_dbl),  RectEdgeSide::Top, RectEdgeSide::Bottom,  |ag,p| ag.af (gen_af_edge_snap (&k.ks, p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msR),    (), (),   |ag,_| ag.af (gen_af_fast_scroll (k.ks.clone())) );
 
 
     /// caps-qks3-wheel .. we'll use for **_ IDE LAST LOCATION NAV _** .. (via Alt Left/Right)
     //  (in theory, we have easy combos for alt-l/r, but this make it tie in better w the edit locs below)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks3),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks3),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
 
     /// and with mode-state-E, we'll do **_ IDE LAST EDIT LOCATION NAV _** .. (via Alt-Shift-Left/Right)
-    setup_frwd_bkwd ( k,  |wg| wg.m(caps).s(qks3).s(msE),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks3).s(msE),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
 
 }
 
@@ -826,6 +810,7 @@ fn setup_ctrl_tab (k:&Krusty) {
     // caps-as-ctrl for caps-tab switching (and shift/ralt combos will work out naturally in fallbacks)
     // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
     // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
+    // note also that there's also separate tab-nav in two-stroke combos .. this is specifically for ctrl-tab nav
     let ks = k.ks.clone();
     let af_caps_tab: AF = Arc::new (move || {
         if ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_ctrl_down() {
@@ -1037,6 +1022,20 @@ fn setup_win_key_combos (k:&Krusty) {
     };
     //k.cm .add_combo ( cg().k(Numrow_1).m(lwin), ag().af(cb_focus_yak_tools_bar) );
 
+
+
+    /// we'll also add in some caps-win combos here that go together w these stand-alone win combos
+
+    // this is counterpart to starting chrome incognito .. w/ caps will set that to open non-incognito
+    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
+
+    // caps-win-c being used to launch winmerge diff from last two clipboard entries
+    k.cm .add_combo ( cg().k(C).no_rpt().m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
+
+    // gaah we'll just throw in iDEA diff for drag-drop diffing (just coz winmerge doesnt do dark mode)
+    //k.cm .add_combo  ( k.ks, cg().k(C).m(lwin),  k.ks.cg_af (Arc::new (|| start_idea_diff() )));
+    // ^^ cant do from here, turns out idea diff from cmd line can ONLY be opened with two files pointed, unlike empty from Idea shortcut!
+
 }
 
 
@@ -1234,66 +1233,6 @@ fn setup_l2 (k:&Krusty) {
     k.cm .add_combo ( cg().k(C).m(caps).s(msE),  ag().af (gen_wxcv_af(C)) );
     k.cm .add_combo ( cg().k(V).m(caps).s(msE),  ag().af (gen_wxcv_af(V)) );
 
-    // we'll use caps-alt-D with j/k or left/right arrows to switch between desktops
-    k.cm .add_combo ( cg().k(J)    .m(caps).m(lalt).s(msD),  ag().k(ExtLeft ).m(win).m(ctrl) );
-    k.cm .add_combo ( cg().k(K)    .m(caps).m(lalt).s(msD),  ag().k(ExtRight).m(win).m(ctrl) );
-    k.cm .add_combo ( cg().k(Left ).m(caps).m(lalt).s(msD),  ag().k(ExtLeft ).m(win).m(ctrl) );
-    k.cm .add_combo ( cg().k(Right).m(caps).m(lalt).s(msD),  ag().k(ExtRight).m(win).m(ctrl) );
-
-}
-
-
-
-
-fn setup_caps_win_combos (k:&Krusty) {
-
-    // caps-win-U should vert-max (via shift-win-up) if not already, or else restore window from vert-max
-    k.cm .add_combo ( cg().k(U).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_vertmax)) );
-    // caps-win-m should maximize (via win-m) if not, else restore from max
-    k.cm .add_combo ( cg().k(M).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_max)) );
-    // caps-win-t should toggle always on top for fgnd window
-    k.cm .add_combo ( cg().k(T).no_rpt().m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
-    // caps-win-n should minimize
-    //k.cm .add_combo ( cg().k(N).m(caps).m(lwin),  ag().af (Arc::new (|| win_fgnd_min())) );
-    // ^^ actually, we already do that with win-esc which is easier .. so we'll repurpose that for non-incognito chrome window
-    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
-
-    // we also have some additional more drastic ones with double-caps-win combos
-    k.cm .add_combo ( cg().k(T).no_rpt().m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_always_on_top)) );
-    k.cm .add_combo ( cg().k(B).no_rpt().m(caps_dbl).m(lwin),  ag().af (action (win_fgnd_toggle_titlebar)) );
-
-    fn setup_win_move_key (k:&Krusty, key:Key, wmfn:fn(i32, i32), dx:i32, dy:i32, m:i32, side_t:RectEdgeSide) {
-        // we'll setup caps-win combos for regular move/stretch etc
-        k.cm .add_combo ( cg().k(key).m(caps).m(lwin),           ag().af (Arc::new (move || wmfn (dx*m, dy*m) )) );
-        // .. and caps-win-ctrl or caps-win-qks1 combos for finer control
-        k.cm .add_combo ( cg().k(key).m(caps).m(lwin).m(lctrl),  ag().af (Arc::new (move || wmfn (dx, dy) )) );
-        k.cm .add_combo ( cg().k(key).m(caps).m(lwin).s(qks1),   ag().af (Arc::new (move || wmfn (dx, dy) )) );
-        // .. and w caps-win-d/f for closest snap for the respective edges
-        k.cm .add_combo ( cg().k(key).m(caps).m(lwin).s(msF),   ag().af (gen_af_edge_snap (&k.ks, side_t)) );
-        k.cm .add_combo ( cg().k(key).m(caps).m(lwin).s(msD),   ag().af (gen_af_edge_snap (&k.ks, side_t)) );
-
-    }
-    // caps-win-[j,k,i,comma] should  move window [left, right, top, bottom] respectively
-    setup_win_move_key (k, J,     win_fgnd_move_rel, -1,  0, 20, RectEdgeSide::Left  );
-    setup_win_move_key (k, K,     win_fgnd_move_rel,  1,  0, 20, RectEdgeSide::Right );
-    setup_win_move_key (k, I,     win_fgnd_move_rel,  0, -1, 20, RectEdgeSide::Top   );
-    setup_win_move_key (k, Comma, win_fgnd_move_rel,  0,  1, 20, RectEdgeSide::Bottom);
-
-    // caps-win-[h,semicolon,period,o] should stretch window [narrower, wider, shorter, taller] respectively
-    setup_win_move_key (k, H,         win_fgnd_stretch,  -1,   0, 20, RectEdgeSide::Left  );
-    setup_win_move_key (k, O,         win_fgnd_stretch,   0,  -1, 20, RectEdgeSide::Top   );
-    setup_win_move_key (k, Period,    win_fgnd_stretch,   0,   1, 20, RectEdgeSide::Bottom);
-    //setup_win_move_key (k, L,       win_fgnd_stretch,   1,   0, 20, RectEdgeSide::Right );     // win-L is reserved by windows for lock
-    setup_win_move_key (k, Semicolon, win_fgnd_stretch,   1,   0, 20, RectEdgeSide::Right );
-
-
-    // some additional caps-win combos
-    // caps-win-c being used to launch winmerge diff from last two clipboard entries
-    k.cm .add_combo ( cg().k(C).no_rpt().m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
-    // gaah we'll just throw in iDEA diff for drag-drop diffing (just coz winmerge doesnt do dark mode)
-    //k.cm .add_combo  ( k.ks, cg().k(C).m(lwin),  k.ks.cg_af (Arc::new (|| start_idea_diff() )));
-    // ^^ cant do from here, turns out idea diff from cmd line can ONLY be opened with two files pointed, unlike empty from Idea shortcut!
-
 }
 
 
@@ -1330,6 +1269,98 @@ fn setup_misc_standalone_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(T).m(lalt).m(caps).c(browser_fgnd()),  ag().k(A).m(ctrl).m(shift) );
 
 }
+
+
+
+fn setup_window_action_tscs (k:&Krusty) {
+    use RectEdgeSide::*;
+	// caps-win-w as fsc for window-actions   .. and we added caps-alt-w too .. why not, its more ergo
+    //  - j/k/i/comma .. caps-only -> move .. w/ f -> snap .. w/ r -> resize ..
+    //  - whl fwd/bkwd .. caps-only OR w/ d -> left/right .. w/ e -> up/dn .. w f/fd/fe -> snap .. r/rd/re -> resize
+    //  - toggles: u -> vertmax .. m -> max .. n -> min .. t -> always-on-top .. b -> border/titlebar
+
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(W).m(caps).m(lwin) );      // caps-win-w  as fsc
+
+    k.cm .co_register_first_stroke_combo ( cg().k(W).m(caps).m(lalt), fsc );        // caps-alt-w  as fsc too!!g
+
+    fn ksi() -> KrustyState { KrustyState::instance() }
+
+    // - j/k/i/comma .. caps-only -> move .. w/ F -> snap .. w/ R -> resize ..
+    let setup_win_move_key = |key:Key, dx:i32, dy:i32, side_t:RectEdgeSide| {
+        k.cm .add_combo ( cg().k(key).fsc(fsc).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
+        k.cm .add_combo ( cg().k(key).fsc(fsc),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 40, dy * 40) )) );
+        k.cm .add_combo ( cg().k(key).fsc(fsc).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 20, dy * 20) )) );
+        // and fine steps
+        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
+        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 4, dy * 4) )) );
+        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 2, dy * 2) )) );
+    };
+    setup_win_move_key.clone() ( J,     -1,  0,  Left  );
+    setup_win_move_key.clone() ( K,      1,  0,  Right );
+    setup_win_move_key.clone() ( I,      0, -1,  Top   );
+    setup_win_move_key.clone() ( Comma,  0,  1,  Bottom);
+
+    // - wheel fwd/bkwd .. caps-only OR w/ D -> left/right .. w/ E -> up/dn .. w F/FD/FE -> snap .. r/rd/re -> resize
+
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF),         Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF).s(msD),  Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF).s(msE),  Bottom, Top,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (0, p * 20) )) );
+
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (0, p * 10) )) );
+
+
+    // toggles: u -> vertmax .. m -> max .. n -> min .. t -> always-on-top .. b -> border/titlebar
+    k.cm .add_combo ( cg().k(U).fsc(fsc),   ag().af (action (win_fgnd_toggle_vertmax)) );
+    k.cm .add_combo ( cg().k(M).fsc(fsc),   ag().af (action (win_fgnd_toggle_max)) );
+    k.cm .add_combo ( cg().k(N).fsc(fsc),   ag().af (action (win_fgnd_min_and_back)) );
+    k.cm .add_combo ( cg().k(T).fsc(fsc),   ag().af (action (win_fgnd_toggle_always_on_top)) );
+    k.cm .add_combo ( cg().k(B).fsc(fsc),   ag().af (action (win_fgnd_toggle_titlebar)) );
+
+    // regardless, since max/vertmax toggles are pretty frequent, we'll for now retain their direct combos too
+    k.cm .add_combo ( cg().k(U).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_vertmax)) );
+    k.cm .add_combo ( cg().k(M).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_max)) );
+
+
+}
+
+fn setup_switch_desktop_tscs (k:&Krusty) {
+    // caps-win-d as fsc for desktop moves .. w jk arrow keys, as well as wheel
+
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(D).m(caps).m(lwin) );
+
+    k.cm .add_combo ( cg().k(J    ).m(caps).fsc(fsc),   ag().k(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo ( cg().k(K    ).m(caps).fsc(fsc),   ag().k(ExtRight).m(win).m(ctrl) );
+    k.cm .add_combo ( cg().k(Left ).m(caps).fsc(fsc),   ag().k(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo ( cg().k(Right).m(caps).fsc(fsc),   ag().k(ExtRight).m(win).m(ctrl) );
+
+    // and for wheel
+    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().k(ExtLeft ).m(win).m(ctrl) );
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().k(ExtRight).m(win).m(ctrl) );
+
+}
+
+fn setup_tab_nav_tscs (k:&Krusty) {
+    // fsc : caps-e-t
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(T).m(caps).s(msE) );
+
+    // (note that these have been kept uniform between IDE, chrome, npp etc)
+    let tab_nav_right = ag().k(PageDown).m(ctrl);
+    let tab_nav_left  = ag().k(PageUp  ).m(ctrl);
+
+    k.cm .add_combo ( cg().k(K).m(caps) .fsc(fsc),  tab_nav_right.clone() );
+    k.cm .add_combo ( cg().k(J).m(caps) .fsc(fsc),  tab_nav_left.clone() );
+
+    k.cm .add_combo ( cg().whl().bkwd().m(caps) .fsc(fsc),  tab_nav_right );
+    k.cm .add_combo ( cg().whl().frwd().m(caps) .fsc(fsc),  tab_nav_left );
+
+}
+
 
 
 
@@ -1376,7 +1407,7 @@ fn setup_latch_combos (_k:&Krusty) {
 
 
 
-fn setup_two_stroke_combos (_k:&Krusty) {
+fn setup_test_two_stroke_combos (_k:&Krusty) {
 
     // we'll leave a set up for a demo/test here
     fn _setup_two_stroke_combo_tests (k:&Krusty) {
@@ -1517,8 +1548,9 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     let show_file_git_diff   =  ag().k(D).m(ctrl).m(alt).m(shift);
     let toggle_diff_preview  =  ag().af (ide_two_stroke_combo (F13, F18));
 
-    let tab_nav_left  = ag().k(Left ).m(alt).m(ctrl);
-    let tab_nav_right = ag().k(Right).m(alt).m(ctrl);
+    //let tab_nav_left  = ag().k(PageUp  ).m(ctrl);
+    //let tab_nav_right = ag().k(PageDown).m(ctrl);
+    // these are kept uniform between IDE, chrome, npp etc .. so these are covered by tab-nav-tscs
 
 
     k.cm .add_combo ( cg().k(G).m(caps).s(msE),   show_file_git_diff );
@@ -1571,10 +1603,6 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(Slash   ).m(caps).s(msE),  ag().k(Slash).m(ctrl) );  // block-comment
 
 
-    // we'll setup some easy caps-sticky two-stroke combos for IDE tabs nav
-    let fsc = k.cm .register_first_stroke_combo ( cg().k(T).m(caps).s(msE) );
-    k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  tab_nav_left );
-    k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  tab_nav_right );
 
 
 
@@ -1750,10 +1778,15 @@ fn setup_gaming_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(Down  ).s(latch_2).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo + 2 * xd, y, None)) );
     k.cm .add_combo ( cg().k(Slash ).s(latch_2).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo         , y, None)) );
 
+    fn og_clear() -> AF { Arc::new ( || { thread::spawn ( || { for i in 0 .. 4 {
+        MousePointer::move_abs (550 + 950*i, 790); s(30);
+        LeftButton.press_release(); s(20);
+    } } ); } ) }
+    k.cm .add_combo ( cg().k(Up).s(latch_2).c(pc()).m(caps),  ag().af (og_clear()) );
 
     fn og_setup () -> AF { Arc::new ( || { thread::spawn ( || {
         // assume four sized windows are up, move them to right loc, start em up, deblur,
-        let _xd = 940;
+        let _xd = 950;
         for _i in (0 .. 4).rev() {
             //MousePointer::move_abs (240, 200);         // home
             MousePointer::move_abs (600, 600); s(50);    // video
@@ -1766,7 +1799,7 @@ fn setup_gaming_combos (k:&Krusty) {
         }
     } ); } ) }
     fn og_teardown() -> AF { Arc::new ( || { thread::spawn ( || { for i in 0 .. 4 {
-        MousePointer::move_abs (940*i + 240, 200); s(50);       // home
+        MousePointer::move_abs (950*i + 240, 200); s(50);       // home
         LeftButton.press_release(); s(500);
         ctrl_press_release(W); s(50);
     } } ); } ) }
@@ -1852,8 +1885,6 @@ pub fn setup_krusty_board () {
     setup_brightness_vol_media(&k);
 
 
-    setup_caps_win_combos(&k);
-
     setup_qks_combos(&k);
 
     setup_misc_standalone_combos(&k);
@@ -1862,7 +1893,16 @@ pub fn setup_krusty_board () {
 
     setup_latch_combos(&k);
 
-    setup_two_stroke_combos(&k);
+
+    // and some two-stroke combos (tsc) thematically grouped under separate first-strokes (fsc)
+
+    setup_test_two_stroke_combos(&k);
+
+    setup_window_action_tscs(&k);
+
+    setup_switch_desktop_tscs(&k);
+
+    setup_tab_nav_tscs(&k);
 
 
     setup_switche_specific_combos(&k);
