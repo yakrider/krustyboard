@@ -187,8 +187,8 @@ fn setup_unstick_all  (k:&Krusty) {
     k.cm .add_combo ( cg().k(F10).no_rpt().m(caps_dbl),  ag().af (print_ks.clone()) );     // caps-dbl-F10 -> debug-printout_ks
     k.cm .add_combo ( cg().k(F10).no_rpt().m(lalt_dbl),  ag().af (print_ks.clone()) );     // lalt-dbl-F10 -> debug-printout_ks
     // and of the combo-maps table itself
-    let cm = k.cm.clone(); let print_cm = Arc::new (move || { cm._debug_print_combos_map(); cm._info_print_simult_act_combos_check(); } );
-    k.cm .add_combo ( cg().k(F9).no_rpt().m(caps_dbl),  ag().af (print_cm) );             // caps-dbl-F9 -> debug-printout_cm
+    let cm = k.cm.clone(); let print_cm = Arc::new (move || cm.debug_print_combos_map());
+    k.cm .add_combo ( cg().k(F9).no_rpt().m(caps_dbl),  ag().af (print_cm) );    // caps-dbl-F9 -> debug-printout_cm
 }
 
 
@@ -679,12 +679,9 @@ fn setup_vert_wheel (k:&Krusty) {
         // else for general caps-wheel, we send out managed-ctrl-wheels (managed to avoid having ctrl dn/up be interspersed)
         let af_ctrl_wheel   = if dir_is_down { ag().whl().bkwd().m(ctrl ).gen_af() } else { ag().whl().frwd().m(ctrl ).gen_af() };
         let af_switche_fgnd = if dir_is_down { ag().k(ExtDown  ).m(shift).gen_af() } else { ag().k(ExtUp    ).m(shift).gen_af() };
-        let af_ctrl_tab     = if dir_is_down { ag().k(ExtDown  ).m(ctrl ).gen_af() } else { ag().k(ExtUp    ).m(ctrl ).gen_af() };
         Arc::new ( move || {
             if check_switche_fgnd() {
                 af_switche_fgnd()
-            } else if ks.in_ctrl_tab_scroll_state.is_set() {
-                af_ctrl_tab()
             } else {
                 ks.mod_keys.lctrl.ensure_active();
                 af_ctrl_wheel()
@@ -801,49 +798,6 @@ fn setup_horiz_wheel (_k:&Krusty) {
     // (note that simple horiz-scroll will work as is w passthrough)
     // general h-wheel note : we do get h-wheel from mouse w x2-btn-wheel, but its still not ergo ..
     // .. so ideally we really wouldnt rely on this, and just have some setup overloaded in kbd w v-wheel setup
-}
-
-
-
-
-fn setup_ctrl_tab (k:&Krusty) {
-    // caps-as-ctrl for caps-tab switching (and shift/ralt combos will work out naturally in fallbacks)
-    // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
-    // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
-    // note also that there's also separate tab-nav in two-stroke combos .. this is specifically for ctrl-tab nav
-    let ks = k.ks.clone();
-    let af_caps_tab: AF = Arc::new (move || {
-        if ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_ctrl_down() {
-            if ks.mod_keys.caps.down.is_set() {
-                ks.mod_keys.lctrl.ensure_active();  // this enables caps-as-ctrl for caps-tab switching
-                // ^^ we're not gonna release ctrl immediately, but keep track and release when caps is released
-            }
-            ks.in_ctrl_tab_scroll_state.set();   // this will affect wheel scrolls until the state clears
-            Tab.press_release()
-        }
-    } );
-    // lets add support for this in caps tab ..
-    k.cm .add_combo ( cg().k(Tab).m(caps),          ag().af(af_caps_tab.clone()) );
-    // just for the tab, the rest of these below (for ctrl/shift/ralt) work naturally via fallback ..
-    // .. but we still want the ctrl-tab-state to be marked so the wheel behavior is uniform w caps
-    k.cm .add_combo ( cg().k(Tab).m(ctrl),          ag().af(af_caps_tab.clone()) );
-    k.cm .add_combo ( cg().k(Tab).m(caps).m(ralt),  ag().af(af_caps_tab.clone()) );
-    k.cm .add_combo ( cg().k(Tab).m(ctrl).m(ralt),  ag().af(af_caps_tab.clone()) );
-
-    // for ctrl-tab state, we'll override typical l2 arrow-nav combos too ..
-    k.cm .add_combo ( cg().k(J    ).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtLeft ).m(ctrl) );
-    k.cm .add_combo ( cg().k(K    ).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtRight).m(ctrl) );
-    k.cm .add_combo ( cg().k(I    ).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtUp   ).m(ctrl) );
-    k.cm .add_combo ( cg().k(Comma).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtDown ).m(ctrl) );
-    k.cm .add_combo ( cg().k(U    ).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtPgUp ).m(ctrl) );
-    k.cm .add_combo ( cg().k(M    ).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),   ag().k(ExtPgDn ).m(ctrl) );
-    // and escape
-    let ct_esc = {
-        let (to_top, esc) = ( ag().k(ExtPgUp).m(ctrl).gen_af(),  ag().k(Escape).gen_af() );
-        // ^^ note tha we specifically want just Esc and not Ctrl-Esc (as that triggers win-start-menu)
-        Arc::new ( move || { to_top(); esc(); } )
-    };
-    k.cm .add_combo ( cg().k(Escape).m(caps) .c(c_flag(k.ks.in_ctrl_tab_scroll_state.clone())),  ag().af(ct_esc) );
 }
 
 
@@ -1258,6 +1212,8 @@ fn setup_qks_combos (k:&Krusty) {
 }
 
 
+
+
 fn setup_misc_standalone_combos (k:&Krusty) {
     // just using this as staging pile for anything else we want to add
 
@@ -1269,6 +1225,7 @@ fn setup_misc_standalone_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(T).m(lalt).m(caps).c(browser_fgnd()),  ag().k(A).m(ctrl).m(shift) );
 
 }
+
 
 
 
@@ -1287,47 +1244,48 @@ fn setup_window_action_tscs (k:&Krusty) {
 
     // - j/k/i/comma .. caps-only -> move .. w/ F -> snap .. w/ R -> resize ..
     let setup_win_move_key = |key:Key, dx:i32, dy:i32, side_t:RectEdgeSide| {
-        k.cm .add_combo ( cg().k(key).fsc(fsc).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
-        k.cm .add_combo ( cg().k(key).fsc(fsc),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 40, dy * 40) )) );
-        k.cm .add_combo ( cg().k(key).fsc(fsc).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 20, dy * 20) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 40, dy * 40) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 20, dy * 20) )) );
         // and fine steps
-        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
-        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 4, dy * 4) )) );
-        k.cm .add_combo ( cg().k(key).fsc(fsc).s(qks1).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 2, dy * 2) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (&ksi(), side_t) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 4, dy * 4) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 2, dy * 2) )) );
     };
-    setup_win_move_key.clone() ( J,     -1,  0,  Left  );
-    setup_win_move_key.clone() ( K,      1,  0,  Right );
-    setup_win_move_key.clone() ( I,      0, -1,  Top   );
-    setup_win_move_key.clone() ( Comma,  0,  1,  Bottom);
+    setup_win_move_key ( J,     -1,  0,  Left  );
+    setup_win_move_key ( K,      1,  0,  Right );
+    setup_win_move_key ( I,      0, -1,  Top   );
+    setup_win_move_key ( Comma,  0,  1,  Bottom);
 
     // - wheel fwd/bkwd .. caps-only OR w/ D -> left/right .. w/ E -> up/dn .. w F/FD/FE -> snap .. r/rd/re -> resize
 
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF),         Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF).s(msD),  Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msF).s(msE),  Bottom, Top,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msF),         Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msF).s(msD),  Right, Left,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msF).s(msE),  Bottom, Top,  |ag,p| ag.af (Arc::new (move || snap_closest_edge_side (&ksi(),p) )) );
 
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (0, p * 20) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (p * 20, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_move_rel (0, p * 20) )) );
 
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
-    setup_frwd_bkwd_whl (k, |wg| wg.fsc(fsc).s(msR).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (0, p * 10) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msR),         1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msR).s(msD),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (p * 10, 0) )) );
+    setup_frwd_bkwd_whl (k, |wg| wg.m(caps).fsc(fsc).s(msR).s(msE),  1, -1,  |ag,p| ag.af (Arc::new (move || win_fgnd_stretch (0, p * 10) )) );
 
 
     // toggles: u -> vertmax .. m -> max .. n -> min .. t -> always-on-top .. b -> border/titlebar
-    k.cm .add_combo ( cg().k(U).fsc(fsc),   ag().af (action (win_fgnd_toggle_vertmax)) );
-    k.cm .add_combo ( cg().k(M).fsc(fsc),   ag().af (action (win_fgnd_toggle_max)) );
-    k.cm .add_combo ( cg().k(N).fsc(fsc),   ag().af (action (win_fgnd_min_and_back)) );
-    k.cm .add_combo ( cg().k(T).fsc(fsc),   ag().af (action (win_fgnd_toggle_always_on_top)) );
-    k.cm .add_combo ( cg().k(B).fsc(fsc),   ag().af (action (win_fgnd_toggle_titlebar)) );
+    k.cm .add_combo ( cg().k(U).m(caps).fsc(fsc),   ag().af (action (win_fgnd_toggle_vertmax)) );
+    k.cm .add_combo ( cg().k(M).m(caps).fsc(fsc),   ag().af (action (win_fgnd_toggle_max)) );
+    k.cm .add_combo ( cg().k(N).m(caps).fsc(fsc),   ag().af (action (win_fgnd_min_and_back)) );
+    k.cm .add_combo ( cg().k(T).m(caps).fsc(fsc),   ag().af (action (win_fgnd_toggle_always_on_top)) );
+    k.cm .add_combo ( cg().k(B).m(caps).fsc(fsc),   ag().af (action (win_fgnd_toggle_titlebar)) );
 
     // regardless, since max/vertmax toggles are pretty frequent, we'll for now retain their direct combos too
     k.cm .add_combo ( cg().k(U).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_vertmax)) );
     k.cm .add_combo ( cg().k(M).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_max)) );
 
-
 }
+
+
 
 fn setup_switch_desktop_tscs (k:&Krusty) {
     // caps-win-d as fsc for desktop moves .. w jk arrow keys, as well as wheel
@@ -1345,6 +1303,8 @@ fn setup_switch_desktop_tscs (k:&Krusty) {
 
 }
 
+
+
 fn setup_tab_nav_tscs (k:&Krusty) {
     // fsc : caps-e-t
     let fsc = k.cm .register_first_stroke_combo ( cg().k(T).m(caps).s(msE) );
@@ -1353,11 +1313,108 @@ fn setup_tab_nav_tscs (k:&Krusty) {
     let tab_nav_right = ag().k(PageDown).m(ctrl);
     let tab_nav_left  = ag().k(PageUp  ).m(ctrl);
 
-    k.cm .add_combo ( cg().k(K).m(caps) .fsc(fsc),  tab_nav_right.clone() );
-    k.cm .add_combo ( cg().k(J).m(caps) .fsc(fsc),  tab_nav_left.clone() );
+    k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  tab_nav_right.clone() );
+    k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  tab_nav_left.clone() );
 
-    k.cm .add_combo ( cg().whl().bkwd().m(caps) .fsc(fsc),  tab_nav_right );
-    k.cm .add_combo ( cg().whl().frwd().m(caps) .fsc(fsc),  tab_nav_left );
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),  tab_nav_right );
+    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),  tab_nav_left );
+
+}
+
+
+
+fn setup_ctrl_tab_tscs (k:&Krusty) {
+    // caps-as-ctrl for caps-tab switching (and shift/ralt combos will work out naturally in fallbacks)
+    // note that caps-as-ctrl is default in fallbacks anyway, but IDE doesnt like the ctrl being pressed/rel for every tab press ..
+    // .. so instead, we keep the ctrl active throughout the caps-tabbing, hence the need for the defs below
+    // note also that there's also separate tab-nav two-stroke combos .. this is specifically for ctrl-tab nav
+
+    // fscs : caps-tab or ctrl-tab or caps-ctrl-tab
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(Tab).m(caps) );
+    k.cm.co_register_first_stroke_combo ( cg().k(Tab).m(ctrl), fsc );
+    k.cm.co_register_first_stroke_combo ( cg().k(Tab).m(ctrl).m(caps), fsc );
+
+    // in addition to just registering the fsc action, we also want the Tab to actually send itself out
+    let ks = k.ks.clone();
+    let af_caps_tab : AF = Arc::new (move || { ks.mod_keys.lctrl.ensure_active(); Tab.press_release(); } );
+    k.cm .add_combo ( cg().k(Tab).m(caps),           ag().af (af_caps_tab.clone()) );
+    k.cm .add_combo ( cg().k(Tab).m(caps).m(ctrl),   ag().af (af_caps_tab) );
+    k.cm .add_combo ( cg().k(Tab).m(ctrl),           ag().k(Tab).m(ctrl) );
+
+    // note that shift/ralt will work on these as-is .. as the fallbacks dont care about our fscs!
+    // and now we can set about the rest of behavior under that fsc ..
+
+    // we'll set up the wheel for caps-tab (and ctrl-tab)
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(caps),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(ctrl),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(ctrl).m(caps),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
+
+    // and since we've had to keep ctrl forced-active for IDE, now it doesnt like our l2 arrow navs, so we'll send them mkg-wrap-disabled
+    [ (J, ExtLeft), (K, ExtRight), (I, ExtUp), (Comma, ExtDown), (U, ExtPgUp), (M, ExtPgDn) ] .into_iter() .for_each ( |(ko,kn)| {
+        k.cm .add_combo ( cg().k(ko).fsc(fsc).m(caps),           ag().k(kn).mkg_nw() );
+        k.cm .add_combo ( cg().k(ko).fsc(fsc).m(ctrl),           ag().k(kn).mkg_nw() );
+        k.cm .add_combo ( cg().k(ko).fsc(fsc).m(ctrl).m(caps),   ag().k(kn).mkg_nw() );
+    } );
+
+    /// Now specifally for the IDE tab-switcher popup, to escape out of it ..
+    // .. sending esc while ctrl-active triggers win-start-menu
+    // .. so we use the trick of pressing space first to defocus from the list, then releasing ctrl to exit out of it
+    let ct_esc = {
+        let ks = k.ks.clone();
+        Arc::new ( move || {
+            Space.press_release();
+            ks.mod_keys.lctrl.ensure_inactive();
+        } )
+    };
+    k.cm .add_combo ( cg().k(Escape).fsc(fsc).m(caps),    ag().af(ct_esc.clone()) );
+
+    // and another easier version to go along with our caps-e-o as esc elsewhere
+    k.cm .add_combo ( cg().k(O).fsc(fsc).m(caps).s(msE),  ag().af(ct_esc.clone()) );
+
+
+    /// again for the IDE switcher popup, we wanted to add a quick switch from tab-switcher to searchable one
+    // (we'll do it by escaping it first (via space then ctrl rel like above), then invoking the searchable switcher)
+    let ide_pers_switcher = {
+        let ks = k.ks.clone();
+        Arc::new ( move || {
+            ct_esc();   // first we escape out of it as above
+            let ks = ks.clone();
+            // we'll want to give a tiny delay so IDE has time to process focus changes appropriately
+            thread::spawn ( move || {
+                thread::sleep (Duration::from_millis(10));
+                // then do actual ctrl-e to bring up the persistent-switcher (as configd in IDE)
+                ks.mod_keys.lctrl.active_on_key(E)()
+            } );
+        } )
+    };
+    //k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc),  ag().af(ide_pers_switcher) );
+    k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc) .c(intellij_fgnd()),  ag().af(ide_pers_switcher) );
+
+}
+
+
+
+fn setup_ide_diff_nav_tscs (k:&Krusty) {
+
+    // diff nav mode on caps-e-d-d
+    let fsc = k.cm .register_first_stroke_combo ( cg().k(D).m(caps).s(msE).s(msD_dbl) );
+
+    // next/prev diff --> wheel
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(caps),         ExtDown,  ExtUp,    |ag,key| ag.k(key).m(ctrl).m(alt) );
+    // next/prev file --> f-wheel
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(caps).s(msF),  ExtRight, ExtLeft,  |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
+    // accept l/r  --> e-wheel
+    setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc).m(caps).s(msE),  ExtRight, ExtLeft,  |ag,key| ag.k(key).m(ctrl).m(alt) );
+
+    // next/prev diff
+    k.cm .add_combo ( cg().k(Comma).fsc(fsc).m(caps),   ag().k(ExtDown ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(I    ).fsc(fsc).m(caps),   ag().k(ExtUp   ).m(ctrl).m(alt) );
+    // and for next/prev file
+    k.cm .add_combo ( cg().k(J).fsc(fsc).m(caps),   ag().k(ExtLeft ).m(ctrl).m(alt).m(shift) );
+    k.cm .add_combo ( cg().k(K).fsc(fsc).m(caps),   ag().k(ExtRight).m(ctrl).m(alt).m(shift) );
+    // and accept left/right
+    k.cm .add_combo ( cg().k(J).fsc(fsc).m(caps).s(msE),   ag().k(ExtLeft ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(K).fsc(fsc).m(caps).s(msE),   ag().k(ExtRight).m(ctrl).m(alt) );
 
 }
 
@@ -1404,36 +1461,6 @@ fn setup_latch_combos (_k:&Krusty) {
 }
 
 
-
-
-
-fn setup_test_two_stroke_combos (_k:&Krusty) {
-
-    // we'll leave a set up for a demo/test here
-    fn _setup_two_stroke_combo_tests (k:&Krusty) {
-        let fsc1 = k.cm.register_first_stroke_combo (cg().k(O).m(caps).s(msF_dbl));
-        let fsc2 = k.cm.register_first_stroke_combo (cg().k(P).m(caps).s(msF_dbl));
-
-        k.cm .add_combo ( cg().k(F9)                 .fsc (fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps)         .fsc (fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps_dbl)     .fsc (fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(alt)          .fsc (fsc1),   ag().k(F19) );
-        k.cm .add_combo ( cg().k(F9).m(caps).m(alt)  .fsc (fsc1),   ag().k(F19) );
-
-        k.cm .add_combo ( cg().k(Right).m(caps).s(msF) .fsc (fsc1),   ag().k(F20) );
-        k.cm .add_combo ( cg().k(Left ).m(caps).s(msF) .fsc (fsc1),   ag().k(F20) );
-
-        k.cm .add_combo ( cg().k(Right).m(caps) .fsc (fsc2),   ag().k(F21) );
-        k.cm .add_combo ( cg().k(Left ).m(caps) .fsc (fsc2),   ag().k(F21) );
-
-        k.cm .add_combo ( cg().k(Right).m(caps).s(msF),   ag().k(F22) );
-        k.cm .add_combo ( cg().k(Left ).m(caps).s(msF),   ag().k(F22) );
-
-        k.cm .add_combo ( cg().k(F).m(caps_dbl) .fsc(fsc1),   ag().k(F23) );
-    }
-    //_setup_two_stroke_combo_tests (&_k);
-
-}
 
 
 
@@ -1692,29 +1719,7 @@ fn setup_IDE_specific_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(Period).s(qks).m(caps),  ag().af (console_clearing_af (lc_submit)) );  // caps-q-period .. lc-submit
 
 
-    /// **_ IDE TAB-SWITCHER SEARCH _** .. specifically for IntelliJ, wanted to add a quick switch from tab-switcher to searchable one
-    // (we'll do it by escaping it first (via space then ctrl rel), then invoking the searchable switcher)
-    fn gen_ide_switcher_switch_af (k:&Krusty, key:Key) -> AF {
-        let ks = k.ks.clone();
-        let ctrl_key_af = k.ks.mod_keys.lctrl.active_on_key(key);
-        Arc::new ( move || {
-            if ks.in_ctrl_tab_scroll_state.is_set() {
-                // space defocuses from list so we wont actually switch tabs when we release the ctrl
-                Space.press_release();
-                // now release the ctrl so the transient-switcher popup goes away
-                ks.mod_keys.lctrl.ensure_inactive();
-                ks.in_ctrl_tab_scroll_state.clear();
-                // then do actual ctrl-e to bring up the persistent-switcher (ctrl-e is default shortcut in IDE for that)
-                // we'll want to give a tiny delay so IDE has time to process focus changes appropriately .. just spawning is enough for that
-                let ks = ks.clone();
-                thread::spawn ( move || {
-                    thread::sleep (Duration::from_millis(10));
-                    ks.mod_keys.lctrl.active_on_key(E)()
-                } );
-            } else { ctrl_key_af() }
-        } )
-    }
-    k.cm .add_combo ( cg().k(Space).m(caps).c(intellij_fgnd()),  ag().af(gen_ide_switcher_switch_af (k, Space)) );
+    // note there's also some fancy ide-tab-switcher tweaks in ctrl-tab first-stroke-combo block
 
 
     /// **_ IDE FLOAT TOOLS TOGGLE / CLEAR _**
@@ -1869,8 +1874,6 @@ pub fn setup_krusty_board () {
     setup_horiz_wheel(&k);
 
 
-    setup_ctrl_tab(&k);
-
     setup_back_quote(&k);
 
     setup_space_key(&k);
@@ -1896,13 +1899,15 @@ pub fn setup_krusty_board () {
 
     // and some two-stroke combos (tsc) thematically grouped under separate first-strokes (fsc)
 
-    setup_test_two_stroke_combos(&k);
-
     setup_window_action_tscs(&k);
 
     setup_switch_desktop_tscs(&k);
 
     setup_tab_nav_tscs(&k);
+
+    setup_ctrl_tab_tscs(&k);
+
+    setup_ide_diff_nav_tscs(&k);
 
 
     setup_switche_specific_combos(&k);
@@ -1958,8 +1963,8 @@ pub fn setup_krusty_board () {
     // finally we can start binding key maps .. first the specialized handling for mode/latch trigger keys
     k.ks.mode_states.bind_mode_keys_actions(&k);
 
-    //k.cm._debug_print_combos_map();
-    k.cm._info_print_simult_act_combos_check();
+    //k.cm.debug_print_combos_map();
+    k.cm.info_print_simult_active_combos_check();
 
 
 

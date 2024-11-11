@@ -63,7 +63,7 @@ pub struct _ComboGen {
     # [ derivative (Debug="ignore") ]
     pub cond : Option<ComboCond>,
 
-    /// Optional hash of caps-sticky first-stroke combo that must be active for this combo to trigger
+    /// Optional hash of modkey-sticky first-stroke combo that must be active for this combo to trigger
     pub first_stroke : ComboHash,
 
     /// The modifier-key consume flag marks that the release of mod-keys in this combo should be masked
@@ -193,8 +193,8 @@ impl <S> ComboGen<S>
         self
     }
 
-    /// Require a caps-sticky first-stroke-combo (fsc) that must be active for this combo to trigger. <br>
-    /// The fsc remains active after the first-stroke is pressed until caps is released next. <br>
+    /// Require a modkey-sticky first-stroke-combo (fsc) that must be active for this combo to trigger. <br>
+    /// The fsc remains active after the first-stroke is pressed until all modkeys are released. <br>
     /// Note: if the fsc matches, other registered actions for this combo without fsc-match will be ignored.
     pub fn fsc (mut self, fsc:ComboHash) -> Self {
         self.dat.first_stroke = fsc;

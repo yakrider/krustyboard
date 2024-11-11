@@ -1,9 +1,9 @@
-#![ allow (dead_code) ]
+#![ allow (dead_code, non_snake_case) ]
 
 use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
@@ -196,9 +196,6 @@ pub struct _KrustyState {
     /// win-groups obj maanges the three supported window-grouping functionalty
     pub win_groups: WinGroups,
 
-    /// since wheel support during ctrl-tab is missing in many applications incl IDEs, we'll impl that ourselves
-    pub in_ctrl_tab_scroll_state: Flag,
-
     /// flag marking right-mouse-btn-wheel scroll switche support <br>
     /// note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
     pub in_right_btn_scroll_state: Flag,
@@ -206,8 +203,8 @@ pub struct _KrustyState {
     /// win_snap_dat snapshot holds data to support moving/dragging/resizing windows and window-groups
     pub win_snap_dat : RwLock <WinSnapDat>,
 
-    /// the active first-stroke for caps-sticky-two-stroke-combos .. will clear when caps is released
-    pub first_stroke : AtomicU64,
+    /// the active first-stroke for modkey-sticky two-stroke-combos .. will clear when all modkeys are released
+    pub first_stroke : ComboHashAtomic,
 
 }
 
@@ -253,24 +250,26 @@ impl KrustyState {
                 mouse       : Mouse::new(),
                 win_groups  : WinGroups::new(),
 
-                in_ctrl_tab_scroll_state   : Flag::default(),
                 in_right_btn_scroll_state  : Flag::default(),
 
                 win_snap_dat : RwLock::new (WinSnapDat::default()),
 
-                first_stroke : AtomicU64::default(),
+                first_stroke : ComboHashAtomic::default(),
             } ) )
         ) .clone()
     }
 
-    pub fn record_first_stroke (&self, fsc:ComboHash) {
-        self.first_stroke.store (fsc.0, Ordering::Relaxed)
+    pub fn proc_notice__modkey_down (&self, mk:ModKey) {
+        self.mouse.proc_notice__modkey_down (mk, self);
     }
-    pub fn check_first_stroke (&self, fsc:ComboHash) -> bool {
-        fsc.0 == self.first_stroke.load (Ordering::Relaxed)
-    }
-    pub fn clear_first_stroke (&self) {
-        self.first_stroke.store (0, Ordering::Relaxed)
+    pub fn proc_notice__modkey_up (&self, mk:ModKey) {
+        if !self.first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
+            self.first_stroke.clear();
+        }
+        if mk == ModKey::caps {
+            self.mod_keys.proc_notice__caps_up(self)
+        }
+        self.mouse.proc_notice__modkey_up (mk, self);
     }
 
 
@@ -290,7 +289,7 @@ impl KrustyState {
 
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
-        self.clear_first_stroke();
+        self.first_stroke.clear();
 
         use MouseButton::*;
         RightButton.press(); LeftButton.press(); RightButton.release(); LeftButton.release();
@@ -298,7 +297,7 @@ impl KrustyState {
         MiddleButton.release(); X1Button.release(); X2Button.release();
 
         [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-           &self.in_ctrl_tab_scroll_state, &self.in_right_btn_scroll_state,
+            &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
 
         jiggle_cursor();

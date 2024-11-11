@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
-use std::thread;
+use std::{panic, thread};
 
 use derive_deref::Deref;
 
@@ -84,16 +84,26 @@ impl InputProcessor {
     /// Creates or returns the singleton InputProcessor.
     /// (.. and when initializing, starts the mpsc channel for kbd/mouse event actions too)
     pub fn instance() -> InputProcessor {
+
         static INSTANCE: OnceCell <InputProcessor> = OnceCell::new();
+
         INSTANCE .get_or_init ( || {
             // we'll create and spawn out channel for kbd and mouse queued events, and get it started
             // (we expect queue drained asap, but we'll keep excess slots as wheel-events on spin can get quite bursty)
             // the processor will hold the sender to this queue for everyone to clone/use
-            let (input_queue_sender, input_queue_receiver) = sync_channel::<EvCbFn_QueuedProc_T> (100);
+            let (input_queue_sender, input_queue_receiver) = sync_channel::<EvCbFn_QueuedProc_T> (500);
+
             thread::spawn (move || {
                 utils::win_set_thread_dpi_aware();
-                while let Ok(af) = input_queue_receiver.recv() { af() }
+                // if this thread panics, we might potentially leave the pc unusable .. so we'd rather have the process quit
+                if panic::catch_unwind ( || {
+                    while let Ok(af) = input_queue_receiver.recv() { af() }
+                } ) .is_err() {
+                    println! ("PANIC in Input Processor AF Queue thread .. we gonna quit!");
+                    std::process::exit(1);
+                }
             });
+
             InputProcessor ( Arc::new ( _InputProcessor {
                 kbd_hook       : AtomicIsize::default(),
                 mouse_hook     : AtomicIsize::default(),
@@ -103,6 +113,7 @@ impl InputProcessor {
                 last_kbd_event : AtomicU64::default(),
             } ) )
         } ) .clone()
+
     }
 
 

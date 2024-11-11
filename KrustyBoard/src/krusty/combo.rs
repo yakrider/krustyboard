@@ -1,6 +1,7 @@
 #![ allow (non_camel_case_types, non_upper_case_globals) ]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::*;
@@ -39,41 +40,66 @@ pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync +
 
 
 
-#[derive (Debug, Default, Copy, Clone)]
+
 /// ComboHash is a simple new-type containing the hash value of the combo
-pub struct ComboHash (pub u64);
+#[derive (Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct ComboHash ( pub(self) u64 );
 
 impl ComboHash {
-    pub fn is_zero (&self) -> bool { self.0 == 0 }
+    pub fn is_empty (&self) -> bool { self.0 == 0 }
 }
+
+
+/// ComboHash-Atomic holds a ComboHash value atomically
+#[derive (Debug, Default)]
+pub struct ComboHashAtomic ( AtomicU64 );
+
+impl ComboHashAtomic {
+    pub fn is_empty (&self) -> bool {
+        ComboHash ( self.0 .load (Ordering::Relaxed) ) .is_empty()
+    }
+    pub fn store (&self, ch:ComboHash) {
+        self.0 .store (ch.0, Ordering::Relaxed)
+    }
+    pub fn clear (&self) {
+        self.0 .store (ComboHash::default().0, Ordering::Relaxed)
+    }
+    pub fn check_match (&self, ch:ComboHash) -> bool {
+        ch == ComboHash ( self.0.load (Ordering::Relaxed) )
+    }
+}
+
 
 
 
 # [ derive () ]
 /// ComboValue is the 'value' part of the combos_map entry that holds the AF, the combo creation time, and the optional trigger condition
-pub struct ComboValue {
+pub(crate) struct ComboValue {
     _private : (),
 
     /// The timestamp Instant of creation .. useful for sorting
-    pub stamp : Instant,
+    pub(crate) stamp : Instant,
 
     /// The action function to be executed when this combo triggers
-    pub af : AF,
+    pub(crate) af : AF,
 
     /// Optional condition that must be valid for this combo to trigger
-    pub cond : Option <ComboCond>,
+    pub(crate) cond : Option <ComboCond>,
 
     /// Optional ComboHash of any first-stroke that must be active for this combo to trigger <br>
     /// (A default zeroed ComboHash indicates no first-stroke requirement)
-    pub fsc : ComboHash,
+    pub(crate) fsc : ComboHash,
 
     /// The no_rpt flag when enabled, suppresses activation of this combo for triggering key-repeats
-    pub no_rpt : bool,
+    pub(crate) no_rpt : bool,
+
+    /// The is_fsc flag is simply a marker for fsc-registration AFs .. only used for info-printout analysis
+    pub(crate) is_fsc : bool,
 }
 
 impl ComboValue {
-    pub fn new (af:AF, cond:Option<ComboCond>, fsc:ComboHash, no_rpt:bool) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), af, cond, fsc, no_rpt }
+    fn new (af:AF, cond:Option<ComboCond>, fsc:ComboHash, no_rpt:bool, is_fsc:bool) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, fsc, no_rpt, is_fsc }
     }
 }
 
@@ -86,19 +112,19 @@ impl Combo {
     // pub fn new (cmk, ??) -> Combo { }
     // ^^ no new fn, as we only want to gen combos via gen_combos which does a bunch of proc first
 
-    pub fn has_wildcards (&self) -> bool {
+    pub(crate) fn has_wildcards (&self) -> bool {
         self.wc_mask_bits < FULL_WILDCARDS_MASK
     }
-    pub fn strip_wildcards (&self) -> Combo {
+    pub(crate) fn strip_wildcards (&self) -> Combo {
         Combo { wc_mask_bits: FULL_WILDCARDS_MASK, ..*self }
     }
-    pub fn check_wildcard_eqv (&self, c:&Combo) -> bool {
+    pub(crate) fn check_wildcard_eqv (&self, c:&Combo) -> bool {
         self.wc_mask_bits & c.states_bits == self.states_bits
     }
 
 
     // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    pub fn static_flags_modes () -> [ModeState_T; N__COMBO_STATES_BITS__FLAGS] {
+    fn static_flags_modes () -> [ModeState_T; N__COMBO_STATES_BITS__FLAGS] {
         // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
         // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
         static FLAGS_MODES : [ModeState_T; N__COMBO_STATES_BITS__FLAGS] = {
@@ -121,7 +147,7 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub fn gen_cur_combo (cmk:EvCbMapKey, ks:&KrustyState) -> Combo {
+    pub(crate) fn gen_cur_combo (cmk:EvCbMapKey, ks:&KrustyState) -> Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let wc_mask_bits = FULL_WILDCARDS_MASK;
         let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
@@ -187,16 +213,12 @@ impl Combo {
         for (ms,dms) in ModeStates::static_ordered_modes().iter() .zip (ModeStates::static_ordered_modes_dbl().iter()) {
             if cg.dat.modes.contains(dms) && !cg.dat.modes.contains(ms) { cg.dat.modes.push(*ms) }
         }
-        // and finally, add caps to all combos with a fsc requirement (i.e. two-stroke-combos)
-        if !cg.dat.first_stroke.is_zero() {
-            if !cg.dat.mks.contains (&ModKey::caps) { cg.dat.mks.push(ModKey::caps) }
-        }
         cg
     }
 
 
     /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub fn gen_combos (mut cg:CG) -> Vec<Combo> {
+    pub(crate) fn gen_combos (mut cg:CG) -> Vec<Combo> {
         // we'll set up helper functions to get the bits for the states bitmap, and the wildcards mask
         fn get_modkey_bit_and_wc (cg:&CG, emks:&[ModKey], mk:ModKey) -> (bool, bool) {
             let mut wc = false;
@@ -253,7 +275,7 @@ impl Combo {
     /// modkeys specified (or not-specified) in the ActionGen builder. <br>
     /// Further, if a combo-gen is provided, will appropriately wrap modkey or mode-key consumption wrappers around the action
     /// (the consumption wrapper marks the keys as consumed, which typically suppresses their key-repeat and/or release events)
-    pub fn gen_af (ag:&AG, cgo:Option<&CG>) -> AF {
+    pub(crate) fn gen_af (ag:&AG, cgo:Option<&CG>) -> AF {
         // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
@@ -313,7 +335,7 @@ impl Combo {
 
 
     pub(crate) fn gen_fsc_hash (cg:CG) -> ComboHash {
-        // gen combos will generate a bunch of l/r expanded combos, but for matching up a caps-sticky first-stroke, we just need one shared truth
+        // gen combos will generate a bunch of l/r expanded combos, but for matching up a first-stroke, we just need one shared truth
         let hash = Self::gen_combos (Self::finalize_combo_gen(cg)) .first() .map (|c| {
             use std::hash::*;
             let mut hasher = DefaultHasher::new();
@@ -324,7 +346,7 @@ impl Combo {
     }
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub fn gen_combo_entries (cg:CG, ag:AG) -> Vec<(Combo, ComboValue)> {
+    pub(crate) fn gen_combo_entries (cg:CG, ag:AG, is_fsc:bool) -> Vec<(Combo, ComboValue)> {
         let cg = Self::finalize_combo_gen(cg);
         let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
@@ -332,7 +354,7 @@ impl Combo {
         let no_rpt = cg.dat.repeat_suppressed;
 
         Self::gen_combos(cg) .into_iter() .map ( |c|
-            (c, ComboValue::new (af.clone(), cond.clone(), fsc, no_rpt))
+            (c, ComboValue::new (af.clone(), cond.clone(), fsc, no_rpt, is_fsc))
         ) .collect()
     }
 

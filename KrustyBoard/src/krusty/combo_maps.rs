@@ -1,6 +1,7 @@
 #![ allow (non_camel_case_types) ]
 
 use std::sync::Arc;
+use std::{thread, time::Duration};
 
 use atomic_refcell::AtomicRefCell;
 use derive_deref::Deref;
@@ -72,7 +73,10 @@ impl CombosMap {
     /// Compiles and adds a combo to the combo-mappings table <br>
     /// The expectation is to progressively (fluently) build the ComboGen and ActionGen params, and pass them here.
     pub fn add_combo (&self, cg: impl Into<CG>, ag: impl Into<AG>) {
-        for (c, cv) in Combo::gen_combo_entries(cg.into(), ag.into()) {
+        self._add_combo (cg, ag, false)
+    }
+    fn _add_combo (&self, cg: impl Into<CG>, ag: impl Into<AG>, is_fsc:bool) {
+        for (c, cv) in Combo::gen_combo_entries (cg.into(), ag.into(), is_fsc) {
             self.add_to_combos_map (c, cv);
         }
     }
@@ -80,28 +84,28 @@ impl CombosMap {
 
     /// Registers a combo as a possible 'first-stroke-combo' (fsc), and returns its combo-hash. <br>
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
-    /// Note that fscs are active only while caps is held, and therefore only a combo with caps (or caps-dbl) can be a valid fsc
+    /// Note that fscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid fsc
     pub fn register_first_stroke_combo (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
         let fsc = Combo::gen_fsc_hash(cg.clone());
         self.setup_first_stroke_af (cg, fsc);
         fsc
     }
-    /// Co-Registers a possible first-stroke combo as an alternate for another first-stroke with the ComboHash supplied
+    /// Co-Registers a possible first-stroke combo as an alternate for another first-stroke with the combo-hash supplied
     pub fn co_register_first_stroke_combo (&self, cg: impl Into<CG>, fsc:ComboHash) {
         self.setup_first_stroke_af (cg.into(), fsc);
     }
     fn setup_first_stroke_af (&self, cg:CG, fsc:ComboHash) {
         let ks = KrustyState::instance();
         let af = Arc::new (move || {
-            if ks.mod_keys.caps.down.is_set() {
-                // ^^ the check is for safety, as any recorded fsc only clears on caps-release ..
-                // (fscs are required to have caps and are active until the caps is released)
-                ks.record_first_stroke(fsc);
+            if ks.mod_keys.some_mk_down() {
+                // ^^ the check is for safety, as any recorded fsc only clears on all-modkeys-released ..
+                // (fscs are required to have some mod-key in them and are active until all modkeys are released)
+                ks.first_stroke.store(fsc);
                 jiggle_cursor()
             }
         } );
-        self.add_combo (cg, ag().af(af));
+        self._add_combo (cg, ag().af(af), true);
     }
 
     fn add_to_wildcards_map (&self, c:Combo) {
@@ -133,7 +137,7 @@ impl CombosMap {
             // note that we allow multiple conditional or mult non-conditional combos to trigger ..
             // .. but if any conditional combo triggers, then non-conditional combos for that are ignored
             cvs.push(cv);
-            cvs.sort_by_cached_key (|cv| (cv.fsc.is_zero(), cv.cond.is_none(), cv.stamp));
+            cvs.sort_by_cached_key (|cv| (cv.fsc.is_empty(), cv.cond.is_none(), cv.stamp));
             // ^^ we want to sort such that fscs and  conditionals are up top .. (hence the booleans supplied)
         } else {
             cm.insert (c, vec![cv]);
@@ -141,36 +145,56 @@ impl CombosMap {
     }
 
 
-    pub fn _debug_print_combos_map (&self) {
-        println! ("\nCombo entries and their combo-values counts \n# (non-cond, cond, first-stroke-cond)");
-        self.combos_map .borrow() .iter() .map ( |(c,cvs)| {
-            let cs = cvs.iter().filter(|cv| cv.cond.is_some()).count();
-            let fscs = cvs.iter().filter(|cv| !cv.fsc.is_zero()).count();
-            let ncs = cvs.len() - cs - fscs;
-            format! ("{:?} {:?}", (ncs,cs,fscs), c)
-        } ) .sorted() .for_each (|s| println!("{}",s));
-        println! ("nTot = {:?}", self.combos_map.borrow().len());
 
-        println! ("combo counts by combo-map-key:");
-        self.combos_map .borrow() .keys() .map(|c| c.cmk) .counts()
-            .iter() .sorted_by_key (|(_,n)| *n) .for_each (|(cmk,n)| println!("  {:3}  {:?}", n, cmk));
 
-        println! ("\nwildcarded combos:");
-        self.wildcard_combos.borrow() .values() .flatten() .map (|(c,_cs)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
+
+    pub fn debug_print_combos_map (&self) {
+        let cm = self.clone();
+        thread::spawn ( move || {
+            println! ("\nCombo entries and their combo-values counts \n# (first-stroke-combos, combos-total, two-stroke-combos, conditional-combos)");
+            cm.combos_map .borrow() .iter() .map ( |(c,cvs)| {
+                let conds = cvs.iter().filter(|cv| cv.cond.is_some()).count();
+                let tscs = cvs.iter().filter(|cv| !cv.fsc.is_empty()).count();
+                let fscs = cvs.iter().filter(|cv| cv.is_fsc).count();
+                //note : same combos might be both tscs and cond .. i.e adding the ones above can be > cvs.len()
+                format! ("fsc: {:?}, tot: {:?}, tsc: {:?}, cond: {:?}   {:?}", fscs, cvs.len(), tscs, conds, c)
+            } ) .sorted() .for_each (|s| println!("{}",s));
+            println! ("nTot = {:?}", cm.combos_map.borrow().len());
+
+            println! ("combo counts by combo-map-key:");
+            cm.combos_map .borrow() .keys() .map(|c| c.cmk) .counts() .iter()
+                .map (|(cmk,n)| format!("  {:3}  {:?}", n, cmk)) .sorted() .for_each (|s| println!("{}",s));
+
+            println! ("\nwildcarded combos:");
+            cm.wildcard_combos.borrow() .values() .flatten()
+                .map (|(c,_cs)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
+
+            println! ("\nfirst-stroke-combo registrations:");
+            cm.combos_map .borrow() .iter()
+                .filter (|(_c,cvs)| cvs.iter().any(|cv| cv.is_fsc))
+                .map (|(c,_v)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
+
+            cm.info_print_simult_active_combos_check();
+        } );
     }
 
-    pub fn _info_print_simult_act_combos_check (&self) {
-        //self._debug_print_combos_map();
-        let cm = self.combos_map.borrow();
-        println! ("## total combos count: {:?}", cm.len());
-        println! ("## total combo-map-keys count: {:?}", cm.keys().map(|c| c.cmk).unique().count());
-        println! ("## combo-map-keys with wildcards: {:?}", self.wildcard_combos.borrow().len());
+    pub fn info_print_simult_active_combos_check (&self) {
+        let cm = self.clone();
+        thread::spawn ( move || {
+            thread::sleep (Duration::from_millis(10));  // just to avoid printout garbling at startup
+            println! ("## total combos count: {:?}", cm.combos_map.borrow().len());
+            println! ("## total combo-map-keys count: {:?}", cm.combos_map.borrow().keys().map(|c| c.cmk).unique().count());
+            println! ("## combo-map-keys with wildcards: {:?}", cm.wildcard_combos.borrow().len());
 
-        let combos_w_mult_non_cond_cvs = cm .iter() .map ( |(c,cvs)| {
-            (c, cvs.iter() .filter (|cv| cv.cond.is_none() && cv.fsc.is_zero()) .count())
-        } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
-        println! ("## combos with multiple non-conditional combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
-        combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
+            let fscs_count = cm.combos_map .borrow() .iter() .filter (|(_c,cvs)| cvs.iter().any (|cv| cv.is_fsc)) .count();
+            println! ("## first-stroke registrations: {:?}", fscs_count);
+
+            let combos_w_mult_non_cond_cvs = cm .combos_map .borrow() .iter() .map ( |(c,cvs)| {
+                (*c, cvs.iter() .filter (|cv| cv.cond.is_none() && cv.fsc.is_empty() && !cv.is_fsc) .count())
+            } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
+            println! ("## combos with multiple non-cond, non-fsc combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
+            combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
+        } );
     }
 
 
@@ -251,7 +275,7 @@ impl CombosMap {
     // - if fsc present and doesnt match, we skip that cv
     // - if fsc matched and execd, we can only go through subset that also have the matching fsc specified
     // - (note .. given fsc w cond, where fsc matched but cond did not, we'd still continue checking non-fsc .. follows least-surprise)
-    // - (note also, that our fscs are caps-sticky .. ie, a triggered fsc remains active until the held caps is released .. non-caps fscs are pointless)
+    // - (note also, that our fscs are modkey-sticky .. ie, a triggered fsc remains active until all held-modkeys are released .. non-modkey fscs are pointless)
     // Condition Matching (cond) rules :
     // - we execute AFs for all matching coditional-combos OR all matching non-conditional combos
     // - however, if any conditional combo triggers, then any remaining non-conditional combos are ignored
@@ -261,10 +285,10 @@ impl CombosMap {
         let mut cond_matched = false;
         let mut proc_res = ProcCVsResult::default();
         for cv in cvs {
-            // first we enforce rules for combos with caps-sticky first-stroke-combo reqs specified
-            if !cv.fsc.is_zero() {
+            // first we enforce rules for combos with first-stroke-combo reqs specified
+            if !cv.fsc.is_empty() {
                 proc_res.fscs_found = true;
-                if !ks.check_first_stroke(cv.fsc) { continue }
+                if !ks.first_stroke.check_match(cv.fsc) { continue }
                 // ^^ we found a fsc for this cv .. so if we dont match it, we should skip it
             }
             else if proc_res.fscs_found && proc_res.combo_execd {

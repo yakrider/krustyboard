@@ -360,10 +360,7 @@ impl CapsModKey {
             // capslock can come as repeats like other mod keys .. this was a fresh one
             self.down.set();
             update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
-
-            // lets notify the synced tracked mod keys, so they can invalidate/release themselves
-            ks.mod_keys.proc_notice__caps_down(ks);
-            ks.mouse.proc_notice__modkey_down (self.modkey, ks);
+            ks.proc_notice__modkey_down(caps);
         }
         if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
             // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
@@ -375,13 +372,7 @@ impl CapsModKey {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
-        ks.clear_first_stroke();
-        ks.mouse.proc_notice__modkey_up(self.modkey, ks);
-        if ks.in_ctrl_tab_scroll_state.is_set() {
-            if !ks.mod_keys.some_ctrl_down() { ks.in_ctrl_tab_scroll_state.clear() }
-        }
-        // lets also notify the alt/win tracked mod keys so they can update mngd flags or re-enable themselves if applicable
-        ks.mod_keys.proc_notice__caps_up(ks);
+        ks.proc_notice__modkey_up(caps);
     }
 
 
@@ -602,7 +593,7 @@ impl UnifModKey {
         // now first lets do some common work (physical state etc) ..
         self.down.set();
         update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
-        ks.mouse.proc_notice__modkey_down (self.modkey, ks);
+        ks.proc_notice__modkey_down (self.modkey);
 
         // then for external active state etc updates, we'll call the mgmt specific fns
         self.handling.handle_key_down (self, ks)
@@ -617,13 +608,7 @@ impl UnifModKey {
         }
         // lets do some common work (physical state etc) ..
         self.down.clear(); self.dbl_tap.clear();
-        ks.mouse.proc_notice__modkey_up (self.modkey, ks);
-
-        // if we were in ctrl-tab-scroll state, we'll clear it if this is ctrl release and caps not still being held
-        if ks.in_ctrl_tab_scroll_state.is_set()
-            && !ks.mod_keys.caps.down.is_set()
-            && ((self.modkey == lctrl || self.modkey == rctrl) && !self.paired_down())
-        { ks.in_ctrl_tab_scroll_state.clear() }
+        ks.proc_notice__modkey_up (self.modkey);
 
         // then for external active state etc updates, we'll call the mgmt specific fns
         self.handling.handle_key_up (self, ks)
