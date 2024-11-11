@@ -90,7 +90,7 @@ pub const MBTN_DOUBLE_TAP_MS : u32 = 500;
 pub fn update_stamp_key_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
     let is_double_tap = update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS);
     if is_double_tap {
-        jiggle_cursor();
+        jiggle_cursor(1);
         //let curs = Cursors::instance();
         //curs.hc_app_starting.toggle_cursor (OCR_NORMAL, &curs.hc_arrow);
         //curs.hc_app_starting.toggle_cursor (OCR_IBEAM,  &curs.hc_ibeam)
@@ -107,11 +107,14 @@ fn update_stamp_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag, thresh_ms:
     dbl_flag .store (is_double_tap);
     is_double_tap
 }
-pub fn jiggle_cursor() {
-    thread::spawn (|| {
-        MousePointer::move_rel(5,5);
-        thread::sleep(Duration::from_millis(100));
-        MousePointer::move_rel(-5,-5);
+pub fn jiggle_cursor (n:isize) {
+    thread::spawn ( move || {
+        for _ in 0 .. n {
+            MousePointer::move_rel(5,5);
+            thread::sleep (Duration::from_millis(100));
+            MousePointer::move_rel(-5,-5);
+            thread::sleep (Duration::from_millis(100));
+        }
     } );
 }
 
@@ -204,7 +207,10 @@ pub struct _KrustyState {
     pub win_snap_dat : RwLock <WinSnapDat>,
 
     /// the active first-stroke for modkey-sticky two-stroke-combos .. will clear when all modkeys are released
-    pub first_stroke : ComboHashAtomic,
+    pub sticky_first_stroke : ComboHashAtomic,
+
+    /// the active first-stroke for latching two-stroke-combos .. will clear only when clear-latches is triggered
+    pub latching_first_stroke : ComboHashAtomic,
 
 }
 
@@ -254,7 +260,8 @@ impl KrustyState {
 
                 win_snap_dat : RwLock::new (WinSnapDat::default()),
 
-                first_stroke : ComboHashAtomic::default(),
+                sticky_first_stroke   : ComboHashAtomic::default(),
+                latching_first_stroke : ComboHashAtomic::default(),
             } ) )
         ) .clone()
     }
@@ -263,8 +270,8 @@ impl KrustyState {
         self.mouse.proc_notice__modkey_down (mk, self);
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey) {
-        if !self.first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
-            self.first_stroke.clear();
+        if !self.sticky_first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
+            self.sticky_first_stroke.clear();
         }
         if mk == ModKey::caps {
             self.mod_keys.proc_notice__caps_up(self)
@@ -289,7 +296,8 @@ impl KrustyState {
 
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
-        self.first_stroke.clear();
+        self.sticky_first_stroke.clear();
+        self.latching_first_stroke.clear();
 
         use MouseButton::*;
         RightButton.press(); LeftButton.press(); RightButton.release(); LeftButton.release();
@@ -300,7 +308,7 @@ impl KrustyState {
             &self.in_right_btn_scroll_state,
         ] .into_iter() .for_each (|flag| flag.clear());
 
-        jiggle_cursor();
+        jiggle_cursor(3);
 
         // lets send a delayed Esc for any context menus etc that show up
         thread::spawn ( || {

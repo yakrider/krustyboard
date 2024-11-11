@@ -10,15 +10,12 @@ use crate::*;
 
 pub const N__COMBO_STATES_BITS__MODKEYS : usize = 9;    // x2 = 18  (from dbl-tap flags)
 pub const N__COMBO_STATES_BITS__MODES   : usize = 9;    // x2 = 18  (from dbl-tap flags)
-pub const N__COMBO_STATES_BITS__LATCHES : usize = 4;
 pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
 // ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
 // 4+5=9 modes ( msE, msD, msF, msR,  qks, qks1, qks2, qks3, qks4), x2 adding double-taps
-// 4 latched layer combo states (latch_1, latch_2, latch_3, latch_4)
 // 0 flags () .. mngd-ctrl-dn, ctrl-tab-scrl, right-ms-scrl no longer included in bitmap
 //
 // note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
-// note also that rght-ms-scrl and some other flags are not included in combo maps .. just check them at use
 
 
 
@@ -93,7 +90,7 @@ pub(crate) struct ComboValue {
     /// The no_rpt flag when enabled, suppresses activation of this combo for triggering key-repeats
     pub(crate) no_rpt : bool,
 
-    /// The is_fsc flag is simply a marker for fsc-registration AFs .. only used for info-printout analysis
+    /// The is_fsc flag is simply a marker for latching/sticky first-stroke registration AFs .. only used for info-printout analysis
     pub(crate) is_fsc : bool,
 }
 
@@ -154,18 +151,10 @@ impl Combo {
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
             .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.dbl_tap.is_set()) )
-            .chain ( & ks.mode_states.latch_flag_pairs() .map (|(_,ms)| ms.active.is_set()) )
             .chain ( & Self::get_cur_flags_states_flags(ks) .map (|fg| fg.is_set()) )
             .enumerate() .fold ( 0, |a, (ei,e)| a | ((*e as u64) << (ei as u8)) );
 
         Combo { _private:(), cmk, states_bits, wc_mask_bits }
-    }
-    pub fn gen_no_latch_combo (combo:Combo) -> Combo {
-        const LATCH_MASK_SHIFT : usize = 2 * N__COMBO_STATES_BITS__MODKEYS + 2 * N__COMBO_STATES_BITS__MODES;
-        const LATCH_MASK : u64 = ((1 << N__COMBO_STATES_BITS__LATCHES) -1) << LATCH_MASK_SHIFT;
-        // ^^ note that bits were progressively packed leftwards, so latches are towards leftmost, not rightmost
-        let states_bits = combo.states_bits  & (FULL_WILDCARDS_MASK ^ LATCH_MASK);
-        Combo { states_bits, ..combo }
     }
 
 
@@ -242,7 +231,6 @@ impl Combo {
                 .chain ( & ModeStates::static_ordered_modes()     .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .chain ( & ModKeys::static_ordered_mod_keys_dbl() .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) )
                 .chain ( & ModeStates::static_ordered_modes_dbl() .map (|md| get_mode_bit_and_wc (cg,md)) )
-                .chain ( & ModeStates::static_latch_states()      .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .chain ( & Combo::static_flags_modes()            .map (|md| get_mode_bit_and_wc (cg,md)) )
                 .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
                     let acc_w = aw | ((*w as u64) << (ei as u8));  // accumulate the mask bits
@@ -366,15 +354,13 @@ impl Combo {
 impl std::fmt::Debug for Combo {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use colored::*;
-        const bits_chars_uc: &str = "CACSWACSWEDFRQ1234CACSWACSWEDFRQ1234LLLL";
-        const bits_chars_lc: &str = "cacswacswedfrq1234cacswacswedfrq1234llll";
+        const bits_chars: &str = "CAčSWAčSWEDFRQ1234CAčSWAčSWEDFRQ1234";
         fn bits_str (bits:u64) -> String {
             format! ("{:064b}",bits) .chars().rev()
-                .zip (bits_chars_uc.chars())
-                .zip (bits_chars_lc.chars())
-                .enumerate() .map ( |(i,((b,uc),lc))| {
-                    let c = if b=='1' {uc.to_string().yellow()} else {lc.to_string().dimmed()};
-                    let sp = if i==0 || i==4 || i==8 || i==12 || i==17 || i==18 || i==22 || i==26 || i==30 || i==35 {"."} else {""};
+                .zip (bits_chars.chars())
+                .enumerate() .map ( |(i,(b,bc))| {
+                    let c = if b=='1' {bc.to_string().yellow()} else {bc.to_string().dimmed()};
+                    let sp = if i==0 || i==4 || i==8 || i==12 || i==17 || i==18 || i==22 || i==26 || i==30 {"."} else {""};
                     c.to_string() + &sp.dimmed().to_string()
                 } ) .collect::<String>()
         }

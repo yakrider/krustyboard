@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
 use derive_deref::Deref;
-use rustc_hash::FxHashSet;
 use strum_macros::EnumIter;
 
 use crate::{*, ModeState_T::*};
@@ -20,7 +19,6 @@ pub enum ModeState_T {
     msE_dbl, msD_dbl, msF_dbl, msR_dbl,
     qks, qks1, qks2, qks3, qks4,
     qks_dbl, qks1_dbl, qks2_dbl, qks3_dbl, qks4_dbl,
-    latch_1, latch_2, latch_3, latch_4,
     //mngd_ctrl_dn, //ctrl_tab_scrl, //right_ms_scrl,
     // note: ^^ want minimal flags use here, as we dont want a set flag to change the combo state so other combos w/o flags get invalidated
 }
@@ -51,23 +49,6 @@ pub struct ModeState ( Arc <_ModeState> );
 
 
 # [ derive (Debug) ]
-/// LatchState representation for mode-flags (and any associated trigger keys they have)
-/// Note that key triggered latch-states are TOGGLED upon assigned key presses
-pub struct _LatchState {
-    pub ms_t     : ModeState_T,     // we'll just add to the ModeState enum to keep usage simpler
-        key      : AtomicRefCell <Option<KbdKey>>,
-    pub active   : Flag,
-}
-
-# [ derive (Debug, Clone, Deref) ]
-/// Implements the (Arc wrapped) ModeState functionality
-pub struct LatchState ( Arc <_LatchState> );
-
-
-
-
-
-# [ derive (Debug) ]
 /// Holds all the ModeStates together, common functionality is impld here
 pub struct ModeStates {
     _private : (),
@@ -85,29 +66,13 @@ pub struct ModeStates {
     pub qks3 : ModeState,
     pub qks4 : ModeState,
 
-    // latching layer states
-    pub latch_1 : LatchState,
-    pub latch_2 : LatchState,
-    pub latch_3 : LatchState,
-    pub latch_4 : LatchState,
-
     // then the computed flags .. (helps avoid multiple checks at mouse-drag etc)
     pub some_l2_mode_active     : Flag,
     pub some_qks_mode_active    : Flag,
     pub some_mode_state_active  : Flag,
     pub some_mode_dbl_active    : Flag,
-    pub some_latch_state_active : Flag,
-
-    // we'll also maintain a set of our registered mode-trigger-keys for quick lookup
-    // NOTE: we're using AtomicRefCell instead of Arc-RwLock as there should be no writes are runtime (after initial setup)
-    mode_keys : AtomicRefCell <FxHashSet <KbdKey>>,
-    //latch_keys : AtomicRefCell <FxHashSet <KbdKey>>,     // no runtime need yet to check against these
 
 }
-
-
-
-
 
 
 
@@ -230,60 +195,6 @@ impl ModeState {
 
 
 
-/// Implements the (Arc wrapped) LatchState functionality
-impl LatchState {
-
-    pub fn new (ms_t: ModeState_T) -> LatchState {
-        LatchState ( Arc::new ( _LatchState {
-            ms_t,
-            key    : AtomicRefCell::new(None),
-            active : Flag::default(),
-        } ) )
-    }
-
-    /// get a copy of the registered key as option if set
-    pub fn key (&self) -> Option<KbdKey> {
-        *self.key.borrow()
-    }
-    /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
-    fn register_key (&self, key:KbdKey) {
-        *self.key.borrow_mut() = Some(key);
-    }
-
-    /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
-    fn bind_latch_key_down(&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
-        let (ls, ks) = (self.clone(), k.ks.clone());
-        let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
-        let cb = EvCbFn_Inline ( Arc::new ( move |_| {
-            if ks.mod_keys.caps.dbl_tap.is_set() {
-                // note that latch keys only update latch state when the keypress is on dbl_caps
-                //ls.active.toggle();
-                // ^^ we'll instead set it so only one latch state is active at a time (for usability reasons)
-                let prior_state = ls.active.is_set();
-                ks.mode_states.clear_latch_state_flags();
-                ls.active.store(!prior_state);
-                ks.mode_states.some_latch_state_active .store (ls.active.is_set())
-            }
-            ev_proc_ds
-        } ) );
-        if let Some(key) = self.key() {
-            k.iproc.input_bindings .bind_kbd_event (key, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
-        }
-    }
-
-    /// For mode-key btns (in addition to any combo maps action) we'll want individual binding callbacks that update flags.
-    /// Note that after these binding callbacks process, they will still go through bulk processing for their default/combo actions.
-    /// (This is as opposed to default-keys/combos that are handled in bulk w/o individual callback bindings)
-    pub fn bind_latch_key_action(&self, k:&Krusty) {
-        self.bind_latch_key_down(k);
-        // note that there's nothing to do on key-up for latch keys
-    }
-
-}
-
-
-
 
 /// Implements the (Arc wrapped) ModeStates-holder functionality
 impl ModeStates {
@@ -301,19 +212,10 @@ impl ModeStates {
             qks3 : ModeState::new (qks3, qks3_dbl),       // key :  3
             qks4 : ModeState::new (qks4, qks4_dbl),       // key :  4
 
-            latch_1 : LatchState::new (latch_1),       // key :  F1
-            latch_2 : LatchState::new (latch_2),       // key :  F2
-            latch_3 : LatchState::new (latch_3),       // key :  F3
-            latch_4 : LatchState::new (latch_4),       // key :  F4
-
             some_l2_mode_active    : Flag::default(),
             some_qks_mode_active   : Flag::default(),
             some_mode_state_active : Flag::default(),
             some_mode_dbl_active   : Flag::default(),
-            some_latch_state_active: Flag::default(),
-
-            mode_keys  : AtomicRefCell::new (FxHashSet::default()),
-            //latch_keys : AtomicRefCell::new (FxHashSet::default()),   // dont really need to track these
         }
     }
 
@@ -338,10 +240,6 @@ impl ModeStates {
         static QKS_MODES : [ModeState_T;5] = [qks, qks1, qks2, qks3, qks4];
         QKS_MODES
     }
-    pub fn static_latch_states() -> [ModeState_T; N__COMBO_STATES_BITS__LATCHES] {
-        static LATCH_STATES: [ModeState_T; N__COMBO_STATES_BITS__LATCHES] = [latch_1, latch_2, latch_3, latch_4];
-        LATCH_STATES
-    }
 
 
     pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); N__COMBO_STATES_BITS__MODES] { [
@@ -350,41 +248,19 @@ impl ModeStates {
         (msE, &self.msE), (msD,  &self.msD),  (msF, &self.msF), (msR, &self.msR),
         (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3), (qks4, &self.qks4)
     ] }
-    pub fn latch_flag_pairs (&self) -> [(ModeState_T, &LatchState); N__COMBO_STATES_BITS__LATCHES] { [
-        // NOTE that the ordering here MUST match that given by the static_latch_states above
-        // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
-        (latch_1, &self.latch_1), (latch_2,  &self.latch_2),  (latch_3, &self.latch_3), (latch_4, &self.latch_4),
-    ] }
 
 
 
     pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {
         if let Some(ms) = self.get_mode_flag(ms_t) {
             ms.register_key(key);
-            self.mode_keys.borrow_mut().insert(key);
         }
-    }
-    pub fn check_if_mode_key (&self, key:Key) -> bool {
-        // this check needs to happen at runtime, so maintaining a small hashmap to do it fast rather than iterating through flags
-        self.mode_keys.borrow().contains(&key)
-        // ^^ note that we're ignoring latch keys here, they have no special runtime implication
     }
     pub fn get_mode_flag (&self, mst:ModeState_T) -> Option<&ModeState> {
         self.mode_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
     }
     pub fn get_mode_t (&self, key:Key) -> Option<ModeState_T> {
         self.mode_flag_pairs() .iter() .find (|(_, ms)| ms.key.borrow().filter(|&k| k==key).is_some()) .map (|(ms_t,_)| *ms_t)
-    }
-    
-
-    pub fn register_latch_key (&self, key:Key, ms_t:ModeState_T) {
-        if let Some(ms) = self.get_latch_flag(ms_t) {
-            ms.register_key(key);
-            //self.latch_keys.write().unwrap().insert(key);     // dont really need to track these .. no runtime need yet
-        }
-    }
-    pub fn get_latch_flag (&self, mst:ModeState_T) -> Option<&LatchState> {
-        self.latch_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
     }
 
     
@@ -418,24 +294,16 @@ impl ModeStates {
     }
     
 
-    // latch states are exclusive, so instead of refreshing is-any-latch-active, we instead clear them before toggling any
-    pub fn clear_latch_state_flags (&self) {
-        self.latch_flag_pairs() .iter() .for_each (|(_,ms)| ms.active.clear());
-    }
-
     pub fn clear_flags (&self) {
         self.mode_flag_pairs()  .iter() .for_each (|(_,ms)| { ms.down.clear(); ms.dbl_tap.clear() });
-        self.latch_flag_pairs() .iter() .for_each (|(_,ms)| { ms.active.clear() });
         self.some_l2_mode_active.clear();
         self.some_qks_mode_active.clear();
         self.some_mode_state_active.clear();
         self.some_mode_dbl_active.clear();
-        self.some_latch_state_active.clear();
     }
 
     pub fn bind_mode_keys_actions (&self, k:&Krusty) {
         self.mode_flag_pairs()  .iter() .for_each (|(_,ms)| ms.bind_mode_key_action(k));
-        self.latch_flag_pairs() .iter() .for_each (|(_,ms)| ms.bind_latch_key_action(k));
     }
 
 }

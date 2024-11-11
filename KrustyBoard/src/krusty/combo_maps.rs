@@ -82,31 +82,68 @@ impl CombosMap {
     }
 
 
-    /// Registers a combo as a possible 'first-stroke-combo' (fsc), and returns its combo-hash. <br>
+
+    /// Registers a combo as a possible 'sticky-first-stroke-combo' (sfsc), and returns its combo-hash. <br>
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
-    /// Note that fscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid fsc
-    pub fn register_first_stroke_combo (&self, cg: impl Into<CG>) -> ComboHash {
+    /// Note that sfscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid sfsc
+    pub fn register_combo_sticky_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
         let fsc = Combo::gen_fsc_hash(cg.clone());
-        self.setup_first_stroke_af (cg, fsc);
+        self.setup_af_sticky_first_stroke (cg, fsc);
         fsc
     }
-    /// Co-Registers a possible first-stroke combo as an alternate for another first-stroke with the combo-hash supplied
-    pub fn co_register_first_stroke_combo (&self, cg: impl Into<CG>, fsc:ComboHash) {
-        self.setup_first_stroke_af (cg.into(), fsc);
+    /// Co-Registers a possible first-stroke combo as an alternate for another sticky first-stroke with the combo-hash supplied
+    pub fn co_register_combo_sticky_first_stroke (&self, cg: impl Into<CG>, fsc:ComboHash) {
+        self.setup_af_sticky_first_stroke (cg.into(), fsc);
     }
-    fn setup_first_stroke_af (&self, cg:CG, fsc:ComboHash) {
+    fn setup_af_sticky_first_stroke (&self, cg:CG, fsc:ComboHash) {
         let ks = KrustyState::instance();
-        let af = Arc::new (move || {
+        let af = Arc::new ( move || {
+            // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
+            // (fscs are required to have some mod-key in them and are active until all modkeys are released)
             if ks.mod_keys.some_mk_down() {
-                // ^^ the check is for safety, as any recorded fsc only clears on all-modkeys-released ..
-                // (fscs are required to have some mod-key in them and are active until all modkeys are released)
-                ks.first_stroke.store(fsc);
-                jiggle_cursor()
+                ks.sticky_first_stroke.store(fsc);
+                jiggle_cursor(1)
             }
         } );
         self._add_combo (cg, ag().af(af), true);
     }
+
+
+    /// Registers a combo as a possible 'latching-first-stroke-combo' (lfsc), and returns its combo-hash. <br>
+    /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
+    /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered
+    pub fn register_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
+        let cg = cg.into();
+        let fsc = Combo::gen_fsc_hash(cg.clone());
+        self.setup_af_latching_first_stroke (cg,fsc);
+        fsc
+    }
+    /// Co-Registers a possible first-stroke combo as an alternate for another latching first-stroke with the combo-hash supplied
+    pub fn co_register_combo_latching_first_stroke (&self, cg: impl Into<CG>, fsc:ComboHash) {
+        self.setup_af_latching_first_stroke (cg.into(), fsc);
+    }
+    fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
+        let ks = KrustyState::instance();
+        let af = Arc::new ( move || {
+            ks.latching_first_stroke.store(fsc);
+            jiggle_cursor(2);
+        } );
+        self._add_combo (cg, ag().af(af), true);
+    }
+
+
+    /// Registers a combo to CLEAR any active latching-first-stroke-combo
+    pub fn register_combo_clear_latching_first_stroke (&self, cg: impl Into<CG>) {
+        let ks = KrustyState::instance();
+        let af = Arc::new ( move || {
+            ks.latching_first_stroke.clear();
+            jiggle_cursor(2);
+        } );
+        self._add_combo (cg.into(), ag().af(af), true);
+    }
+
+
 
     fn add_to_wildcards_map (&self, c:Combo) {
         let mut wcm = self.wildcard_combos.borrow_mut();
@@ -275,7 +312,9 @@ impl CombosMap {
     // - if fsc present and doesnt match, we skip that cv
     // - if fsc matched and execd, we can only go through subset that also have the matching fsc specified
     // - (note .. given fsc w cond, where fsc matched but cond did not, we'd still continue checking non-fsc .. follows least-surprise)
-    // - (note also, that our fscs are modkey-sticky .. ie, a triggered fsc remains active until all held-modkeys are released .. non-modkey fscs are pointless)
+    // Sticky vs Latching FSCs (sfsc / lfsc)
+    // - SFSCs are modkey-sticky .. ie, a triggered sfsc remains active until all held-modkeys are released .. non-modkey fscs are pointless)
+    // - LFSCs are latching .. ie, a triggered lfsc remains active until clear-latching-first-stroke is explicitly triggered
     // Condition Matching (cond) rules :
     // - we execute AFs for all matching coditional-combos OR all matching non-conditional combos
     // - however, if any conditional combo triggers, then any remaining non-conditional combos are ignored
@@ -288,15 +327,17 @@ impl CombosMap {
             // first we enforce rules for combos with first-stroke-combo reqs specified
             if !cv.fsc.is_empty() {
                 proc_res.fscs_found = true;
-                if !ks.first_stroke.check_match(cv.fsc) { continue }
-                // ^^ we found a fsc for this cv .. so if we dont match it, we should skip it
+                if !ks.latching_first_stroke.check_match(cv.fsc)
+                    && !ks.sticky_first_stroke.check_match(cv.fsc)
+                { continue }
+                // ^^ this cv had a fsc .. so if that fsc matched neither of the active [sfsc, lfsc], we should skip it
             }
             else if proc_res.fscs_found && proc_res.combo_execd {
                 // ^^ this cv didnt have a fsc, but some prior fsc existed, and we've execd on some cv for this combo earlier ..
                 // .. and since fscs sort up top, nothing afterwards is now worth checking ..
                 return proc_res
             }
-            // so by here, either we're the a matched combo, or no fsc existed or matched for this and we're checking non-fsc cvs
+            // so by here, either we're a matched fsc combo, or no fsc existed or matched for this and we're checking non-fsc cvs
             // so now we can simply process based on regular conditonals rules
             if let Some(cond) = cv.cond.as_ref() {
                 // all conditional combos that are satisfied can be run
@@ -377,27 +418,7 @@ impl CombosMap {
 
         if proc_res.combo_execd || wc_proc_res.combo_execd { return }
 
-        // - Else if some latch state was active, we can try to match a combo ignoring latches (as fallback)
-        //   (And we'll do the same as above here, w direct matches first, w global/local exclusivity to fscs/conditionals, then check wildcards similarly)
-        // Note that we're doing the 'check again w/o latch' coz its more efficient than trying to default all latch combos to have no-latch wildcards ..
-        // .. coz the cur impl requires linear search to match wildcard combos (within the subset for that particular cmk w wildcard combos)
-
-        if ks.mode_states.some_latch_state_active.is_set() {
-
-            let combo_no_latch = Combo::gen_no_latch_combo(combo);
-
-            let proc_res = self.try_proc_combo_afs (&combo_no_latch, ev, ks);
-
-            if proc_res.fscs_found && proc_res.combo_execd { return }
-
-            let wc_proc_res = self.try_proc_wildcard_combo_afs (&cmk, &combo_no_latch, ev, ks);
-
-            if proc_res.combo_execd || wc_proc_res.combo_execd { return }
-        }
-
-        // - And finally, if neither direct lookups, nor lookups ignoring any active latch state found anything to run (with and without wildcards)
-        // .. then we'll resort to fallback action generation and processing
-
+        // - finally if no lookups (w/ and w/o wildcards) found anything to run, we'll try fallback action gen and processing
         // but first, lets also filter out any automatic fallbacks for ..
         // .. caps-dbl, ralt-dbl combos in all cases .. and some mode-state (and mode-state-dbl) when with caps down
         // .. (reminder that [EDFRQ1234]_dbl, potentially w shift/ralt etc can trigger during normal typing and must be allowed)
