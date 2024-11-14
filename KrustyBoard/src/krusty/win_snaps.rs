@@ -9,6 +9,7 @@ use rand::Rng;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
+use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SW_SHOWMAXIMIZED, WINDOWPLACEMENT};
 
 use crate::{ *, utils::*};
 
@@ -37,15 +38,16 @@ impl RectEdgeLists {
 
 # [ derive (Debug, Default, Clone) ]
 pub struct WinSnapDat {
-    pub hwnd        : Hwnd,
-    pub rect        : RECT,
-    pub padding     : RECT,
-    pub workarea    : RECT,
-    pub snap_thresh : u32,
-    pub pointer     : POINT,
-    pub edge_lists  : RectEdgeLists,
-    pub win_grp     : Option<WinGroups_E>,
-    pub grp_rects   : FxHashMap <Hwnd,RECT>,
+    pub hwnd          : Hwnd,
+    pub rect          : RECT,
+    pub padding       : RECT,
+    pub win_placement : WINDOWPLACEMENT,
+    pub workarea      : RECT,
+    pub snap_thresh   : u32,
+    pub pointer       : POINT,
+    pub edge_lists    : RectEdgeLists,
+    pub win_grp       : Option<WinGroups_E>,
+    pub grp_rects     : FxHashMap <Hwnd,RECT>,
 }
 
 
@@ -106,9 +108,53 @@ fn win_grp_move_mirrored (dx:i32, dy:i32, ks:&KrustyState) {     //println!("{:?
     } )
 }
 
+fn re_position_maxed_window_for_drag (ks:&KrustyState) {
+    // for new loction for restored windows, we'll try and take proportions of pointer location relative to workarea
+    // this will leave the new window always enclosing the pointer, and therefore ready for dragging
+    let wsd = ks.win_snap_dat.read().unwrap();
+    let (rect, wa) = (wsd.win_placement.rcNormalPosition, wsd.workarea);
+    let (w, h)   = (rect.right - rect.left,  rect.bottom - rect.top);
+    let (waw, wah) = (wa.right - wa.left,  wa.bottom - wa.top);
+
+    let mut wp = wsd.win_placement;
+    wp.rcNormalPosition.left =  wsd.pointer.x - wsd.pointer.x * w / waw;
+    wp.rcNormalPosition.top =  wsd.pointer.y - wsd.pointer.y * h / wah;
+    wp.rcNormalPosition.right = wp.rcNormalPosition.left + w;
+    wp.rcNormalPosition.bottom = wp.rcNormalPosition.top + h;
+    wp.showCmd = SW_RESTORE;
+    win_set_placement (wsd.hwnd, &mut wp);
+}
+
+fn ensure_maxed_windows_drag_ready (ks:&KrustyState) -> bool {
+    // it doesnt make sense to drag maximized windows as-is ..
+    // - if we find a maximized window, we manually reposition it by the pointer in its original size first
+    // - but it takes a bit for that to reflect in window-dimensions/edges etc that we want for drag/snap ..
+    // - so we skip that round and set the hwnd to zero to indicate we need to re-capture next round
+
+    if ks.win_snap_dat.read().unwrap().win_placement.showCmd == SW_SHOWMAXIMIZED {
+        re_position_maxed_window_for_drag (ks);
+        // we'll zero out the hwnd so next time we'll refresh the snap-dat (so new dimensions/edges are reflected)
+        ks.win_snap_dat.write().unwrap().hwnd = Hwnd(0);
+        // and update the showCmd for when we get here hext mouse-move
+        ks.win_snap_dat.write().unwrap().win_placement.showCmd = SW_RESTORE;
+        return false
+    }
+    // now if the hwnd had been wiped, we'll re-capture snap-dat
+    if ks.win_snap_dat.read().unwrap().hwnd == Hwnd(0) {
+        ks.capture_pointer_win_snap_dat(None)
+    }
+    true
+}
+
 pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:&KrustyState) {
+    // first, we gotta take care of any maximized windows before we attempt dragging/resizing them
+    if !ensure_maxed_windows_drag_ready (ks) {
+        return
+    }
     // pointer move events stream much faster than reasonable to repaint for smooth perf .. so we'll redraw only for a fraction
-    if rand::thread_rng().gen_range(0..10) < 8 { handle_pointer_window_drag (x,y,ks) }
+    if rand::thread_rng() .gen_range (0..10) < 8 {
+        handle_pointer_window_drag (x, y, ks)
+    }
 }
 
 
@@ -134,9 +180,15 @@ fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
     );
 }
 pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
+    // first, we gotta take care of any maximized windows before we attempt dragging/resizing them
+    if !ensure_maxed_windows_drag_ready (ks) {
+        return
+    }
     // pointer move events stream much faster than reasonable to repaint for smooth perf ..
     // .. this is even more critical for resize as compared to drag, so we'll redraw for even smaller fraction of reports
-    if rand::thread_rng().gen_range(0..10) < 2 { handle_pointer_window_resize (x,y,ks) }
+    if rand::thread_rng() .gen_range (0..10) < 2 {
+        handle_pointer_window_resize (x, y, ks)
+    }
 }
 
 
@@ -206,6 +258,7 @@ pub fn capture_win_snap_dat (ks:&KrustyState, hwnd:Hwnd, win_grp:Option<WinGroup
     let rect = win_get_window_rect (hwnd);
     let frame = win_get_window_frame (hwnd);
     let padding = calc_window_padding (&rect, &frame);
+    let win_placement = win_get_placement (hwnd);
 
     // we'll want to store rects for any group windows to make mirrored moves if in grp mode
     let mut grp_rects : FxHashMap <Hwnd, RECT> = FxHashMap::default();
@@ -230,7 +283,7 @@ pub fn capture_win_snap_dat (ks:&KrustyState, hwnd:Hwnd, win_grp:Option<WinGroup
     let pointer = MousePointer::pos();
 
     // and thats it, can store it all away so the actual pointer-move callbacks can be fast!
-    WinSnapDat { hwnd, rect, padding, workarea, snap_thresh, pointer, edge_lists, win_grp, grp_rects }
+    WinSnapDat { hwnd, rect, padding, win_placement, workarea, snap_thresh, pointer, edge_lists, win_grp, grp_rects }
 }
 
 

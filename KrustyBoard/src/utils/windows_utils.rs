@@ -156,8 +156,22 @@ pub fn win_check_minimized (hwnd:Hwnd) -> bool { unsafe {
 pub fn win_minimize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MINIMIZE);
 } }
+pub fn win_get_placement (hwnd:Hwnd) -> WINDOWPLACEMENT { unsafe {
+    let mut win_state =  WINDOWPLACEMENT::default();
+    GetWindowPlacement (hwnd, &mut win_state);
+    win_state
+} }
+pub fn win_set_placement (hwnd:Hwnd, wp:&mut WINDOWPLACEMENT) { unsafe {
+    SetWindowPlacement (hwnd, &*wp);
+} }
+pub fn win_check_maximized (hwnd:Hwnd) -> bool {
+    win_get_placement(hwnd).showCmd == SW_SHOWMAXIMIZED
+}
 pub fn win_maximize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MAXIMIZE);
+} }
+pub fn win_restore (hwnd:Hwnd) { unsafe {
+    ShowWindowAsync (hwnd, SW_RESTORE);
 } }
 pub fn win_toggle_maximize (hwnd:Hwnd) { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();

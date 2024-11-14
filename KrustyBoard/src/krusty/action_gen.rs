@@ -15,10 +15,21 @@ ActionGen API Type-State machinery notes:
 */
 
 
+
+/// The mouse pointer actions are best modeled differently from events, so we'll define it separately
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub enum MousePointerAction_T {
+    pointer_move_abs { x_pos:i32, y_pos:i32 },
+    pointer_move_rel { del_x:i32, del_y:i32 },
+}
+
+
+
 #[derive (Clone)] pub struct ActionGenSt_Init     { }
 #[derive (Clone)] pub struct ActionGenSt_Key      { key   : Key,          action : Option<KbdEvCbMapKey_T> }
 #[derive (Clone)] pub struct ActionGenSt_MouseBtn { mbtn  : MouseButton,  action : Option<MouseBtnEv_T> }
 #[derive (Clone)] pub struct ActionGenSt_Wheel    { wheel : MouseWheel,   action : MouseWheelEv_T }
+#[derive (Clone)] pub struct ActionGenSt_Pointer  { action : MousePointerAction_T }
 #[derive (Clone)] pub struct ActionGenSt_AF       { af : AF }
 
 pub struct ActionGenSt_Inited   { af : AF }
@@ -32,6 +43,7 @@ impl ActionGenSt for ActionGenSt_Init {}
 impl ActionGenSt for ActionGenSt_Key {}
 impl ActionGenSt for ActionGenSt_MouseBtn {}
 impl ActionGenSt for ActionGenSt_Wheel {}
+impl ActionGenSt for ActionGenSt_Pointer {}
 impl ActionGenSt for ActionGenSt_AF {}
 impl ActionGenSt for ActionGenSt_Inited {}
 
@@ -41,6 +53,7 @@ pub trait ActionGenable {}
 impl ActionGenable for ActionGenSt_Key {}
 impl ActionGenable for ActionGenSt_MouseBtn {}
 impl ActionGenable for ActionGenSt_Wheel {}
+impl ActionGenable for ActionGenSt_Pointer {}
 impl ActionGenable for ActionGenSt_AF {}
 impl ActionGenable for ActionGenSt_Inited {}
 
@@ -101,6 +114,10 @@ impl ActionGen<ActionGenSt_Init> {
     /// By default, it WILL wrap the AF with modifier key guard actions, can be set to not do so w .mkg_nw()
     pub fn hwhl (self) -> ActionGen <ActionGenSt_Wheel> {
         let st = ActionGenSt_Wheel { wheel: MouseWheel::HorizontalWheel, action:MouseWheelEv_T::WheelBackwards };
+        ActionGen { mks: self.mks, wrap_mkg: true, st }
+    }
+    pub fn pointer (self) -> ActionGen <ActionGenSt_Pointer> {
+        let st = ActionGenSt_Pointer { action: MousePointerAction_T::pointer_move_rel {del_x:0, del_y:0} };
         ActionGen { mks: self.mks, wrap_mkg: true, st }
     }
     /// Create a new Combo-Action-generator (non-key action-function output type). <br>
@@ -186,6 +203,17 @@ impl ActionGen <ActionGenSt_Wheel> {
     }
 }
 
+impl ActionGen <ActionGenSt_Pointer> {
+    pub fn move_abs (mut self, x_pos:i32, y_pos:i32) -> Self {
+        self.st.action = MousePointerAction_T::pointer_move_abs { x_pos, y_pos };
+        self
+    }
+    pub fn move_rel (mut self, del_x:i32, del_y:i32) -> Self {
+        self.st.action = MousePointerAction_T::pointer_move_rel { del_x, del_y };
+        self
+    }
+}
+
 /// methods specific to generating ActionGen for directly specified Action-Function
 impl ActionGen <ActionGenSt_AF> {
     /// Enable wrapping with mod-key guard actions (which accounts for prior modkey active/inactive). <br>
@@ -243,7 +271,7 @@ impl From <ActionGen <ActionGenSt_Key>> for AG {
             Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp)   => action_p1 (Key::release,       ag.st.key),
             None                                       => action_p1 (Key::press_release, ag.st.key),
         };
-        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited{af} }
+        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af} }
     }
 }
 impl From <ActionGen <ActionGenSt_MouseBtn>> for AG {
@@ -253,7 +281,7 @@ impl From <ActionGen <ActionGenSt_MouseBtn>> for AG {
             Some (MouseBtnEv_T::BtnUp)   => action_p1 (MouseButton::release,       ag.st.mbtn),
             None                         => action_p1 (MouseButton::press_release, ag.st.mbtn),
         };
-        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited{af} }
+        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af} }
     }
 }
 impl From <ActionGen <ActionGenSt_Wheel>> for AG {
@@ -267,9 +295,20 @@ impl From <ActionGen <ActionGenSt_Wheel>> for AG {
                 ws.wheel.scroll(delta)
             } )
         } else { no_action() };
-        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited{af} }
+        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af} }
     }
 }
+impl From <ActionGen <ActionGenSt_Pointer>> for AG {
+    fn from (ag : ActionGen <ActionGenSt_Pointer>) -> Self {
+        use MousePointerAction_T::*;
+        let af : AF = match ag.st.action {
+            pointer_move_abs { x_pos, y_pos } => Arc::new ( move || MousePointer::move_abs (x_pos, y_pos) ),
+            pointer_move_rel { del_x, del_y } => Arc::new ( move || MousePointer::move_rel (del_x, del_y) ),
+        };
+        Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af} }
+    }
+}
+
 impl From <ActionGen <ActionGenSt_AF>> for AG {
     fn from (ag : ActionGen<ActionGenSt_AF>) -> Self {
         Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af: ag.st.af} }
