@@ -9,22 +9,22 @@ use derive_deref::Deref;
 use rustc_hash::FxHashMap;
 
 use crate::*;
-use {EventDat::*, EvCbMapKey::*};
+use {EventDat::*, BindingsMapKey::*};
 
 
 
 /// The bindings-map key type for any key can be key-down or key-up .. (no sys-key-dn/up, press-rel, hold, dbl-click etc)
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum KbdEvCbMapKey_T {
+pub enum KbdEv_MapKey_T {
     KeyEventCb_KeyDown,
     KeyEventCb_KeyUp,
 }
-impl From<KbdEvent_T> for KbdEvCbMapKey_T {
+impl From<KbdEvent_T> for KbdEv_MapKey_T {
     fn from (ev_t: KbdEvent_T) -> Self {
         use KbdEvent_T::*;
         match ev_t {
-            KbdEvent_KeyDown | KbdEvent_SysKeyDown => KbdEvCbMapKey_T::KeyEventCb_KeyDown,
-            KbdEvent_KeyUp   | KbdEvent_SysKeyUp   => KbdEvCbMapKey_T::KeyEventCb_KeyUp,
+            KbdEvent_KeyDown | KbdEvent_SysKeyDown => KbdEv_MapKey_T::KeyEventCb_KeyDown,
+            KbdEvent_KeyUp   | KbdEvent_SysKeyUp   => KbdEv_MapKey_T::KeyEventCb_KeyUp,
     }  }
 }
 
@@ -32,14 +32,14 @@ impl From<KbdEvent_T> for KbdEvCbMapKey_T {
 /// The bindings map key contains the mouse-event-source, and the event-action upon which the callback is to trigger. <br>
 /// (This is defined matching the EventDat types minus the actual event-specific data)
 #[derive (Eq, PartialEq, Hash, Copy, Clone)]
-pub enum EvCbMapKey {
-    key_ev_t   ( KbdKey,       KbdEvCbMapKey_T   ),
+pub enum BindingsMapKey {
+    key_ev_t   ( KbdKey,       KbdEv_MapKey_T ),
     btn_ev_t   ( MouseButton,  MouseBtnEv_T   ),
     wheel_ev_t ( MouseWheel,   MouseWheelEv_T ),
     move_ev_t
 }
-impl EvCbMapKey {
-    pub fn from_event (event: &Event) -> EvCbMapKey {
+impl BindingsMapKey {
+    pub fn from_event (event: &Event) -> BindingsMapKey {
         match event.dat {
             key_event   {key,   ev_t, ..}  => key_ev_t   (key, ev_t.into()),
             btn_event   {btn,   ev_t, ..}  => btn_ev_t   (btn, ev_t),
@@ -47,9 +47,9 @@ impl EvCbMapKey {
             move_event  {..}               => move_ev_t,
     }  }
 }
-impl std::fmt::Debug for EvCbMapKey {
+impl std::fmt::Debug for BindingsMapKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use {KbdEvCbMapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
+        use {KbdEv_MapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
         match &self {
             key_ev_t   (key,   KeyEventCb_KeyDown) => write! (f, "Down  {:?}", key),
             key_ev_t   (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {:?}", key),
@@ -84,7 +84,7 @@ pub type EvCbFn_OffThread_T = Arc <dyn Fn (Event) + Send + Sync + 'static>;
 
 /// the combo-proc cb will return only the event-propagation-directive <br>
 /// the semantic type is : Arc < dyn Fn (event-cb-map-key, was-binding-found, input-event) -> event-prop-directives >
-pub type EvCbFn_ComboProc_T = Arc <dyn Fn (EvCbMapKey, bool, Event) -> EvProp_D + Send + Sync + 'static>;
+pub type EvCbFn_ComboProc_T = Arc <dyn Fn (BindingsMapKey, bool, Event) -> EvProp_D + Send + Sync + 'static>;
 
 /// finally, we'll ahve a type for queued packaged computation with all the args already preapplied (to exec from the queue)
 pub type EvCbFn_QueuedProc_T = Box <dyn Fn() + Send + Sync + 'static>;
@@ -107,7 +107,7 @@ pub struct EvCbEntry {
 
 # [ derive (Deref) ]
 pub struct Bindings (
-    AtomicRefCell <FxHashMap <EvCbMapKey, EvCbEntry>>
+    AtomicRefCell <FxHashMap <BindingsMapKey, EvCbEntry>>
     // ^^ note that we use AtomicRefCell instead of RwLock as we dont ever write to it at runtime (and it is faster at runtime)
     // .. so if want to support dynamic binding/unbinding at runtime, we should switch back to RwLock
 );
@@ -122,7 +122,7 @@ impl Bindings {
         Bindings ( AtomicRefCell::new ( FxHashMap::default() ) )
     }
 
-    pub fn bind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T, cbe:EvCbEntry) {
+    pub fn bind_kbd_event (&self, key:Key, ev_t:KbdEv_MapKey_T, cbe:EvCbEntry) {
         self .borrow_mut() .insert ( key_ev_t (key, ev_t), cbe );
     }
     pub fn bind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEv_T, cbe:EvCbEntry) {
@@ -139,7 +139,7 @@ impl Bindings {
     // NOTE that these unbinds below are NOT intended to be called at runtime as we're using AtomicRefCell instead of RwLock
     // if we want to enable dynamic binding/unbinding at runtime, we should switch bindings back to RwLock
 
-    pub fn unbind_kbd_event (&self, key:Key, ev_t:KbdEvCbMapKey_T) {
+    pub fn unbind_kbd_event (&self, key:Key, ev_t:KbdEv_MapKey_T) {
         self .borrow_mut() .remove ( & key_ev_t (key, ev_t) );
     }
     pub fn unbind_btn_event (&self, mbtn:MouseButton, ev_t:MouseBtnEv_T) {

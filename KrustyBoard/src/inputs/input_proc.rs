@@ -216,12 +216,12 @@ impl InputProcessor {
         use { EvProp_D::*, ComboProc_D::* };
         let mut ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
 
-        let cmk = EvCbMapKey::from_event(&event);
+        let bmk = BindingsMapKey::from_event(&event);
         let mut had_binding = false;
 
         // first route it through any per-key registered callbacks
-        //if let Some(cbe) = self.input_bindings .borrow() .get (&cmk) {
-        if let Some(cbe) = unsafe { & *self.input_bindings.as_ptr() } .get (&cmk) {
+        //if let Some(cbe) = self.input_bindings .borrow() .get (&bmk) {
+        if let Some(cbe) = unsafe { & *self.input_bindings.as_ptr() } .get (&bmk) {
             // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
             had_binding = true;
             ev_proc_ds = cbe.ev_proc_ds;
@@ -266,7 +266,7 @@ impl InputProcessor {
         // note that we're using the same input-af-queue ..
         // .. and its non-ideal as some other event might have snuck in between event and its combo proc
         // .. but a separate queue woudlnt fix it either .. and eitherway shoudlnt be a problem if queue clearance is fast enough
-        let _ = self.input_af_queue .send (Box::new (move || cm.combo_maps_handle_input (cmk, &event)));
+        let _ = self.input_af_queue .send (Box::new (move || cm.combo_maps_handle_input (bmk, &event)));
 
         // combo-proc-handled keys should be completely blocked past combo-proc (both keydn and keyup etc)
         // (not least because the actual combo proc is queued for later .. so either we bail early, or we combo-proc and stop cur event)

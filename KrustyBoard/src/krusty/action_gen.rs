@@ -26,7 +26,7 @@ pub enum MousePointerAction_T {
 
 
 #[derive (Clone)] pub struct ActionGenSt_Init     { }
-#[derive (Clone)] pub struct ActionGenSt_Key      { key   : Key,          action : Option<KbdEvCbMapKey_T> }
+#[derive (Clone)] pub struct ActionGenSt_Key      { key   : Key,          action : Option<KbdEv_MapKey_T> }
 #[derive (Clone)] pub struct ActionGenSt_MouseBtn { mbtn  : MouseButton,  action : Option<MouseBtnEv_T> }
 #[derive (Clone)] pub struct ActionGenSt_Wheel    { wheel : MouseWheel,   action : MouseWheelEv_T }
 #[derive (Clone)] pub struct ActionGenSt_Pointer  { action : MousePointerAction_T }
@@ -165,12 +165,12 @@ impl <S> ActionGen<S>
 impl ActionGen <ActionGenSt_Key> {
     /// Specify the key action to be press only (not the default press-release)
     pub fn press (mut self) -> Self {
-        self.st.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown);
+        self.st.action = Some (KbdEv_MapKey_T::KeyEventCb_KeyDown);
         self
     }
     /// Specify the key action to be release only (not the default press-release)
     pub fn rel (mut self) -> Self {
-        self.st.action = Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp);
+        self.st.action = Some (KbdEv_MapKey_T::KeyEventCb_KeyUp);
         self
     }
 }
@@ -267,9 +267,9 @@ impl ActionGen <ActionGenSt_Inited> {
 impl From <ActionGen <ActionGenSt_Key>> for AG {
     fn from (ag : ActionGen <ActionGenSt_Key>) -> Self {
         let af = match ag.st.action {
-            Some (KbdEvCbMapKey_T::KeyEventCb_KeyDown) => action_p1 (Key::press,         ag.st.key),
-            Some (KbdEvCbMapKey_T::KeyEventCb_KeyUp)   => action_p1 (Key::release,       ag.st.key),
-            None                                       => action_p1 (Key::press_release, ag.st.key),
+            Some (KbdEv_MapKey_T::KeyEventCb_KeyDown) => action_p1 (Key::press,         ag.st.key),
+            Some (KbdEv_MapKey_T::KeyEventCb_KeyUp)   => action_p1 (Key::release,       ag.st.key),
+            None                                           => action_p1 (Key::press_release, ag.st.key),
         };
         Self { mks: ag.mks, wrap_mkg: ag.wrap_mkg, st: ActionGenSt_Inited {af} }
     }

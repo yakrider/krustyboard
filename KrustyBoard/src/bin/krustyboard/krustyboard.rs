@@ -1251,7 +1251,7 @@ fn setup_misc_standalone_combos (k:&Krusty) {
 
 fn setup_window_action_tscs (k:&Krusty) {
     use RectEdgeSide::*;
-	// caps-win-w as fsc for window-actions   .. and we added caps-alt-w too .. why not, its more ergo
+    // fsc:  caps-win-w   or  caps-alt-w  .. latching
     //  - j/k/i/comma .. caps-only -> move .. w/ f -> snap .. w/ r -> resize ..
     //  - whl fwd/bkwd .. caps-only OR w/ d -> left/right .. w/ e -> up/dn .. w f/fd/fe -> snap .. r/rd/re -> resize
     //  - toggles: u -> vertmax .. m -> max .. n -> min .. t -> always-on-top .. b -> border/titlebar
@@ -1345,6 +1345,8 @@ fn setup_tab_nav_tscs (k:&Krusty) {
 
 }
 
+
+
 fn setup_arrow_wheel_tscs (k:&Krusty) {
     // fsc : caps-caps-q-q .. latching
     let fsc = k.cm .register_combo_latching_first_stroke ( cg().k(Q).s(qks_dbl).m(caps_dbl) );
@@ -1357,16 +1359,18 @@ fn setup_arrow_wheel_tscs (k:&Krusty) {
 
 }
 
+
+
 fn setup_kbd_pointer_tscs (k:&Krusty) {
     // fsc : caps-e-e-m .. sticky
     let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(M).m(caps).s(msE_dbl) );
     let v : i32 = 20;
 
-    // first the cardinal mouse directions
-    k.cm .add_combo ( cg().k(I     ).m(caps).fsc(fsc),  ag().pointer() .move_rel ( 0, -v) );
-    k.cm .add_combo ( cg().k(Comma ).m(caps).fsc(fsc),  ag().pointer() .move_rel ( 0,  v) );
-    k.cm .add_combo ( cg().k(J     ).m(caps).fsc(fsc),  ag().pointer() .move_rel (-v,  0) );
-    k.cm .add_combo ( cg().k(K     ).m(caps).fsc(fsc),  ag().pointer() .move_rel ( v,  0) );
+    // first the cardinal mouse directions .. the msE wc simply to avoid inadvertent actions (e.g when adding cursors)
+    k.cm .add_combo ( cg().k(I     ).m(caps).fsc(fsc).wcs(msE),  ag().pointer() .move_rel ( 0, -v) );
+    k.cm .add_combo ( cg().k(Comma ).m(caps).fsc(fsc).wcs(msE),  ag().pointer() .move_rel ( 0,  v) );
+    k.cm .add_combo ( cg().k(J     ).m(caps).fsc(fsc).wcs(msE),  ag().pointer() .move_rel (-v,  0) );
+    k.cm .add_combo ( cg().k(K     ).m(caps).fsc(fsc).wcs(msE),  ag().pointer() .move_rel ( v,  0) );
     // then diagonal directions
     k.cm .add_combo ( cg().k(U     ).m(caps).fsc(fsc),  ag().pointer() .move_rel (-v, -v) );
     k.cm .add_combo ( cg().k(M     ).m(caps).fsc(fsc),  ag().pointer() .move_rel (-v,  v) );
@@ -1379,6 +1383,7 @@ fn setup_kbd_pointer_tscs (k:&Krusty) {
 
     // and finally, the alt-shift-click in IDE to add extra cursors that we wanted
     k.cm .add_combo ( cg().k(Space ).m(caps).fsc(fsc).s(msE),  ag().mbtn(LeftButton ).m(alt).m(shift) );
+
 }
 
 
@@ -1483,6 +1488,16 @@ fn setup_ide_diff_nav_tscs (k:&Krusty) {
     // and accept left/right
     k.cm .add_combo ( cg().k(J).fsc(fsc).m(caps).s(msE),   ag().k(ExtLeft ).m(ctrl).m(alt) );
     k.cm .add_combo ( cg().k(K).fsc(fsc).m(caps).s(msE),   ag().k(ExtRight).m(ctrl).m(alt) );
+
+    // and for actual arrow-keys as well .. next/prev
+    k.cm .add_combo ( cg().k(Down ).fsc(fsc),  ag().k(ExtDown ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(Up   ).fsc(fsc),  ag().k(ExtUp   ).m(ctrl).m(alt) );
+    // next/prev file
+    k.cm .add_combo ( cg().k(Left ).fsc(fsc),  ag().k(ExtLeft ).m(ctrl).m(alt).m(shift) );
+    k.cm .add_combo ( cg().k(Right).fsc(fsc),  ag().k(ExtRight).m(ctrl).m(alt).m(shift) );
+    // and for accept left/right
+    k.cm .add_combo ( cg().k(Left ).fsc(fsc).m(caps),  ag().k(ExtLeft ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(Right).fsc(fsc).m(caps),  ag().k(ExtRight).m(ctrl).m(alt) );
 
 }
 
@@ -1805,6 +1820,7 @@ fn setup_IDE_combos (k:&Krusty) {
 }
 
 
+
 fn setup_one_note_combos (k:&Krusty) {
     // note that these ofc rely on the setup of note-note quick-access toolbar ..
     // .. where .. select-mode is pos-3 in toolbar, finger-draw 4, eraser-stroke 5, eraser-point 6, pens 7
@@ -1832,6 +1848,7 @@ fn setup_one_note_combos (k:&Krusty) {
     };
     k.cm .add_combo ( cg().k(E).m(caps).s(qks).s(msE_dbl) .c(one_note_fgnd(k)),   ag().af (eraser) );
     k.cm .add_combo ( cg().k(D).m(caps).s(qks).s(msD_dbl) .c(one_note_fgnd(k)),   ag().af (threaded (pen.clone())) );
+
 }
 
 
@@ -1958,6 +1975,8 @@ pub fn setup_krusty_board () {
     setup_l2(&k);
 
 
+    // mouse, wheel combos .. (though there are others in tsc or app-specific sections too)
+
     setup_mouse_left_btn(&k);
 
     setup_mouse_right_btn(&k);
@@ -1968,6 +1987,8 @@ pub fn setup_krusty_board () {
 
     setup_horiz_wheel(&k);
 
+
+    // some specific keys and combo-patterns
 
     setup_back_quote(&k);
 
@@ -1998,18 +2019,19 @@ pub fn setup_krusty_board () {
 
     setup_tab_nav_tscs(&k);
 
-    setup_arrow_wheel_tscs(&k);
-
     setup_kbd_pointer_tscs(&k);
 
     setup_ctrl_tab_tscs(&k);
 
+
+    // and some two-stroke combos (tsc) with latching first-stroke (lfsc)
+
+    setup_arrow_wheel_tscs(&k);
+
     setup_ide_diff_nav_tscs(&k);
 
 
-    // and some two-stroke combos (tsc) with latching first-stroke (lfsc)
-    //setup_latching_tsc_tests(&k);
-
+    // gaming and app specific combo setups (many with sticky/latching fscs)
 
     setup_switche_combos(&k);
 

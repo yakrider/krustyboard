@@ -378,7 +378,7 @@ impl CapsModKey {
 
     pub fn setup_tracking (&self, k:&Krusty) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
+        use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
 
         if Key::CapsLock.is_toggled() { // toggle off first if necessary (to clear key light)
             Key::CapsLock.press_release();
@@ -618,7 +618,7 @@ impl UnifModKey {
     pub fn setup_tracking (&self, k:&Krusty) {
         // the setup for these is mostly just tracking their state flags ..
         // however, we will also disable repeats, not least to ease looking at keystreams
-        use crate::{KbdEvCbMapKey_T::*, EvCbFn_T::*};
+        use crate::{KbdEv_MapKey_T::*, EvCbFn_T::*};
 
         let umk = self.clone(); let ks = k.ks.clone();
         k.iproc.input_bindings .bind_kbd_event (

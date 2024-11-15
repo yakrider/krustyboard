@@ -14,11 +14,11 @@ ComboGen API Type-State machinery notes:
 
 
 #[derive (Debug, Clone)] pub struct ComboGenSt_Init     { }
-#[derive (Debug, Clone)] pub struct ComboGenSt_Key      { key  : Key,         action : KbdEvCbMapKey_T }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Key      { key  : Key,         action : KbdEv_MapKey_T }
 #[derive (Debug, Clone)] pub struct ComboGenSt_MouseBtn { mbtn : MouseButton, action : MouseBtnEv_T }
 #[derive (Debug, Clone)] pub struct ComboGenSt_Wheel    { whl  : MouseWheel,  action : MouseWheelEv_T }
 
-#[derive (Debug, Clone)] pub struct ComboGenSt_Inited   { cmk: EvCbMapKey }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Inited   { bmk : BindingsMapKey }
 // ^^ The inited state holds the combo-maps-key .. the same structure as we would have as key in input bindings map
 // ^^ note above that the action field when default will make combo-gen that triggers on press, else a release trigger can be specified
 
@@ -48,13 +48,13 @@ impl ComboGenable for ComboGenSt_Inited {}
 pub struct _ComboGen {
 
     /// Modifier keys that should be down to trigger this combo
-    pub mks      : Vec<ModKey>,
+    pub mks : Vec<ModKey>,
 
     /// Mode-states that should match for this combo to trigger
-    pub modes    : Vec<ModeState_T>,
+    pub modes : Vec<ModeState_T>,
 
     /// Modifier keys that can be ignored (marked as wildcard) .. (defined but empty-list means global wc)
-    pub wc_mks   : Option<Vec<ModKey>>,
+    pub wc_mks : Option<Vec<ModKey>>,
 
     /// Mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
     pub wc_modes : Option<Vec<ModeState_T>>,
@@ -63,11 +63,13 @@ pub struct _ComboGen {
     # [ derivative (Debug="ignore") ]
     pub cond : Option<ComboCond>,
 
-    /// Optional hash of a (sticky or latching) first-stroke combo that must be active for this combo to trigger
+    /// Optional hash of a (sticky or latching) first-stroke-combo (fsc) that must be active for this combo to trigger. <br>
+    /// Note that only one fsc will can recorded for a combo (whether it is sticky or latching). <br>
+    /// Further, at execution time, a sfsc match is attempted first, and only if no sfsc matches, will a lfsc match be attempted.
     pub first_stroke : ComboHash,
 
     /// The modifier-key consume flag marks that the release of mod-keys in this combo should be masked
-    pub mod_key_no_consume  : bool,
+    pub mod_key_no_consume : bool,
 
     /// The mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released. <br>
     /// (This is useful to  avoid stragglers .. e.g say Alt-qks1-wheel for brightness, if alt is released first, we dont want '1's spamming out). <br>
@@ -118,7 +120,7 @@ impl ComboGen <ComboGenSt_Init> {
     }
     /// Create ComboGen around a keyboard key action (default action is press)
     pub fn k (self, key:Key) -> ComboGen <ComboGenSt_Key> {
-        let st = ComboGenSt_Key { key, action: KbdEvCbMapKey_T::KeyEventCb_KeyDown };
+        let st = ComboGenSt_Key { key, action: KbdEv_MapKey_T::KeyEventCb_KeyDown };
         ComboGen { dat: self.dat, st }
     }
     /// Create ComboGen around a mouse button action (default action is press)
@@ -223,7 +225,7 @@ impl <S> ComboGen<S>
 impl ComboGen <ComboGenSt_Key> {
     /// Specify the key trigger action to be release (instead of the default press)
     pub fn rel (mut self) -> Self {
-        self.st.action = KbdEvCbMapKey_T::KeyEventCb_KeyUp;
+        self.st.action = KbdEv_MapKey_T::KeyEventCb_KeyUp;
         self
     }
     /// Enable triggering this combo on key-repeats without having to press the key again. <br>
@@ -258,10 +260,10 @@ impl ComboGen <ComboGenSt_Wheel> {
 
 /// methods specific to the fully Inited ComboGen
 impl ComboGen <ComboGenSt_Inited> {
-    /// get the Combo-Maps-Key (cmk)
-    /// (for internal use restrict cmk access)
-    pub fn get_cmk (&self) -> EvCbMapKey {
-        self.st.cmk
+    /// get the Bindings-Maps-Key (bmk)
+    /// (for internal use to restrict bmk access)
+    pub fn get_bmk (&self) -> BindingsMapKey {
+        self.st.bmk
     }
 }
 
@@ -272,20 +274,20 @@ impl ComboGen <ComboGenSt_Inited> {
 
 impl From <ComboGen <ComboGenSt_Key>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Key>) -> Self {
-        let cmk = EvCbMapKey::key_ev_t (cg.st.key, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
+        let bmk = BindingsMapKey::key_ev_t (cg.st.key, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_MouseBtn>> for CG {
     fn from (cg : ComboGen <ComboGenSt_MouseBtn>) -> Self {
-        let cmk = EvCbMapKey::btn_ev_t (cg.st.mbtn, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
+        let bmk = BindingsMapKey::btn_ev_t (cg.st.mbtn, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_Wheel>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Wheel>) -> Self {
-        let cmk = EvCbMapKey::wheel_ev_t (cg.st.whl, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {cmk} }
+        let bmk = BindingsMapKey::wheel_ev_t (cg.st.whl, cg.st.action);
+        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 

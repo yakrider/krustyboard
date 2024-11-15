@@ -111,7 +111,7 @@ impl ModeState {
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
     fn bind_mode_key_down (&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
+        use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // first we'll prep any supplemental actions specific to different types of mode-state keys
         let ks = k.ks.clone();
         let mss_cba : AF = {
@@ -156,7 +156,7 @@ impl ModeState {
 
     /// Binds mode-key-up event on registered mod-key to flag update action
     fn bind_mode_key_up (&self, k:&Krusty) {
-        use crate::{EvProp_D::*, KbdEvCbMapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
+        use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // again, first we'll prep any supplemental actions specific to different types of mode-state keys
         let ks = k.ks.clone();
         let mss_cba : AF = {

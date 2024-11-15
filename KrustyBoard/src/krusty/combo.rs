@@ -23,7 +23,8 @@ pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 pub struct Combo {
     _private:(),
-    pub cmk : EvCbMapKey,
+    pub bmk : BindingsMapKey,
+    pub first_stroke : ComboHash,
     pub states_bits  : u64,
     pub wc_mask_bits : u64,
 }
@@ -39,7 +40,7 @@ pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync +
 
 
 /// ComboHash is a simple new-type containing the hash value of the combo
-#[derive (Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive (Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ComboHash ( pub(self) u64 );
 
 impl ComboHash {
@@ -52,17 +53,20 @@ impl ComboHash {
 pub struct ComboHashAtomic ( AtomicU64 );
 
 impl ComboHashAtomic {
+    pub fn get (&self) -> ComboHash {
+        ComboHash ( self.0 .load (Ordering::Relaxed) )
+    }
     pub fn is_empty (&self) -> bool {
-        ComboHash ( self.0 .load (Ordering::Relaxed) ) .is_empty()
+        self.get().is_empty()
+    }
+    pub fn check_match (&self, ch:ComboHash) -> bool {
+        self.get() == ch
     }
     pub fn store (&self, ch:ComboHash) {
         self.0 .store (ch.0, Ordering::Relaxed)
     }
     pub fn clear (&self) {
         self.0 .store (ComboHash::default().0, Ordering::Relaxed)
-    }
-    pub fn check_match (&self, ch:ComboHash) -> bool {
-        ch == ComboHash ( self.0.load (Ordering::Relaxed) )
     }
 }
 
@@ -83,10 +87,6 @@ pub(crate) struct ComboValue {
     /// Optional condition that must be valid for this combo to trigger
     pub(crate) cond : Option <ComboCond>,
 
-    /// Optional ComboHash of any first-stroke that must be active for this combo to trigger <br>
-    /// (A default zeroed ComboHash indicates no first-stroke requirement)
-    pub(crate) fsc : ComboHash,
-
     /// The no_rpt flag when enabled, suppresses activation of this combo for triggering key-repeats
     pub(crate) no_rpt : bool,
 
@@ -95,8 +95,8 @@ pub(crate) struct ComboValue {
 }
 
 impl ComboValue {
-    fn new (af:AF, cond:Option<ComboCond>, fsc:ComboHash, no_rpt:bool, is_fsc:bool) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), af, cond, fsc, no_rpt, is_fsc }
+    fn new (af:AF, cond:Option<ComboCond>, no_rpt:bool, is_fsc:bool) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, no_rpt, is_fsc }
     }
 }
 
@@ -106,7 +106,7 @@ impl ComboValue {
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 impl Combo {
 
-    // pub fn new (cmk, ??) -> Combo { }
+    // pub fn new (bmk, ??) -> Combo { }
     // ^^ no new fn, as we only want to gen combos via gen_combos which does a bunch of proc first
 
     pub(crate) fn has_wildcards (&self) -> bool {
@@ -144,9 +144,10 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub(crate) fn gen_cur_combo (cmk:EvCbMapKey, ks:&KrustyState) -> Combo {
+    pub(crate) fn gen_cur_combo (bmk:BindingsMapKey, ks:&KrustyState) -> Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let wc_mask_bits = FULL_WILDCARDS_MASK;
+        let first_stroke = ComboHash::default();
         let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
             .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
             .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
@@ -154,7 +155,10 @@ impl Combo {
             .chain ( & Self::get_cur_flags_states_flags(ks) .map (|fg| fg.is_set()) )
             .enumerate() .fold ( 0, |a, (ei,e)| a | ((*e as u64) << (ei as u8)) );
 
-        Combo { _private:(), cmk, states_bits, wc_mask_bits }
+        Combo { _private:(), bmk, states_bits, wc_mask_bits, first_stroke }
+    }
+    pub (crate) fn gen_fsc_combo (combo:&Combo, first_stroke:ComboHash) -> Combo {
+        Combo { first_stroke, ..*combo }
     }
 
 
@@ -188,7 +192,7 @@ impl Combo {
         // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step ..
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
-        if let EvCbMapKey::key_ev_t (key, KbdEvCbMapKey_T::KeyEventCb_KeyDown) = cg.get_cmk() {
+        if let BindingsMapKey::key_ev_t (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
             if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
                if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
                 cg = cg.msk_nc();
@@ -239,7 +243,7 @@ impl Combo {
                 } )
             };
             let wc_mask_bits = FULL_WILDCARDS_MASK ^ wc_bits;
-            Combo { _private:(), cmk: cg.get_cmk(), states_bits, wc_mask_bits }
+            Combo { _private:(), bmk:cg.get_bmk(), first_stroke:cg.dat.first_stroke, states_bits, wc_mask_bits }
         }
 
         // before sending off to combo lrmk expansion, lets expand any specified wildcard L/R agnostic modkeys
@@ -338,11 +342,10 @@ impl Combo {
         let cg = Self::finalize_combo_gen(cg);
         let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
-        let fsc = cg.dat.first_stroke;
         let no_rpt = cg.dat.repeat_suppressed;
 
         Self::gen_combos(cg) .into_iter() .map ( |c|
-            (c, ComboValue::new (af.clone(), cond.clone(), fsc, no_rpt, is_fsc))
+            (c, ComboValue::new (af.clone(), cond.clone(), no_rpt, is_fsc))
         ) .collect()
     }
 
@@ -368,7 +371,12 @@ impl std::fmt::Debug for Combo {
             bits_str (self.wc_mask_bits ^ FULL_WILDCARDS_MASK)
         } else { "".into() };
 
-        write! ( f, "{:20} {}  {}", format! ("{:?}", &self.cmk).magenta(), bits_str(self.states_bits).trim(), mask_str.trim() )
+        let states_str = bits_str (self.states_bits);
+        let bmk = format! ("{:?}", &self.bmk).magenta();
+        let fsc = format! ("{:X}", &self.first_stroke.0);
+        let fsc = if fsc.len() > 1 { fsc } else { "".into() };
+
+        write! ( f, "{:20}  {}  {}  {}", bmk, states_str.trim(), mask_str.trim(), fsc.green() )
     }
 }
 
