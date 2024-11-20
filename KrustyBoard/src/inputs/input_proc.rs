@@ -130,10 +130,12 @@ impl InputProcessor {
         hhook: &AtomicIsize,
         hook_proc: unsafe extern "system" fn (c_int, WPARAM, LPARAM) -> LRESULT,
     ) { unsafe {
-        SetWindowsHookExW (hook_id, Some(hook_proc), HINSTANCE(0), 0) .iter() .for_each ( |hh| {
+        if let Ok(hh) = SetWindowsHookExW (hook_id, Some(hook_proc), HINSTANCE(0), 0) {
             println! ("hooking attempt .. succeeded!");
             hhook.store (hh.0, Ordering::SeqCst);
-        } );
+        } else {
+            eprintln!("hooking attempt .. FAILED .. error code : {:?} !!", GetLastError());
+        }
     } }
     fn set_kbd_hook   (&self) { InputProcessor::set_hook (WH_KEYBOARD_LL, &self.kbd_hook,   kbd_proc); }
     fn set_mouse_hook (&self) { InputProcessor::set_hook (WH_MOUSE_LL,    &self.mouse_hook, mouse_proc); }
@@ -213,6 +215,8 @@ impl InputProcessor {
     /// Both kbd and mouse events from hooks get packaged into an InputEvent and sent here for processing
     pub fn proc_input_event (&self, event:Event) -> EvProp_D {
 
+        //println!("{:?}",event)
+
         use { EvProp_D::*, ComboProc_D::* };
         let mut ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
 
@@ -231,8 +235,8 @@ impl InputProcessor {
                     if ev_proc_ds.ev_prop_d == EvProp_Undet { ev_proc_ds = epds; }
                 }
                 EvCbFn_Spawned(cb) => {
-                    let (cb, kbe) = (cb.clone(), event);
-                    thread::spawn (move || cb(kbe));
+                    let (cb, ev) = (cb.clone(), event);
+                    thread::spawn (move || cb(ev));
                 }
                 EvCbFn_Queued(cb) => {
                     let (cb, ev) = (cb.clone(), event);

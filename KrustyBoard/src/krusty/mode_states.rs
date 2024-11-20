@@ -14,13 +14,25 @@ use crate::{*, ModeState_T::*};
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
 /// All the supported mode-states, (whether they have triggering keys registered or not)
 pub enum ModeState_T {
-    no_ms,                      // no_ms can be useful to fill in fns set to take somethhing .. its ignored at its not in bitmaps
-    msE, msD, msF, msR,         // typically for l2 [sel, del, word, fast] actions respectively
-    msE_dbl, msD_dbl, msF_dbl, msR_dbl,
-    qks, qks1, qks2, qks3, qks4,
-    qks_dbl, qks1_dbl, qks2_dbl, qks3_dbl, qks4_dbl,
-    //mngd_ctrl_dn, //ctrl_tab_scrl, //right_ms_scrl,
-    // note: ^^ want minimal flags use here, as we dont want a set flag to change the combo state so other combos w/o flags get invalidated
+    // note below that no_ms can be useful to fill in fns set to take somethhing .. (it is ignored at its not in bitmaps)
+    // and in general, [msE, msD, msF, msR] are to be used for l2 [sel, del, word, fast] actions respectively
+    no_ms,
+    msE,      msD,       msF,       msR,
+    msE_dbl,  msD_dbl,   msF_dbl,   msR_dbl,
+    qks,      qks1,      qks2,      qks3,      qks4,
+    qks_dbl,  qks1_dbl,  qks2_dbl,  qks3_dbl,  qks4_dbl,
+}
+
+impl ModeState_T {
+    pub fn is_l2 (self) -> bool {
+        matches! (self,  msE | msD | msF | msR)
+    }
+    pub fn is_qks (self) -> bool {
+        matches! (self,  qks | qks1 | qks2 | qks3 | qks4)
+    }
+    pub fn is_dbl (self) -> bool {
+        matches! (self,  msE_dbl | msD_dbl | msF_dbl | msR_dbl | qks_dbl | qks1_dbl | qks2_dbl | qks3_dbl | qks4_dbl)
+    }
 }
 
 
@@ -100,7 +112,9 @@ impl ModeState {
 
     /// get a copy of the registered key as option if set
     pub fn key (&self) -> Option<KbdKey> {
-        *self.key.borrow()
+        //self.key.borrow()
+        unsafe { *self.key.as_ptr() }
+        // ^^we access this without guards as this never gets written to during runtime
     }
 
     /// registration fn is private so we dont do it from outside MSS (where we can add the key to registered keys set)
@@ -115,11 +129,9 @@ impl ModeState {
         // first we'll prep any supplemental actions specific to different types of mode-state keys
         let ks = k.ks.clone();
         let mss_cba : AF = {
-            if ModeStates::static_l2_modes() .contains(&self.ms_t) {
-                Arc::new ( move || ks.mode_states.some_l2_mode_active.set() )
-            } else if ModeStates::static_qks_modes() .contains(&self.ms_t) {
-                Arc::new ( move || ks.mode_states.some_qks_mode_active.set() )
-            } else { Arc::new (move || { }) }
+            if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.some_l2_mode_active.set() ) }
+            else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.some_qks_mode_active.set() ) }
+            else { Arc::new ( || { } ) }
         };
         // now we can build the actual binding actions
         // (note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens)
@@ -160,8 +172,8 @@ impl ModeState {
         // again, first we'll prep any supplemental actions specific to different types of mode-state keys
         let ks = k.ks.clone();
         let mss_cba : AF = {
-            if      ModeStates::static_l2_modes()  .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
-            else if ModeStates::static_qks_modes() .contains(&self.ms_t) { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
+            if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
+            else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         // then build the actual binding actions
@@ -219,56 +231,21 @@ impl ModeStates {
         }
     }
 
-    // we'll just define all enum subsets we need rather than trying to partly/fully iterating through ModeState_T
-    pub fn static_ordered_modes() -> [ModeState_T; N__COMBO_STATES_BITS__MODES] {
-        static COMBO_MODES: [ModeState_T; N__COMBO_STATES_BITS__MODES] = [
-            msE, msD, msF, msR, qks, qks1, qks2, qks3, qks4
-        ];
-        COMBO_MODES
-    }
-    pub fn static_ordered_modes_dbl() -> [ModeState_T; N__COMBO_STATES_BITS__MODES] {
-        static COMBO_MODES_DBL: [ModeState_T; N__COMBO_STATES_BITS__MODES] = [
-            msE_dbl, msD_dbl, msF_dbl, msR_dbl, qks_dbl, qks1_dbl, qks2_dbl, qks3_dbl, qks4_dbl
-        ];
-        COMBO_MODES_DBL
-    }
-    pub fn static_l2_modes () -> [ModeState_T;4] {
-        static L2_MODES : [ModeState_T;4]  = [msE, msD, msF, msR];
-        L2_MODES
-    }
-    pub fn static_qks_modes () -> [ModeState_T;5] {
-        static QKS_MODES : [ModeState_T;5] = [qks, qks1, qks2, qks3, qks4];
-        QKS_MODES
-    }
 
-
-    pub fn mode_flag_pairs (&self) -> [(ModeState_T, &ModeState); N__COMBO_STATES_BITS__MODES] { [
-        // NOTE that the ordering here MUST match that given by the static_l2_qks_modes above
-        // .. as this is what we will use to populate the combo bitmap and compare to current combo-mode-states!
-        (msE, &self.msE), (msD,  &self.msD),  (msF, &self.msF), (msR, &self.msR),
-        (qks, &self.qks), (qks1, &self.qks1), (qks2, &self.qks2), (qks3, &self.qks3), (qks4, &self.qks4)
+    pub fn ordered_mode_states (&self) -> [&ModeState; 9] { [
+        // NOTE that the ordering here will be uses to populate the combo bitmap and compare to current combo-mode-states
+        &self.msE, &self.msD,  &self.msF,  &self.msR,
+        &self.qks, &self.qks1, &self.qks2, &self.qks3, &self.qks4
     ] }
 
 
-
     pub fn register_mode_key (&self, key:Key, ms_t:ModeState_T) {
-        if let Some(ms) = self.get_mode_flag(ms_t) {
-            ms.register_key(key);
-        }
-    }
-    pub fn get_mode_flag (&self, mst:ModeState_T) -> Option<&ModeState> {
-        self.mode_flag_pairs() .iter() .find (|(ms_t,_)| *ms_t == mst) .map(|(_,ms)| *ms)
-    }
-    pub fn get_mode_t (&self, key:Key) -> Option<ModeState_T> {
-        self.mode_flag_pairs() .iter() .find (|(_, ms)| ms.key.borrow().filter(|&k| k==key).is_some()) .map (|(ms_t,_)| *ms_t)
+        for ms in self.ordered_mode_states() {
+            if ms.ms_t == ms_t {
+                ms.register_key(key); break
+        }  }
     }
 
-    
-    pub fn mode_key_consuming_action (&self, ms_t:ModeState_T, af:AF) -> AF {
-        if let Some(ms) = self.get_mode_flag(ms_t) { ms.mode_key_consuming_action(af) }
-        else { af }
-    }
-    
 
     pub fn refresh_qks_mode_active_flag (&self) {
         self.some_qks_mode_active.store (
@@ -289,13 +266,15 @@ impl ModeStates {
     }
     pub fn refresh_mode_dbl_active_flag (&self) {
         self.some_mode_dbl_active.store (
-            self.mode_flag_pairs() .iter() .any (|(_,s)| s.dbl_tap.is_set())
+            self.ordered_mode_states() .iter() .any (|ms| ms.dbl_tap.is_set())
         );
     }
     
 
     pub fn clear_flags (&self) {
-        self.mode_flag_pairs()  .iter() .for_each (|(_,ms)| { ms.down.clear(); ms.dbl_tap.clear() });
+        for ms in self.ordered_mode_states() {
+            ms.down.clear(); ms.dbl_tap.clear(); ms.consumed.clear();
+        }
         self.some_l2_mode_active.clear();
         self.some_qks_mode_active.clear();
         self.some_mode_state_active.clear();
@@ -303,7 +282,9 @@ impl ModeStates {
     }
 
     pub fn bind_mode_keys_actions (&self, k:&Krusty) {
-        self.mode_flag_pairs()  .iter() .for_each (|(_,ms)| ms.bind_mode_key_action(k));
+        for ms in self.ordered_mode_states() {
+            ms.bind_mode_key_action(k)
+        }
     }
 
 }

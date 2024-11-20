@@ -115,6 +115,13 @@ impl Mouse {
         }
     }
 
+    pub fn clear_flags (&self) {
+        for mbtn in [ &self.lbtn, &self.rbtn, &self.mbtn, &self.x1btn, &self.x2btn ] {
+            mbtn.down.clear(); mbtn.dbl_tap.clear(); mbtn.active.clear(); mbtn.consumed.clear();
+        }
+        self.vwheel.spin_invalidated.clear(); self.hwheel.spin_invalidated.clear();
+    }
+
     pub fn setup_mouse (&self, k:&Krusty) {
 
         // for most mouse btn actions, we can setup standard skeleton bindings, and let actual 'business-logic' be setup via combo bindings
@@ -175,7 +182,9 @@ impl Mouse {
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
             // we'll want to capture/refresh win-snap-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            ks.capture_pointer_win_snap_dat(None);
+            let ks = ks.clone();
+            let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
+            let _ = InputProcessor::instance().input_af_queue .send (action);
         }
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:&KrustyState) {
@@ -183,7 +192,9 @@ impl Mouse {
         self.vwheel.spin_invalidated.set();
         if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
             // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
-            ks.capture_pointer_win_snap_dat(None);
+            let ks = ks.clone();
+            let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
+            let _ = InputProcessor::instance().input_af_queue .send (action);
         }
     }
 
@@ -252,23 +263,28 @@ pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
 
 
 pub fn mouse_rbtn_release_masked () {
+    mouse_action_masked (Arc::new ( || MouseButton::RightButton.release() ));
+}
+pub fn mouse_action_masked (af:AF) {
     // for cases we have to release the rbtn, but try to avoid triggering the context menu, we'll release it at corner of screen
+    // .. it will still produce a context menu, but at least it is deterministic (cf clicking on random fgnd app)
+    // .. also, in theory, could consider grabbing/restoring fgnd focus too .. but meh this is already almost too much
+
     //MouseButton::RightButton.release_at (0xFFFF, 0xFFFF);
     // ^^ ugh this doesnt seem to actually do that .. so we'll manually move there, release, then restore
 
     // and looks like for such a manual-move strategy to work, there HAS to be a delay before we move the pointer back
-    // (also, this works for almost all applications EXCEPT for windows-explorer .. MS ofc has to be special .. meh)
     let point = MousePointer::pos();
     thread::spawn ( move || {
         win_set_thread_dpi_aware();
-        // we'll add a delay before release, to avoid focus stealing from switche intended window etc
+        // move the pointer away from fgnd app
         MousePointer::move_abs (0xFFFF, 0xFFFF);
+        // we'll add delay to let the pointer move to be processed
         thread::sleep(time::Duration::from_millis(20));
-        MouseButton::RightButton.release();
-        // we'll add some delay to actually have the release processed while pointer is still away
+        af();
+        // and more delay for any af() sent events to be processed while pointer is still away
         thread::sleep(time::Duration::from_millis(40));
-        // note that reducing this delay or even removing it will mostly work (as the event handling can happen before spawned thread comes up)..
-        // .. however, for times when there's load etc and the event handling is also pushed out, we'll want at least some delay
+        // restore pointer location
         MousePointer::move_abs (point.x, point.y);
     } );
 }

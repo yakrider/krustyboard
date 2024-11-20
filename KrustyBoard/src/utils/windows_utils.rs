@@ -336,7 +336,7 @@ pub fn get_exe_by_pid (pid:u32) -> Option<String> { unsafe {
     let mut lpdwsize = 256u32;
     if handle.is_err() { return None }
     let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
-    handle.iter().for_each ( |h| { CloseHandle(*h); } );
+    if let Ok(h) = handle { CloseHandle(h); }
     PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .and_then (|s| s.split("\\").last().map(|s| s.to_string()))
 } }
 

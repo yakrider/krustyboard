@@ -70,7 +70,9 @@ impl CombosMap {
 
     /// Check if a key is in the handled-keys-set of the combos-map
     pub fn check_if_handled_key (&self, key:&Key) -> bool {
-        self.handled_keys_set .borrow() .contains (key)
+        //self.handled_keys_set .borrow() .contains (key)
+        unsafe { & *self.handled_keys_set.as_ptr() } .contains(key)
+        // ^^ we access this without guards as it never gets written to during runtime (and it is in hotpath)
     }
 
 
@@ -101,7 +103,7 @@ impl CombosMap {
         self.setup_af_sticky_first_stroke (cg.into(), fsc);
     }
     fn setup_af_sticky_first_stroke (&self, cg:CG, fsc:ComboHash) {
-        let ks = KrustyState::instance();
+        let ks = cg.ks.clone();
         let af = Arc::new ( move || {
             // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
             // (fscs are required to have some mod-key in them and are active until all modkeys are released)
@@ -128,7 +130,7 @@ impl CombosMap {
         self.setup_af_latching_first_stroke (cg.into(), fsc);
     }
     fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
-        let ks = KrustyState::instance();
+        let ks = cg.ks.clone();
         let af = Arc::new ( move || {
             ks.latching_first_stroke.store(fsc);
             jiggle_cursor(2);
@@ -139,12 +141,13 @@ impl CombosMap {
 
     /// Registers a combo to CLEAR any active latching-first-stroke-combo
     pub fn register_combo_clear_latching_first_stroke (&self, cg: impl Into<CG>) {
-        let ks = KrustyState::instance();
+        let cg = cg.into();
+        let ks = cg.ks.clone();
         let af = Arc::new ( move || {
             ks.latching_first_stroke.clear();
-            jiggle_cursor(2);
+            jiggle_cursor(3);
         } );
-        self._add_combo (cg.into(), ag().af(af), true);
+        self._add_combo (cg, ag().af(af), true);
     }
 
 
@@ -258,15 +261,15 @@ impl CombosMap {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
                 MouseBtnEv_T::BtnDown => {
                     Some ( Arc::new ( move || {
-                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
+                        if let Some(bs) = ks.mouse.get_btn_state(btn) {
                             bs.active.set(); bs.btn.press();
-                    } ) } ) )
+                    } } ) )
                 }
                 MouseBtnEv_T::BtnUp   => {
                     Some ( Arc::new ( move || {
-                        ks.mouse.get_btn_state(btn) .iter().for_each (|bs| {
+                        if let Some(bs) = ks.mouse.get_btn_state(btn) {
                             if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
-                    } ) } ) )
+                    } } ) )
                 }
             } }
             EventDat::wheel_event {wheel, delta} => {

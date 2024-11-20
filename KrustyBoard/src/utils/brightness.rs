@@ -25,7 +25,7 @@ mod brightness_ps_wmi {
             .and_then (|s| s.lines().next().and_then(|s| s.to_owned().parse::<i32>().ok()));
 
         let set_b_cmd = |v:i32| { let _ = Command::new(PS_LOC).arg(set_cmd(v)).spawn(); };
-        cur_b .iter() .for_each(|v| set_b_cmd((v + incr).abs()));
+        if let Some(v) = cur_b { set_b_cmd ((v + incr).abs()) }
     }
 }
 

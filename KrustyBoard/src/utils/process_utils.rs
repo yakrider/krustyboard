@@ -35,7 +35,6 @@ pub fn start_chrome_incognito() {
 pub fn start_chrome_app (app_id:&str) {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(format!(r#"--profile-directory="Default" --app-id={}"#, app_id)) .spawn();
 }
-pub fn start_chrome_bard () { start_chrome_app ("nohacooabmgpjcdeajcfjgkpfibiffjf") }
 
 pub fn start_alt_file_explorer() {
     let _ = Command::new(EXPLORER_LOC) .arg(Q_DIR_LOC) .spawn();

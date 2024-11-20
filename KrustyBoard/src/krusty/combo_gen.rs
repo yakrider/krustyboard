@@ -97,6 +97,9 @@ impl _ComboGen {
 # [ derive (Debug, Clone) ]
 pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
 
+    /// we'll hold an Arc clone of KrustyState for internal referencing
+    pub ks : KrustyState,
+
     /// all the data that ComboGen actually holds through the construction states
     pub dat : Box<_ComboGen>,
 
@@ -116,27 +119,27 @@ pub fn cg() -> ComboGen { ComboGen::new() }
 impl ComboGen <ComboGenSt_Init> {
     /// Create a new ComboGen at the _Init state (which is default)
     pub fn new () -> Self {
-        ComboGen { dat: Box::new(_ComboGen::new()), st: ComboGenSt_Init{} }
+        ComboGen { ks: KrustyState::instance(), dat: Box::new(_ComboGen::new()), st: ComboGenSt_Init{} }
     }
     /// Create ComboGen around a keyboard key action (default action is press)
     pub fn k (self, key:Key) -> ComboGen <ComboGenSt_Key> {
         let st = ComboGenSt_Key { key, action: KbdEv_MapKey_T::KeyEventCb_KeyDown };
-        ComboGen { dat: self.dat, st }
+        ComboGen { ks: self.ks, dat: self.dat, st }
     }
     /// Create ComboGen around a mouse button action (default action is press)
     pub fn mbtn (self, mbtn:MouseButton) -> ComboGen <ComboGenSt_MouseBtn> {
         let st = ComboGenSt_MouseBtn { mbtn, action: MouseBtnEv_T::BtnDown };
-        ComboGen { dat: self.dat, st }
+        ComboGen { ks: self.ks, dat: self.dat, st }
     }
     /// Create ComboGen around mouse vertical wheel action (default action is wheel-backwards/downwards)
     pub fn whl (self) -> ComboGen <ComboGenSt_Wheel> {
         let st = ComboGenSt_Wheel { whl: MouseWheel::DefaultWheel, action: MouseWheelEv_T::WheelBackwards };
-        ComboGen { dat: self.dat, st }
+        ComboGen { ks: self.ks, dat: self.dat, st }
     }
     /// Create ComboGen around mouse horizontal wheel action (default action is wheel-backwards/leftwards)
     pub fn hwhl (self) -> ComboGen <ComboGenSt_Wheel> {
         let st = ComboGenSt_Wheel { whl: MouseWheel::HorizontalWheel, action: MouseWheelEv_T::WheelBackwards };
-        ComboGen { dat: self.dat, st }
+        ComboGen { ks: self.ks, dat: self.dat, st }
     }
 }
 
@@ -275,19 +278,19 @@ impl ComboGen <ComboGenSt_Inited> {
 impl From <ComboGen <ComboGenSt_Key>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Key>) -> Self {
         let bmk = BindingsMapKey::key_ev_t (cg.st.key, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
+        ComboGen { ks: cg.ks, dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_MouseBtn>> for CG {
     fn from (cg : ComboGen <ComboGenSt_MouseBtn>) -> Self {
         let bmk = BindingsMapKey::btn_ev_t (cg.st.mbtn, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
+        ComboGen { ks: cg.ks, dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_Wheel>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Wheel>) -> Self {
         let bmk = BindingsMapKey::wheel_ev_t (cg.st.whl, cg.st.action);
-        ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
+        ComboGen { ks: cg.ks, dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 

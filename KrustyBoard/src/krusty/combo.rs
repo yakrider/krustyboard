@@ -8,14 +8,13 @@ use crate::*;
 
 
 
-pub const N__COMBO_STATES_BITS__MODKEYS : usize = 9;    // x2 = 18  (from dbl-tap flags)
-pub const N__COMBO_STATES_BITS__MODES   : usize = 9;    // x2 = 18  (from dbl-tap flags)
-pub const N__COMBO_STATES_BITS__FLAGS   : usize = 0;
-// ^^ 9 mod-keys (caps,l/r-(alt,ctrl,win,shift)), x2 adding double-taps,
-// 4+5=9 modes ( msE, msD, msF, msR,  qks, qks1, qks2, qks3, qks4), x2 adding double-taps
-// 0 flags () .. mngd-ctrl-dn, ctrl-tab-scrl, right-ms-scrl no longer included in bitmap
-//
-// note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits
+// Combo-States-Bits accounting :
+// expected ordering .. [caps, mks-left, mks-right, ms*, qks*, caps-dbl, mks-dbl-left, mks-dbl-right, ms*-dbl, qks*-dbl]
+// mod-keys ordering .. [Alt, Ctrl, Shift, Win]
+// mode-states ordering .. [ msE, msD, msF, msR,  qks, qks1, qks2, qks3, qks4]
+// adds up to .. (1 + 4*2 + 4 + 5) * 2  =  18*2  =  36
+// debug printout sample : [C.AčSW.AčSW.EDFR.Q1234.C.AčSW.AčSW.EDFR.Q1234]
+// (note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits)
 
 
 
@@ -28,8 +27,6 @@ pub struct Combo {
     pub states_bits  : u64,
     pub wc_mask_bits : u64,
 }
-
-pub const FULL_WILDCARDS_MASK: u64 = 0xFFFFFFFFFFFFFFFF;
 
 
 
@@ -110,51 +107,33 @@ impl Combo {
     // ^^ no new fn, as we only want to gen combos via gen_combos which does a bunch of proc first
 
     pub(crate) fn has_wildcards (&self) -> bool {
-        self.wc_mask_bits < FULL_WILDCARDS_MASK
+        self.wc_mask_bits < u64::MAX
     }
     pub(crate) fn strip_wildcards (&self) -> Combo {
-        Combo { wc_mask_bits: FULL_WILDCARDS_MASK, ..*self }
+        Combo { wc_mask_bits: u64::MAX, ..*self }
     }
     pub(crate) fn check_wildcard_eqv (&self, c:&Combo) -> bool {
         self.wc_mask_bits & c.states_bits == self.states_bits
     }
 
 
-    // while the mod-keys and mode-states are handled by their own objects, we'll handle combo bits gen for flag states ourselves
-    fn static_flags_modes () -> [ModeState_T; N__COMBO_STATES_BITS__FLAGS] {
-        // note that this will be the source of ordering for the flags-state bits in our combo flags-bitmap field
-        // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
-        static FLAGS_MODES : [ModeState_T; N__COMBO_STATES_BITS__FLAGS] = {
-            //[mngd_ctrl_dn, ctrl_tab_scrl, rght_ms_scrl];
-            //[mngd_ctrl_dn, ctrl_tab_scrl];
-            //[mngd_ctrl_dn];
-            []
-        };
-        FLAGS_MODES
-    }
-    fn get_cur_flags_states_flags (_:&KrustyState) -> [&Flag; N__COMBO_STATES_BITS__FLAGS] {
-        // note that the order of these must match the order given by the static_flag_modes fn above
-        // NOTE again we want minimal flags in bitmap, as we dont want a flag to change the combo state so other combos w/o flags get invalidated
-        //[&ks.in_managed_ctrl_down_state, &ks.in_ctrl_tab_scroll_state, &ks.in_right_btn_scroll_state]
-        //[&ks.in_managed_ctrl_down_state, &ks.in_ctrl_tab_scroll_state]
-        //[&ks.in_managed_ctrl_down_state]
-        []
-    }
-
-
-
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
     pub(crate) fn gen_cur_combo (bmk:BindingsMapKey, ks:&KrustyState) -> Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
-        let wc_mask_bits = FULL_WILDCARDS_MASK;
+        let wc_mask_bits = u64::MAX;
         let first_stroke = ComboHash::default();
-        let states_bits = ks.mod_keys.mk_flag_pairs()    .map (|(_,fg)| fg.is_set()) .iter()
-            .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.down.is_set()) )
-            .chain ( & ks.mod_keys.mk_dbl_flag_pairs()   .map (|(_,fg)| fg.is_set()) )
-            .chain ( & ks.mode_states.mode_flag_pairs()  .map (|(_,ms)| ms.dbl_tap.is_set()) )
-            .chain ( & Self::get_cur_flags_states_flags(ks) .map (|fg| fg.is_set()) )
-            .enumerate() .fold ( 0, |a, (ei,e)| a | ((*e as u64) << (ei as u8)) );
-
+        let states_bits = {
+            // first the key-down states for caps, mod-keys, and mode-state-keys
+            [ ks.mod_keys.caps.down.is_set() ] .into_iter()
+            .chain ( ks.mod_keys.ordered_unif_modkeys()    .map (|mk| mk.down.is_set()) )
+            .chain ( ks.mode_states.ordered_mode_states()  .map (|ms| ms.down.is_set()) )
+            // next, their dbl_tap states
+            .chain ( [ ks.mod_keys.caps.dbl_tap.is_set() ] )
+            .chain ( ks.mod_keys.ordered_unif_modkeys()    .map (|mk| mk.dbl_tap.is_set()) )
+            .chain ( ks.mode_states.ordered_mode_states()  .map (|ms| ms.dbl_tap.is_set()) )
+            // we'll progressively shift the bits and pack them into a u64
+            .enumerate() .fold ( 0, |a, (ei,e)| a | ((e as u64) << (ei as u8)) )
+        };
         Combo { _private:(), bmk, states_bits, wc_mask_bits, first_stroke }
     }
     pub (crate) fn gen_fsc_combo (combo:&Combo, first_stroke:ComboHash) -> Combo {
@@ -193,19 +172,23 @@ impl Combo {
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
         if let BindingsMapKey::key_ev_t (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
-            if let Some(ms_t) = KrustyState::instance().mode_states.get_mode_t(key) {
-               if !cg.dat.modes.contains(&ms_t) { cg.dat.modes.push(ms_t) }
-                cg = cg.msk_nc();
-            }
+            for ms in cg.ks.clone().mode_states.ordered_mode_states() {
+                // ^^ the clone here is to avoid having cg be partially borrowed due to deref coercion
+                if ms.key() == Some(key) {
+                    if !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
+                    cg = cg.msk_nc();
+            } }
         }
         // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
-        for (mk,dmk) in ModKeys::static_ordered_mod_keys().iter() .zip (ModKeys::static_ordered_mod_keys_dbl().iter()) {
-            if cg.dat.mks.contains(dmk) && !cg.dat.mks.contains(mk) { cg.dat.mks.push(*mk) }
-        }
+        if cg.dat.mks.contains(&ModKey::caps_dbl) && !cg.dat.mks.contains(&ModKey::caps) { cg.dat.mks.push(ModKey::caps) }
+        // .. and for the other modkeys
+        cg.ks.mod_keys.ordered_unif_modkeys() .into_iter() .for_each ( |umk| {
+            if cg.dat.mks.contains(&umk.mk_dbl) && !cg.dat.mks.contains(&umk.mk) { cg.dat.mks.push(umk.mk) }
+        } );
         // and for double-taps on mode-states too
-        for (ms,dms) in ModeStates::static_ordered_modes().iter() .zip (ModeStates::static_ordered_modes_dbl().iter()) {
-            if cg.dat.modes.contains(dms) && !cg.dat.modes.contains(ms) { cg.dat.modes.push(*ms) }
-        }
+        cg.ks.mode_states.ordered_mode_states() .into_iter() .for_each ( |ms| {
+            if cg.dat.modes.contains(&ms.ms_dbl_t) && !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
+        } );
         cg
     }
 
@@ -231,18 +214,22 @@ impl Combo {
         // and a helper fn to generate a combo given a set of lrmk expanded modkeys
         fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey]) -> Combo {
             let (wc_bits, states_bits) = {
-                ModKeys::static_ordered_mod_keys()                .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) .iter()
-                .chain ( & ModeStates::static_ordered_modes()     .map (|md| get_mode_bit_and_wc (cg,md)) )
-                .chain ( & ModKeys::static_ordered_mod_keys_dbl() .map (|mk| get_modkey_bit_and_wc (cg,emks,mk)) )
-                .chain ( & ModeStates::static_ordered_modes_dbl() .map (|md| get_mode_bit_and_wc (cg,md)) )
-                .chain ( & Combo::static_flags_modes()            .map (|md| get_mode_bit_and_wc (cg,md)) )
+                // first the key-down states for caps, mod-keys, and mode-state-keys
+                [ get_modkey_bit_and_wc (cg, emks, ModKey::caps) ] .into_iter()
+                .chain ( cg.ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk)) )
+                .chain ( cg.ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_t)) )
+                // next, their dbl_tap states
+                .chain ( [ get_modkey_bit_and_wc (cg, emks, ModKey::caps_dbl) ] )
+                .chain ( cg.ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk_dbl)) )
+                .chain ( cg.ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_dbl_t)) )
+                // we'll progressively shift the bits and pack into u64 for the states-bits and wildcard mask-bits
                 .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
-                    let acc_w = aw | ((*w as u64) << (ei as u8));  // accumulate the mask bits
-                    let acc_b = ab | ((*b as u64) << (ei as u8));  // accumulate the data bits
+                    let acc_w = aw | ((w as u64) << (ei as u8));  // accumulate the mask bits
+                    let acc_b = ab | ((b as u64) << (ei as u8));  // accumulate the states bits
                     (acc_w, acc_b)
                 } )
             };
-            let wc_mask_bits = FULL_WILDCARDS_MASK ^ wc_bits;
+            let wc_mask_bits = u64::MAX ^ wc_bits;
             Combo { _private:(), bmk:cg.get_bmk(), first_stroke:cg.dat.first_stroke, states_bits, wc_mask_bits }
         }
 
@@ -278,10 +265,9 @@ impl Combo {
         fn ag_triplet_contains (ag:&AG, lrmk:&ModKey, lmk:&ModKey, rmk:&ModKey) -> bool {
             ag.check_mks_contains(lrmk) || ag.check_mks_contains(lmk) || ag.check_mks_contains(rmk)
         }
-        let ks = KrustyState::instance();
         let mut af = ag.get_af();
         ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
-            ks.mod_keys.mod_umk_pairs() .iter() .filter (|(mk,_)| *mk == *lmk) .for_each (|(_, umk)| { // for the left-matching umk
+            ag.ks.mod_keys.ordered_unif_modkeys() .iter() .filter (|umk| umk.mk == *lmk) .for_each (|umk| { // for the left-matching umk
                 // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
                 if ag_triplet_contains (ag, lrmk, lmk, rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
@@ -313,13 +299,13 @@ impl Combo {
         // else, if we did have a combo-gen, we'll try to wrap it with any specified mod-key/mode-key consume actions
         let cg = cgo.unwrap();
         if !cg.dat.mod_key_no_consume {
-            ks.mod_keys.mod_umk_pairs() .iter() .for_each ( |(mk, umk)| {
-                if umk.handling.is_managed() && cg.dat.mks.contains(mk) { af = umk.keydn_consuming_action (af.clone()) }
+            ag.ks.mod_keys.ordered_unif_modkeys() .iter() .for_each ( |umk| {
+                if umk.handling.is_managed() && cg.dat.mks.contains(&umk.mk) { af = umk.keydn_consuming_action (af.clone()) }
             });
         }
         if !cg.dat.mode_kdn_no_consume {
-            ks.mode_states.mode_flag_pairs() .iter() .for_each ( |(ms_t, ms)| {
-                if cg.dat.modes.contains(ms_t) { af = ms.mode_key_consuming_action (af.clone()); }
+            ag.ks.mode_states.ordered_mode_states() .iter() .for_each ( |ms| {
+                if cg.dat.modes.contains(&ms.ms_t) { af = ms.mode_key_consuming_action (af.clone()); }
             } );
         }
         af
@@ -367,8 +353,8 @@ impl std::fmt::Debug for Combo {
                     c.to_string() + &sp.dimmed().to_string()
                 } ) .collect::<String>()
         }
-        let mask_str = if self.wc_mask_bits != FULL_WILDCARDS_MASK {
-            bits_str (self.wc_mask_bits ^ FULL_WILDCARDS_MASK)
+        let mask_str = if self.wc_mask_bits != u64::MAX {
+            bits_str (self.wc_mask_bits ^ u64::MAX)
         } else { "".into() };
 
         let states_str = bits_str (self.states_bits);

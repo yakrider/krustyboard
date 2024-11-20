@@ -20,9 +20,6 @@ use crate::*;
 // todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
 
 
-// we'll define some easier type aliases (CallBack, ActionFn etc) to pass around triggered actions and so on
-/// Arc/Action-Function Fn() representation that can be passed around between threads
-pub type AF  = Arc <dyn Fn() + Send + Sync + 'static> ;
 
 pub type Key = KbdKey ;
 
@@ -129,7 +126,10 @@ impl Cursor {
     fn get (&self) -> Option<HICON> { self.0 }
 
     pub fn swap_cursor ( &self, id:SYSTEM_CURSOR_ID ) { unsafe {
-        self.0 .iter() .filter_map (|&hc| CopyIcon(hc).ok()) .for_each (|hc| {SetSystemCursor (HCURSOR(hc.0), id);});
+        if let Some(hc) = self.0 {
+            if let Ok(hc) = CopyIcon(hc) {
+                SetSystemCursor (HCURSOR(hc.0), id);
+        } }
     } }
     pub fn toggle_cursor ( &self,  id:SYSTEM_CURSOR_ID, cur_restore:&Cursor ) { unsafe {
         let cur = self.get(); let res = cur_restore.get();
@@ -267,6 +267,9 @@ impl KrustyState {
     }
 
     pub fn proc_notice__modkey_down (&self, mk:ModKey) {
+        if mk == ModKey::caps {
+            self.mod_keys.proc_notice__caps_down(self)
+        }
         self.mouse.proc_notice__modkey_down (mk, self);
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey) {
@@ -287,6 +290,7 @@ impl KrustyState {
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
     }
     pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
+        // again, we'll not spawn this here, but those who can tolerate being spawned can call this on a spawned thread etc
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
@@ -296,27 +300,38 @@ impl KrustyState {
 
         self.mode_states.clear_flags();
         self.mod_keys.unstick_all();
+        self.mouse.clear_flags();
+
         self.sticky_first_stroke.clear();
         self.latching_first_stroke.clear();
+        self.in_right_btn_scroll_state.clear();
 
-        use MouseButton::*;
-        RightButton.press(); LeftButton.press(); RightButton.release(); LeftButton.release();
-        // ^^ interleaving these helps minimize effect of a direct right-btn release (e.g context menus)
-        MiddleButton.release(); X1Button.release(); X2Button.release();
+        // lets clear out capslock external state too
+        if Key::CapsLock.is_toggled() { Key::CapsLock.press_release() }
 
-        [  &self.mouse.lbtn.down, &self.mouse.rbtn.down, &self.mouse.mbtn.down,
-            &self.in_right_btn_scroll_state,
-        ] .into_iter() .for_each (|flag| flag.clear());
+        let mouse_masked_af = Arc::new ( || {
+            use MouseButton::*;
 
-        jiggle_cursor(3);
+            RightButton.press(); LeftButton.press();
+            // ^^ w/o these presses, the esc wont get rid of context menu! .. presumably about where focus is
+            RightButton.release(); LeftButton.release(); MiddleButton.release();
+            X1Button.release(); X2Button.release();
 
-        // lets send a delayed Esc for any context menus etc that show up
-        thread::spawn ( || {
-            thread::sleep (Duration::from_millis(100));
+            // send the Esc to get rid of win context menu
+            thread::sleep (Duration::from_millis(50));
             Key::Escape.press_release();
-            thread::sleep (Duration::from_millis(100));
+
+            // now finally, reset hooks
             InputProcessor::instance().re_set_hooks();
+
+            // and setup visual cue
+            jiggle_cursor(3);
         } );
+        mouse_action_masked (mouse_masked_af);
+        // ^^ this moves pointer to 0xFF,0FF before attempting clicks (is spawned out, ~50ms)
+        // .. it wont prevent a context menu from appearing, but at least in typical setups it will be in windows notif area
+        // .. which is better than in the random fgnd app .. and afterwards, we can clear the win-notif area context menu w an Esc
+        // .. and fgnd focus will be lost, but trying to capture/restore that would be even less worth the trouble
 
     }
 

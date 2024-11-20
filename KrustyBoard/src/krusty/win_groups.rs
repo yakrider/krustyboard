@@ -4,7 +4,6 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use std::ops::Not;
 
 use derive_deref::Deref;
 use rustc_hash::FxHashSet;
@@ -132,7 +131,10 @@ impl WinGroup {
                     if grp_ztops_count == grp_len {
                         // we found all grp windows at top z-order, means we're active, so send grp back to toggle it
                         //but first, lets activate the next-in-line hwnd so active window focus transfers seamlessly
-                        if let Some(&h) = hwnds .iter() .find (|h| wg.read().unwrap().grp_set.contains(h).not()) { win_activate(h) };
+                        for &h in &hwnds {
+                            if !wg.read().unwrap().grp_set.contains(&h) {
+                                win_activate(h); break
+                        } }
                         // now we can send our grp hwnds back
                         wg.read().unwrap().grp_set .iter() .for_each (|&h| { win_send_to_back(h); win_minimize(h); } );
                         break;
@@ -146,7 +148,9 @@ impl WinGroup {
     }
 
     fn close (&self) {
-        self.read().unwrap().grp.iter().for_each (|&hwnd| win_close(hwnd))
+        for &hwnd in &self.read().unwrap().grp {
+            win_close(hwnd)
+        }
     }
 }
 
@@ -160,28 +164,28 @@ impl WinGroups {
         WinGroups { grps : [ WinGroup::new(), WinGroup::new(), WinGroup::new(), WinGroup::new() ] }
     }
     pub fn grp_contains (&self, wg:WinGroups_E, hwnd:Hwnd) -> bool {
-        self.grps .get(wg.idx()) .is_some_and (|wg| wg.get_hwnds().contains(&hwnd))
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.get_hwnds().contains(&hwnd) } else { false }
     }
     pub fn get_grp_hwnds (&self, wg:WinGroups_E) -> Vec<Hwnd> {
-        self.grps .get(wg.idx()) .map (|wg| wg.get_hwnds()) .unwrap_or_default()
+        if let Some(wg) = self.grps.get(wg.idx()) {  wg.get_hwnds() } else { Vec::new() }
     }
     pub fn add_to_group (&self, wg: WinGroups_E, hwnd:Hwnd) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.add(&hwnd));
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.add(&hwnd) }
     }
     pub fn remove_from_group (&self, wg:WinGroups_E, hwnd:Hwnd) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.remove(&hwnd));
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.remove(&hwnd) }
     }
     pub fn toggle_grp_always_on_top (&self, wg:WinGroups_E) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.toggle_always_on_top());
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.toggle_always_on_top() }
     }
     pub fn activate_win_group (&self, wg:WinGroups_E) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.activate());
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.activate() }
     }
     pub fn toggle_grp_activation (&self, wg:WinGroups_E) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.toggle_activation());
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.toggle_activation() }
     }
     pub fn close_grp_windows (&self, wg:WinGroups_E) {
-        self.grps .get(wg.idx()) .iter().for_each (|wg| wg.close());
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.close() }
     }
 
 }
