@@ -3,11 +3,13 @@
 
 
 use image::ImageFormat;
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tao::event::Event;
+use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 
-use crate::{InputProcessor, KrustyState};
+use crate::{InputProcessor, KrustyState, utils};
+
 
 fn get_icon() -> Icon {
     let icon_str = {
@@ -20,62 +22,90 @@ fn get_icon() -> Icon {
     Icon::from_rgba (icon.into_bytes(), 44, 44).unwrap()
 }
 
+
+
 pub fn start_system_tray_monitor() {
 
-    let event_loop = EventLoopBuilder::new().build();
+    let quit    = MenuItem::new ("Quit",    true, None);
+    let reload  = MenuItem::new ("Reload",  true, None);
+
+    let is_elev = utils::check_cur_proc_elevated().unwrap_or_default();
+    let elevated = CheckMenuItem::new ("Elevated", false, is_elev, None);
+
+    let suspend = CheckMenuItem::new ("Suspend", true, false, None);
 
     let tray_menu = Menu::new();
-    let suspend = MenuItem::new ("Suspend", true, None);
-    let reload  = MenuItem::new ("Reload",  true, None);
-    let quit    = MenuItem::new ("Quit",    true, None);
-    tray_menu .append_items ( &[ &suspend, &reload, &quit ] );
+    tray_menu .append_items ( &[ &elevated, &suspend, &reload, &quit ] );
 
-    let mut tray_icon = None;
+    let tray_icon = TrayIconBuilder::new()
+        .with_menu (Box::new(tray_menu))
+        .with_tooltip ("KrustyBoard")
+        .with_icon (get_icon())
+        .build() .unwrap();
 
-    let menu_channel = MenuEvent::receiver();
-    let tray_channel = TrayIconEvent::receiver();
+    let menu_evs_handler = move |event:MenuEvent| {
+        //println!("menu_event: {event:?}");
 
-    event_loop .run ( move |event, _, control_flow| {
+        if event.id == quit.id() {
+            std::process::exit(0);
+        }
+        else if event.id == reload.id() {
+            suspend.set_checked(false);
+            KrustyState::instance().unstick_all();
+            // ^^ this will also re-install hooks and restart input-processing
+        }
+        else if event.id == suspend.id() {
+                suspend.set_checked(true);
+            if InputProcessor::instance().are_hooks_set() {
+                InputProcessor::instance().stop_input_processing();
+            } else {
+                suspend.set_checked(false);
+                //InputProcessor::instance().begin_input_processing();
+                KrustyState::instance().unstick_all();
+            }
+        }
+    };
+
+    let event_loop : EventLoop<MenuEvent> = EventLoopBuilder::with_user_event().build();
+    // ^^ in theory we could make our actual UserEvent encompassing whatever events we want to proxy ..
+    // but since we only care about MenuEvent for now, we're just directly setting the UserEvent type to MenuEvent
+
+    let menu_evs_proxy = event_loop.create_proxy();
+
+    MenuEvent::set_event_handler ( Some ( move |event:MenuEvent| {
+        let _ = menu_evs_proxy.send_event(event);
+    } ) );
+
+    /* Regarding setting up the proxy above ..
+        - in theory, we could have supplied the menu_evs_handler itself to set_event_handler instead of just making it forward to event-loop ..
+        - however, set_event_handler requires the closure to be Send, but the Menu constituents use Rc which cant be Send..
+          .. meaning, we couldnt have the handler include code to toggle the text in the menu items (Suspend/Resume)
+
+        - now, the event-loop runner simply requires the handler closure to be FnMut (so the closure there can capture Menu and update text)
+        - so lets say we do it like their sample, and try to receive from MenuEvent::receiver() in that event loop ..
+          .. in theory, that works, but because of whatever issue/bug they have, the actual click on the menu doesnt generate an event-loop event!
+          .. (https://github.com/tauri-apps/tray-icon/issues/209)
+          .. which means we'd only try_receive the menu-event when the next run-loop event occurs .. eg. mouse move etc
+          .. and that means, the effect of menu-click would only happen once mouse is moved after clicking btn .. sucks!
+
+        - so instead, we're setting up the proxy so whenever the menu-event fires, we send it to the event loop ..
+        - and there we can deal with it without delay .. (and ofc, there it can update the menu text too)
+     */
+
+
+    // We could in theory also set handling for TrayIconEvent::set_event_handler(?) ..
+    // .. which would give us events on the tray-icon itself (without the menu being opened)
+    // .. but for now we dont plan to respond to that (hover, click etc)
+
+    event_loop .run ( move |event, _win_target, control_flow| {
 
         *control_flow = ControlFlow::Wait;
+        // ^^ default is Poll which isnt necessary for us
 
-        if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
-            //let icon = load_icon(std::path::Path::new(path));
-            tray_icon = Some(
-                TrayIconBuilder::new()
-                    .with_menu (Box::new (tray_menu.clone()))
-                    .with_tooltip ("KrustyBoard")
-                    .with_icon (get_icon())
-                    .build()
-                    .unwrap(),
-            );
+        if let Event::UserEvent(menu_ev) = event {
+            menu_evs_handler(menu_ev)
         }
 
-        if let Ok(event) = menu_channel.try_recv() {
-            //println!("menu_channel: {event:?}");
-            if event.id == quit.id() {
-                tray_icon.take();
-                *control_flow = ControlFlow::Exit;
-            }
-            else if event.id == reload.id() {
-                KrustyState::instance().unstick_all();
-                suspend.set_text("Suspend");
-            }
-            else if event.id == suspend.id() {
-                if InputProcessor::instance().are_hooks_set() {
-                    InputProcessor::instance().stop_input_processing();
-                    suspend.set_text ("Resume");
-                } else {
-                    InputProcessor::instance().begin_input_processing();
-                    suspend.set_text ("Suspend");
-                }
-            }
-        }
-
-        if let Ok(event) = tray_channel.try_recv() {
-            //println!("tray_channel: {event:?}");
-        }
-
-    })
+    } )
 
 }

@@ -3,6 +3,9 @@
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::windows_utils::*;
 
@@ -21,6 +24,24 @@ static CLICK_MONITOR_CDC_LOC : &str = r#"D:\yakdat\downloads\ins-bin\_MONITOR_BR
 /* reminder - re UAC elevation when starting processes while running krusy elevated (as we often want to do)
     - since processes started here directly
 */
+
+
+
+pub fn check_cur_proc_elevated () -> Option<bool> {
+    check_proc_elevated ( unsafe { GetCurrentProcess() } )
+}
+pub fn check_proc_elevated (h_proc:HANDLE) -> Option<bool> { unsafe {
+    let mut h_token = HANDLE::default();
+    if false == OpenProcessToken (h_proc, TOKEN_QUERY, &mut h_token) { return None };
+    let mut token_info : TOKEN_ELEVATION = TOKEN_ELEVATION::default();
+    let mut token_info_len = size_of::<TOKEN_ELEVATION>() as u32;
+    if ! GetTokenInformation (
+        h_token, TokenElevation, Some(&mut token_info as *mut _ as *mut _),
+        token_info_len, &mut token_info_len
+    ) .as_bool() { return None }
+    Some (token_info.TokenIsElevated != 0)
+} }
+
 
 pub fn start_chrome() {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .spawn();
