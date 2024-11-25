@@ -7,14 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::HINSTANCE;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CopyIcon, HCURSOR, HICON, IDC_ARROW, IDC_IBEAM, IDC_SIZEALL, IDC_SIZENWSE, IDC_WAIT,
-    LoadCursorW, SetSystemCursor, SYSTEM_CURSOR_ID
-};
 
 use crate::*;
+use crate::utils::Cursors;
 
 
 // todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
@@ -86,12 +81,7 @@ pub const MBTN_DOUBLE_TAP_MS : u32 = 500;
 
 pub fn update_stamp_key_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
     let is_double_tap = update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS);
-    if is_double_tap {
-        jiggle_cursor(1);
-        //let curs = Cursors::instance();
-        //curs.hc_app_starting.toggle_cursor (OCR_NORMAL, &curs.hc_arrow);
-        //curs.hc_app_starting.toggle_cursor (OCR_IBEAM,  &curs.hc_ibeam)
-    }
+    if is_double_tap { jiggle_cursor(1) }
     is_double_tap
 }
 pub fn update_stamp_mouse_dbl_click (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
@@ -114,65 +104,6 @@ pub fn jiggle_cursor (n:isize) {
         }
     } );
 }
-
-
-
-
-# [ derive (Debug, Clone) ]
-struct Cursor (Option<HICON>);
-impl Cursor {
-    unsafe fn load_copy_cursor (id:PCWSTR) -> Option<HICON> { LoadCursorW (HINSTANCE(0), id).ok() .and_then (|hc| CopyIcon(hc).ok()) }
-    fn new (id:PCWSTR) -> Cursor { unsafe { Cursor ( Cursor::load_copy_cursor(id) ) } }
-    fn get (&self) -> Option<HICON> { self.0 }
-
-    pub fn swap_cursor ( &self, id:SYSTEM_CURSOR_ID ) { unsafe {
-        if let Some(hc) = self.0 {
-            if let Ok(hc) = CopyIcon(hc) {
-                SetSystemCursor (HCURSOR(hc.0), id);
-        } }
-    } }
-    pub fn toggle_cursor ( &self,  id:SYSTEM_CURSOR_ID, cur_restore:&Cursor ) { unsafe {
-        let cur = self.get(); let res = cur_restore.get();
-        thread::spawn ( move || {
-            cur .and_then (|hc| CopyIcon(hc).ok()) .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
-            thread::sleep(Duration::from_millis(300));
-            res .and_then (|hc| CopyIcon(hc).ok()) .map (|hc| SetSystemCursor (HCURSOR(hc.0), id));
-        } );
-    } }
-}
-
-
-
-# [ derive (Debug, Clone) ]
-pub struct _Cursors {
-    hc_arrow        : Cursor,
-    hc_ibeam        : Cursor,
-    hc_size_all     : Cursor,
-    hc_size_nwse    : Cursor,
-    hc_app_starting : Cursor,
-}
-# [ derive (Debug, Clone, Deref) ]
-pub struct Cursors ( Arc <_Cursors> );
-
-
-impl Cursors {
-    pub fn instance() -> Cursors {
-        static INSTANCE : OnceCell<Cursors> = OnceCell::new();
-        INSTANCE .get_or_init ( ||
-            Cursors ( Arc::new ( _Cursors {
-                hc_arrow        : Cursor::new (IDC_ARROW),
-                hc_ibeam        : Cursor::new (IDC_IBEAM),
-                hc_size_all     : Cursor::new (IDC_SIZEALL),
-                hc_size_nwse    : Cursor::new (IDC_SIZENWSE),
-                hc_app_starting : Cursor::new (IDC_WAIT),
-            } ) )
-        ) .clone()
-    }
-}
-
-
-
-
 
 
 
@@ -275,6 +206,9 @@ impl KrustyState {
     pub fn proc_notice__modkey_up (&self, mk:ModKey) {
         if !self.sticky_first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
             self.sticky_first_stroke.clear();
+            if self.latching_first_stroke.is_empty() {
+                Cursors::instance().apply_norm()
+            } else { Cursors::instance().apply_lfsc() }
         }
         if mk == ModKey::caps {
             self.mod_keys.proc_notice__caps_up(self)
@@ -302,9 +236,10 @@ impl KrustyState {
         self.mod_keys.unstick_all();
         self.mouse.clear_flags();
 
+        self.in_right_btn_scroll_state.clear();
         self.sticky_first_stroke.clear();
         self.latching_first_stroke.clear();
-        self.in_right_btn_scroll_state.clear();
+        Cursors::instance().apply_norm();
 
         // lets clear out capslock external state too
         if Key::CapsLock.is_toggled() { Key::CapsLock.press_release() }

@@ -10,6 +10,7 @@ use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
+use crate::utils::Cursors;
 
 
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
@@ -109,7 +110,7 @@ impl CombosMap {
             // (fscs are required to have some mod-key in them and are active until all modkeys are released)
             if ks.mod_keys.some_mk_down() {
                 ks.sticky_first_stroke.store(fsc);
-                jiggle_cursor(1)
+                Cursors::instance().apply_sfsc();
             }
         } );
         self._add_combo (cg, ag().af(af), true);
@@ -133,7 +134,7 @@ impl CombosMap {
         let ks = cg.ks.clone();
         let af = Arc::new ( move || {
             ks.latching_first_stroke.store(fsc);
-            jiggle_cursor(2);
+            Cursors::instance().apply_lfsc();
         } );
         self._add_combo (cg, ag().af(af), true);
     }
@@ -144,8 +145,12 @@ impl CombosMap {
         let cg = cg.into();
         let ks = cg.ks.clone();
         let af = Arc::new ( move || {
-            ks.latching_first_stroke.clear();
-            jiggle_cursor(3);
+            if ks.latching_first_stroke.is_empty() {
+                jiggle_cursor(2);
+            } else {
+                Cursors::instance().apply_norm();
+                ks.latching_first_stroke.clear();
+            }
         } );
         self._add_combo (cg, ag().af(af), true);
     }

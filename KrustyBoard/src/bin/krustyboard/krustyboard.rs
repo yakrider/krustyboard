@@ -292,8 +292,9 @@ fn setup_mode_keys (k:&Krusty) {
 
 
 fn setup_latching_first_stroke_clear (k:&Krusty) {
-    // caps-dbl-q-q -> clear active latching fsc
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt().m(caps_dbl).s(qks_dbl) );
+    // clear active latching fsc .. caps-q-q, caps-caps-q
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt().m(caps_dbl).s(qks) );
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt().m(caps).s(qks_dbl) );
 }
 
 
@@ -310,8 +311,9 @@ fn setup_caps_as_shift_mappings  (k:&Krusty) {
     } );
 
     // now for at least some of these, we want to enable caps-q for ctrl (e.g. ctrl +/-)
-    k.cm .add_combo ( cg().k(Minus).m(caps).s(qks1),  ag().k(Minus).m(ctrl) );
-    k.cm .add_combo ( cg().k(Equal).m(caps).s(qks1),  ag().k(Equal).m(ctrl) );
+    for key in [Minus, Equal, Slash] {
+        k.cm .add_combo ( cg().k(key).m(caps).s(qks1),  ag().k(key).m(ctrl) )
+    }
 }
 
 
@@ -1242,13 +1244,16 @@ fn setup_misc_standalone_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(Backquote).m(lalt),  ag().k(Tab).m(lctrl) );
 
 
-
     // we'll set caps-alt-p to bring up process explorer (via ctrl-shift-esc)
     k.cm .add_combo ( cg().k(P).m(caps).m(lalt),  ag().k(Escape).m(lctrl).m(lshift) );
 
     // chrome/browser specific combos
     // caps-alt-t --> ctrl-shift-a (tabs search popup)
     k.cm .add_combo ( cg().k(T).m(lalt).m(caps).c(browser_fgnd(k)),  ag().k(A).m(ctrl).m(shift) );
+
+
+    // quick shortcut to reset system cursors .. mostly useful while impl/testing it
+    k.cm .add_combo ( cg().k(C).m(caps_dbl),  ag().af (action (Cursors::reset_system_cursors)) );
 
 }
 
@@ -1494,9 +1499,14 @@ fn setup_ide_diff_nav_tscs (k:&Krusty) {
     // and for next/prev file
     k.cm .add_combo ( cg().k(J).fsc(fsc).m(caps),   ag().k(ExtLeft ).m(ctrl).m(alt).m(shift) );
     k.cm .add_combo ( cg().k(K).fsc(fsc).m(caps),   ag().k(ExtRight).m(ctrl).m(alt).m(shift) );
+
     // and accept left/right
     k.cm .add_combo ( cg().k(J).fsc(fsc).m(caps).s(msE),   ag().k(ExtLeft ).m(ctrl).m(alt) );
     k.cm .add_combo ( cg().k(K).fsc(fsc).m(caps).s(msE),   ag().k(ExtRight).m(ctrl).m(alt) );
+    // and while doing this, might as well support nav too
+    k.cm .add_combo ( cg().k(Comma).fsc(fsc).m(caps).s(msE),   ag().k(ExtDown ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(I    ).fsc(fsc).m(caps).s(msE),   ag().k(ExtUp   ).m(ctrl).m(alt) );
+
 
     // and for actual arrow-keys as well .. next/prev
     k.cm .add_combo ( cg().k(Down ).fsc(fsc),  ag().k(ExtDown ).m(ctrl).m(alt) );
@@ -1504,9 +1514,13 @@ fn setup_ide_diff_nav_tscs (k:&Krusty) {
     // next/prev file
     k.cm .add_combo ( cg().k(Left ).fsc(fsc),  ag().k(ExtLeft ).m(ctrl).m(alt).m(shift) );
     k.cm .add_combo ( cg().k(Right).fsc(fsc),  ag().k(ExtRight).m(ctrl).m(alt).m(shift) );
+
     // and for accept left/right
     k.cm .add_combo ( cg().k(Left ).fsc(fsc).m(caps),  ag().k(ExtLeft ).m(ctrl).m(alt) );
     k.cm .add_combo ( cg().k(Right).fsc(fsc).m(caps),  ag().k(ExtRight).m(ctrl).m(alt) );
+    // and while doing this, might as well support nav too
+    k.cm .add_combo ( cg().k(Down ).fsc(fsc).m(caps),  ag().k(ExtDown ).m(ctrl).m(alt) );
+    k.cm .add_combo ( cg().k(Up   ).fsc(fsc).m(caps),  ag().k(ExtUp   ).m(ctrl).m(alt) );
 
 }
 
@@ -2140,7 +2154,6 @@ pub fn setup_krusty_board () {
     // .. which is for safety in case anything above accidentally included those, although ofc we dont want to rely on that!
     setup_direct_binding_keys (&k);
 
-
     // and we'll give a lil indicator for when we restart etc
     jiggle_cursor(3);
 
@@ -2153,6 +2166,9 @@ pub fn main () {
 
     // setup the whole krusty keyboard configuration
     setup_krusty_board();
+
+    // we'll enable cursor color swaps betwen [normal, sticky-fsc, latching-fsc] modes
+    Cursors::instance().set_swaps_enabled(true);
 
     // we'll first start the windows-events listener
     WinEventsListener::instance().setup_win_event_hooks();

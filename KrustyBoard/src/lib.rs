@@ -77,11 +77,13 @@ pub mod krusty {
 pub mod utils {
     // sub-modules in module directory
     pub mod brightness;
+    pub mod cursors;
     pub mod process_utils;
     pub mod windows_utils;
 
     // and our (selective or wholesale) sub-module re-exports
     pub use self::brightness::*;
+    pub use self::cursors::*;
     pub use self::process_utils::*;
     pub use self::windows_utils::*;
 }

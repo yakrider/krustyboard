@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use windows::core::{PSTR, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, SetThreadDpiAwarenessContext};
+use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
@@ -44,6 +44,12 @@ pub fn dpi_conv_point (hwnd:Hwnd, p:POINT) -> POINT { unsafe {
     let mut p = POINT { x: p.x, y: p.y };
     PhysicalToLogicalPoint (hwnd, &mut p);
     p
+} }
+pub fn get_thread_dpi_awareness() -> DPI_AWARENESS { unsafe {
+    GetAwarenessFromDpiAwarenessContext  (GetThreadDpiAwarenessContext())
+} }
+pub fn get_process_dpi_awareness() -> DPI_AWARENESS { unsafe {
+    GetAwarenessFromDpiAwarenessContext (GetDpiAwarenessContextForProcess (GetCurrentProcess()))
 } }
 
 
