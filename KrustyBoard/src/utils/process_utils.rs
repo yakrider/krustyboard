@@ -95,7 +95,7 @@ fn setup_opened_window (win_class_part_match_str: &str) {
                 //win_fgnd_center_if_past_screen();
                 //win_fgnd_place_right_if_past_screen();
                 let ks = KrustyState::instance();
-                snap_closest_edge_side(&ks, RectEdgeSide::Right);
+                snap_closest_edge_side(ks, RectEdgeSide::Right);
                 //snap_closest_edge_side(&ks, RectEdgeSide::Top);
                 //thread::sleep(Duration::from_millis(300));
                 win_fgnd_toggle_vertmax();

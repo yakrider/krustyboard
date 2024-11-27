@@ -64,7 +64,7 @@ impl Bounds {
 }
 
 
-fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
+fn handle_pointer_window_drag (x:i32, y:i32, ks:KSR) {
     // we'll have saved mouse loc on win-lclick, so we can reference that on where/how to move the window
     let wsd = ks.win_snap_dat.read().unwrap();    // we'll hold this read-lock until this fn exits .. should be ok
 
@@ -95,7 +95,7 @@ fn handle_pointer_window_drag (x:i32, y:i32, ks:&KrustyState) {
     if ks.mode_states.some_qks_mode_active.is_set() { win_grp_move_mirrored (dx + dx_snap, dy + dy_snap, ks) }
 }
 
-fn win_grp_move_mirrored (dx:i32, dy:i32, ks:&KrustyState) {     //println!("{:?}",(dx,dy));
+fn win_grp_move_mirrored (dx:i32, dy:i32, ks:KSR) {     //println!("{:?}",(dx,dy));
     let wsd = ks.win_snap_dat.read().unwrap();
     wsd.grp_rects .iter() .for_each (|(&hwnd,&rect)| {
         win_move_to (
@@ -108,7 +108,7 @@ fn win_grp_move_mirrored (dx:i32, dy:i32, ks:&KrustyState) {     //println!("{:?
     } )
 }
 
-fn re_position_maxed_window_for_drag (ks:&KrustyState) {
+fn re_position_maxed_window_for_drag (ks:KSR) {
     // for new loction for restored windows, we'll try and take proportions of pointer location relative to workarea
     // this will leave the new window always enclosing the pointer, and therefore ready for dragging
     let wsd = ks.win_snap_dat.read().unwrap();
@@ -125,7 +125,7 @@ fn re_position_maxed_window_for_drag (ks:&KrustyState) {
     win_set_placement (wsd.hwnd, &mut wp);
 }
 
-fn ensure_maxed_windows_drag_ready (ks:&KrustyState) -> bool {
+fn ensure_maxed_windows_drag_ready (ks:KSR) -> bool {
     // it doesnt make sense to drag maximized windows as-is ..
     // - if we find a maximized window, we manually reposition it by the pointer in its original size first
     // - but it takes a bit for that to reflect in window-dimensions/edges etc that we want for drag/snap ..
@@ -146,7 +146,7 @@ fn ensure_maxed_windows_drag_ready (ks:&KrustyState) -> bool {
     true
 }
 
-pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:&KrustyState) {
+pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:KSR) {
     // first, we gotta take care of any maximized windows before we attempt dragging/resizing them
     if !ensure_maxed_windows_drag_ready (ks) {
         return
@@ -160,7 +160,7 @@ pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:&KrustyState) {
 
 
 
-fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
+fn handle_pointer_window_resize (x:i32, y:i32, ks:KSR) {
     let wsd = ks.win_snap_dat.read().unwrap();    // will hold read-lock until this fn exits
     let dest = RECT {
         left   : wsd.rect.left,
@@ -179,7 +179,7 @@ fn handle_pointer_window_resize (x:i32, y:i32, ks:&KrustyState) {
         dest.bottom - dest.top  + dr.bottom
     );
 }
-pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
+pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:KSR) {
     // first, we gotta take care of any maximized windows before we attempt dragging/resizing them
     if !ensure_maxed_windows_drag_ready (ks) {
         return
@@ -194,7 +194,7 @@ pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:&KrustyState) {
 
 
 
-pub fn handle_pointer_action_cancel (ks:&KrustyState) {
+pub fn handle_pointer_action_cancel (ks:KSR) {
     let wsd = ks.win_snap_dat.read().unwrap();
     win_move_to (
         wsd.hwnd,  wsd.rect.left,  wsd.rect.top,
@@ -205,7 +205,7 @@ pub fn handle_pointer_action_cancel (ks:&KrustyState) {
 
 
 
-pub fn snap_closest_edge_side (ks:&KrustyState, side_t:RectEdgeSide) {
+pub fn snap_closest_edge_side (ks:KSR, side_t:RectEdgeSide) {
     // first we'll have a helper fn to correctly snap to the nearest edge in the desired direction within workarea-bounds
     fn snap (win_edge:&Edge, pad_v:i32, edges:&[Edge], bound:i32, snap_fwd:bool) -> i32 {
         let edges = edges .iter() .filter ( |e| {
@@ -247,7 +247,7 @@ pub fn jiggle_window (hwnd:Hwnd) {
 
 
 
-pub fn capture_win_snap_dat (ks:&KrustyState, hwnd:Hwnd, win_grp:Option<WinGroups_E>) -> WinSnapDat {    //println!("{:?}",("pre-cache"));
+pub fn capture_win_snap_dat (ks:KSR, hwnd:Hwnd, win_grp:Option<WinGroups_E>) -> WinSnapDat {    //println!("{:?}",("pre-cache"));
     // first set thread dpi-aware in case we're on some spawned thread not inited w that (unlike our event queues)
     win_set_thread_dpi_aware();
 

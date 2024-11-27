@@ -1,12 +1,9 @@
 #![ allow (non_camel_case_types) ]
 
-use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::os::raw::c_int;
 use std::{panic, thread};
-
-use derive_deref::Deref;
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, BOOL, GetLastError};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -57,7 +54,7 @@ impl EvProc_Ds {
 
 
 
-pub struct _InputProcessor {
+pub struct InputProcessor {
     /// handle returned by OS to the lower level kbd hook that we set (needed to unhook later)
     kbd_hook : AtomicIsize,
     /// handle returned by OS to the lower level mouse hook that we set (needed to unhook later)
@@ -74,16 +71,12 @@ pub struct _InputProcessor {
     last_kbd_event : AtomicU64,
 }
 
-# [ derive (Clone, Deref) ]
-pub struct InputProcessor ( Arc <_InputProcessor> );
-
-
 
 impl InputProcessor {
 
     /// Creates or returns the singleton InputProcessor.
     /// (.. and when initializing, starts the mpsc channel for kbd/mouse event actions too)
-    pub fn instance() -> InputProcessor {
+    pub fn instance () -> &'static InputProcessor {
 
         static INSTANCE: OnceCell <InputProcessor> = OnceCell::new();
 
@@ -104,15 +97,15 @@ impl InputProcessor {
                 }
             });
 
-            InputProcessor ( Arc::new ( _InputProcessor {
+            InputProcessor {
                 kbd_hook       : AtomicIsize::default(),
                 mouse_hook     : AtomicIsize::default(),
                 iproc_thread   : AtomicU32::default(),
                 input_bindings : Bindings::new(),
                 input_af_queue : input_queue_sender,
                 last_kbd_event : AtomicU64::default(),
-            } ) )
-        } ) .clone()
+            }
+        } )
 
     }
 
@@ -179,10 +172,9 @@ impl InputProcessor {
     /// Starts listening for bound input events.
     pub fn begin_input_processing (&self) {
 
-        let iproc = self.clone();
+        thread::spawn ( || unsafe {
 
-        thread::spawn ( move || unsafe {
-
+            let iproc = InputProcessor::instance();
             iproc.set_kbd_hook();
             iproc.set_mouse_hook();
 
@@ -227,6 +219,8 @@ impl InputProcessor {
         //if let Some(cbe) = self.input_bindings .borrow() .get (&bmk) {
         if let Some(cbe) = unsafe { & *self.input_bindings.as_ptr() } .get (&bmk) {
             // ^^ the borrow is fine too, but since we dont write at runtime, just direct usage should be fine (and faster)
+            // .. further this direct deref means we can get by w/o having to clone the cbs to pass into thread/queue below
+            // .. which again, we're ok with, given we expect no runtime updates to the bindings (so no worries about the cb ref's lifetime)
             had_binding = true;
             ev_proc_ds = cbe.ev_proc_ds;
             match &cbe.cb {
@@ -235,12 +229,12 @@ impl InputProcessor {
                     if ev_proc_ds.ev_prop_d == EvProp_Undet { ev_proc_ds = epds; }
                 }
                 EvCbFn_Spawned(cb) => {
-                    let (cb, ev) = (cb.clone(), event);
-                    thread::spawn (move || cb(ev));
+                    //let cb = cb.clone();
+                    thread::spawn (move || cb(event));
                 }
                 EvCbFn_Queued(cb) => {
-                    let (cb, ev) = (cb.clone(), event);
-                    let _ = self.input_af_queue.send ( Box::new ( move || cb(ev) ) );
+                    //let cb = cb.clone();
+                    let _ = self.input_af_queue.send ( Box::new ( move || cb(event) ) );
                 }
             }
         }

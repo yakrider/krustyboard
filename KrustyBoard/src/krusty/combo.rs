@@ -118,7 +118,7 @@ impl Combo {
 
 
     /// generate the combo bit-map for the current runtime state (incl the active key and ks state flags)
-    pub(crate) fn gen_cur_combo (bmk:BindingsMapKey, ks:&KrustyState) -> Combo {
+    pub(crate) fn gen_cur_combo (bmk:BindingsMapKey, ks:KSR) -> Combo {
         // note: this is in runtime hot-path .. (unlike the make_combo_*_states_bitmap fns used while building combos-table)
         let wc_mask_bits = u64::MAX;
         let first_stroke = ComboHash::default();
@@ -172,8 +172,7 @@ impl Combo {
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
         if let BindingsMapKey::key_ev_t (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
-            for ms in cg.ks.clone().mode_states.ordered_mode_states() {
-                // ^^ the clone here is to avoid having cg be partially borrowed due to deref coercion
+            for ms in cg.ks.mode_states.ordered_mode_states() {
                 if ms.key() == Some(key) {
                     if !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
                     cg = cg.msk_nc();
@@ -312,9 +311,9 @@ impl Combo {
     }
 
 
-    pub(crate) fn gen_fsc_hash (cg:CG) -> ComboHash {
+    pub(crate) fn gen_fsc_hash (cg:&CG) -> ComboHash {
         // gen combos will generate a bunch of l/r expanded combos, but for matching up a first-stroke, we just need one shared truth
-        let hash = Self::gen_combos (Self::finalize_combo_gen(cg)) .first() .map (|c| {
+        let hash = Self::gen_combos (Self::finalize_combo_gen(cg.clone())) .first() .map (|c| {
             use std::hash::*;
             let mut hasher = DefaultHasher::new();
             c.hash (&mut hasher);

@@ -97,8 +97,8 @@ impl _ComboGen {
 # [ derive (Debug, Clone) ]
 pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
 
-    /// we'll hold an Arc clone of KrustyState for internal referencing
-    pub ks : KrustyState,
+    /// we'll hold a 'static ref to KrustyState for internal referencing
+    pub ks : &'static KrustyState,
 
     /// all the data that ComboGen actually holds through the construction states
     pub dat : Box<_ComboGen>,

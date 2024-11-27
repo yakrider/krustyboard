@@ -127,7 +127,7 @@ impl ModeState {
     fn bind_mode_key_down (&self, k:&Krusty) {
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // first we'll prep any supplemental actions specific to different types of mode-state keys
-        let ks = k.ks.clone();
+        let ks = k.ks;
         let mss_cba : AF = {
             if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.some_l2_mode_active.set() ) }
             else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.some_qks_mode_active.set() ) }
@@ -135,7 +135,7 @@ impl ModeState {
         };
         // now we can build the actual binding actions
         // (note that these should be inline so the flags are certain to be set by the time combo-processing for this key happens)
-        let (ms, ks) = (self.clone(), k.ks.clone());
+        let ms = self.clone();
         let cb = EvCbFn_Inline ( Arc::new ( move |ev:Event| {
             if ms.down.is_clear() {
                 // i.e. not a repeat
@@ -170,14 +170,14 @@ impl ModeState {
     fn bind_mode_key_up (&self, k:&Krusty) {
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // again, first we'll prep any supplemental actions specific to different types of mode-state keys
-        let ks = k.ks.clone();
+        let ks = k.ks;
         let mss_cba : AF = {
             if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
             else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         // then build the actual binding actions
-        let (ms, ks) = (self.clone(), k.ks.clone());
+        let ms = self.clone();
         let ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
         let cb = EvCbFn_Inline ( Arc::new ( move |_| {
             ms.down.clear(); ms.consumed.clear(); mss_cba();

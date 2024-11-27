@@ -60,16 +60,12 @@ impl TryFrom <ModKey> for KbdKey {
 
 /// CapsModKey holds the caps-lock key and its impl as the base for most l2/l3 functionality
 # [ derive (Debug) ]
-pub struct _CapsModKey {
+pub struct CapsModKey {
     _private : (),
     pub down    : Flag,         // physically down
     pub dbl_tap : Flag,         // marker that two presses came within dbl-tab window
     pub stamp   : EventStamp,   // stamp when it was last pressed, used for dbl-tap marking
 }
-
-# [ derive (Debug, Clone, Deref) ]
-pub struct CapsModKey ( Arc <_CapsModKey> );
-
 
 
 
@@ -162,12 +158,12 @@ pub trait KeyHandling : Debug {
 
     fn handling_type (&self) -> ModKey_Mgmt ;
 
-    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
-    fn handle_key_up   (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds;
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:KSR) -> EvProc_Ds;
+    fn handle_key_up   (&self, bmk:&UnifModKey, ks:KSR) -> EvProc_Ds;
 
     // for caps up/down the default impl should do nothing, but ModKey_Managed etc can define their own processing
-    fn proc_notice__caps_down (&self, _:&UnifModKey, _:&KrustyState) { }
-    fn proc_notice__caps_up   (&self, _:&UnifModKey, _:&KrustyState) { }
+    fn proc_notice__caps_down (&self, _:&UnifModKey, _:KSR) { }
+    fn proc_notice__caps_up   (&self, _:&UnifModKey, _:KSR) { }
 
     // general behavioral queries can be satisfied here w/o the specific impls having to worry about them
     fn is_managed (&self) -> bool { self.handling_type() == ModKey_Mgmt::MK_Mgmt_Managed }
@@ -191,7 +187,7 @@ pub struct ModKeys {
 
     _private   : (),
     // capslock tracking
-    pub caps   : CapsModKey,
+    pub caps   : &'static CapsModKey,
     // ralt is only tracked, but not synced (since lalt is treated as shift instead)
     pub ralt   : UnifModKey,
     //  and now that native win funcationality is moved to dbl-win, lwin/rwin are simple tracked keys (no sync w logical state)
@@ -304,10 +300,10 @@ impl ModKeys {
     }
 
 
-    pub fn proc_notice__caps_down (&self, ks:&KrustyState) {
+    pub fn proc_notice__caps_down (&self, ks:KSR) {
         self.ordered_unif_modkeys() .iter() .for_each (|umk| umk.proc_notice__caps_down(ks));
     }
-    pub fn proc_notice__caps_up (&self, ks:&KrustyState) {
+    pub fn proc_notice__caps_up (&self, ks:KSR) {
         self.ordered_unif_modkeys() .iter() .for_each (|umk| umk.proc_notice__caps_up(ks));
     }
 
@@ -326,20 +322,20 @@ impl ModKeys {
 impl CapsModKey {
     // ^^ CMK : Caps-Modifier-Key type .. basically tracks caps state and sets up caps as the global Layer-2/3/qks etc modifier key
 
-    pub fn instance () -> Self {
+    pub fn instance () -> &'static Self {
         // note that since ofc there's only one caps key, we'll set this up as singleton (unlike for the TMKs and SMKs below)
         static INSTANCE: OnceCell<CapsModKey> = OnceCell::new();
         INSTANCE .get_or_init ( ||
-            CapsModKey ( Arc::new ( _CapsModKey {
+            CapsModKey {
                 _private : (),
                 down        : Flag::default(),
                 dbl_tap     : Flag::default(),
                 stamp       : EventStamp::default(),
-            } ) )
-        ) .clone()
+            }
+        )
     }
 
-    fn handle_key_down (&self, ks:&KrustyState, ev:&Event) {
+    fn handle_key_down (&self, ks:KSR, ev:&Event) {
         //println!("Caps DOWN : {:?}, inj: {:?}", ev.key, ev.injected);
 
         // note that for caps, we completely block it from ever being sent up, and just manage internally
@@ -351,12 +347,11 @@ impl CapsModKey {
         }
         if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
             // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
-            let ks = ks.clone();
             afq_send (Box::new (move || ks.mod_keys.lctrl.ensure_active()));
         }
     }
 
-    fn handle_key_up (&self, ks:&KrustyState, _ev:&Event) {
+    fn handle_key_up (&self, ks:KSR, _ev:&Event) {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
@@ -371,13 +366,12 @@ impl CapsModKey {
         // toggle off first if necessary (to clear key light)
         if CapsLock.is_toggled() { CapsLock.press_release() }
 
-        let ks = k.ks.clone();
+        let ks = k.ks;
         let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
-        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(&ks, &ev); ev_proc_ds } ) );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_down(ks, &ev); ev_proc_ds } ) );
         k.iproc.input_bindings .bind_kbd_event (CapsLock, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
 
-        let ks = k.ks.clone();
-        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(&ks, &ev); ev_proc_ds } ) );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps.handle_key_up(ks, &ev); ev_proc_ds } ) );
         k.iproc.input_bindings .bind_kbd_event (CapsLock, KeyEventCb_KeyUp, EvCbEntry { ev_proc_ds, cb } );
     }
 
@@ -395,12 +389,12 @@ impl KeyHandling for ModKey_Passthrough {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Passthrough }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_down (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
         bmk.active.set();
         EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
         bmk.active.clear();
         EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
     }
@@ -413,11 +407,11 @@ impl KeyHandling for ModKey_Blocked {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Blocked }
 
-    fn handle_key_down (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_down (&self, _:&UnifModKey, _:KSR) -> EvProc_Ds {
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
-    fn handle_key_up (&self, _:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_up (&self, _:&UnifModKey, _:KSR) -> EvProc_Ds {
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
@@ -429,7 +423,7 @@ impl KeyHandling for ModKey_Doubled {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Doubled }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_down (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
         if bmk.dbl_tap.is_set() {
             bmk.active.set();
             EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
@@ -438,7 +432,7 @@ impl KeyHandling for ModKey_Doubled {
         }
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:&KrustyState) -> EvProc_Ds {
+    fn handle_key_up (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
         if bmk.active.is_set() {
             bmk.active.clear();
             EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
@@ -476,7 +470,7 @@ impl KeyHandling for ModKey_Managed {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Managed }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds {
+    fn handle_key_down (&self, bmk:&UnifModKey, ks:KSR) -> EvProc_Ds {
         // we should clear the consumed flag, but not if mouse btns are down, so we'll just put mouse-btns state there
         //self.consumed.clear();
         bmk.consumed .store ( ks.mouse.lbtn.down.is_set() || ks.mouse.rbtn.down.is_set() );
@@ -492,7 +486,7 @@ impl KeyHandling for ModKey_Managed {
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, ks:&KrustyState) -> EvProc_Ds {
+    fn handle_key_up (&self, bmk:&UnifModKey, ks:KSR) -> EvProc_Ds {
         // (note.. no more passing through of mod-keys, we'll instead send replacement ones if we need to (due to R/L sc-codes mismatch etc))
 
         // first off, we'll take care of pair managed flags
@@ -525,7 +519,7 @@ impl KeyHandling for ModKey_Managed {
         EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
-    fn proc_notice__caps_down (&self, bmk:&UnifModKey, _ks:&KrustyState) {
+    fn proc_notice__caps_down (&self, bmk:&UnifModKey, _ks:KSR) {
         // we will immediately invalidate and clear any down mod-key found upon caps activation!
         // note that internally tracked physical is_down will continue to be down
         // note also that each of paired mod-keys will get their own notification too
@@ -539,7 +533,7 @@ impl KeyHandling for ModKey_Managed {
         }
     }
 
-    fn proc_notice__caps_up (&self, bmk:&UnifModKey, _ks:&KrustyState) {
+    fn proc_notice__caps_up (&self, bmk:&UnifModKey, _ks:KSR) {
         // for managed active (i.e active outside w/o down held), we want to clear it on caps release ..
         // note that only checking ourselves works even if the paired was held down, the pair would just reactivate itself afterwards
         // (because each of the pair gets its own caps-up/dn notification)
@@ -590,7 +584,7 @@ impl UnifModKey {
     /// NOTE re injected events .. we block our own (and ahk) injections at hook level .. so anything here is external
     // so we'll want to let them through, only updating our tracking of external state (not our physical state)
 
-    fn handle_key_down (&self, ev: Event, ks:&KrustyState) -> EvProc_Ds {
+    fn handle_key_down (&self, ev: Event, ks:KSR) -> EvProc_Ds {
         if ev.injected {
             self.active.set();
             return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
@@ -610,7 +604,7 @@ impl UnifModKey {
     }
 
 
-    fn handle_key_up (&self, ev: Event, ks:&KrustyState) -> EvProc_Ds {
+    fn handle_key_up (&self, ev: Event, ks:KSR) -> EvProc_Ds {
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
         if ev.injected {
             self.active.clear();
@@ -630,24 +624,24 @@ impl UnifModKey {
         // however, we will also disable repeats, not least to ease looking at keystreams
         use crate::{KbdEv_MapKey_T::*, EvCbFn_T::*};
 
-        let umk = self.clone(); let ks = k.ks.clone();
+        let umk = self.clone(); let ks = k.ks;
         k.iproc.input_bindings .bind_kbd_event (
             self.mk.key(), KeyEventCb_KeyDown, EvCbEntry {
                 ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
-                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_down (ev, &ks) } ) )
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_down (ev, ks) } ) )
         } );
 
-        let umk = self.clone(); let ks = k.ks.clone();
+        let umk = self.clone(); let ks = k.ks;
         k.iproc.input_bindings .bind_kbd_event (
             self.mk.key(), KeyEventCb_KeyUp, EvCbEntry {
                 ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
-                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_up (ev, &ks) } ) )
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { umk.handle_key_up (ev, ks) } ) )
         } );
     }
 
 
-    pub fn proc_notice__caps_down (&self, ks:&KrustyState) { self.handling.proc_notice__caps_down (self, ks) }
-    pub fn proc_notice__caps_up   (&self, ks:&KrustyState) { self.handling.proc_notice__caps_up   (self, ks) }
+    pub fn proc_notice__caps_down (&self, ks:KSR) { self.handling.proc_notice__caps_down (self, ks) }
+    pub fn proc_notice__caps_up   (&self, ks:KSR) { self.handling.proc_notice__caps_up   (self, ks) }
 
 
 

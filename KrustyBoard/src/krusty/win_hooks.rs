@@ -1,9 +1,8 @@
 #![ allow (non_snake_case) ]
 
 
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::thread::spawn;
-use derive_deref::Deref;
 use once_cell::sync::OnceCell;
 
 use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND};
@@ -25,31 +24,27 @@ pub struct FgndInfo {
     pub exe   : String,
 }
 
-pub struct _WinEventsListener {
+pub struct WinEventsListener {
     pub is_hooked : Flag,
     pub fgnd_info : RwLock <FgndInfo>,
 }
 
-# [ derive ( Clone, Deref ) ]
-pub struct WinEventsListener (Arc <_WinEventsListener> );
-
-
 
 impl WinEventsListener {
 
-    pub fn instance() -> WinEventsListener {
+    pub fn instance () -> &'static WinEventsListener {
         static INSTANCE: OnceCell<WinEventsListener> = OnceCell::new();
         INSTANCE .get_or_init ( || {
-            WinEventsListener( Arc::new ( _WinEventsListener {
+            WinEventsListener {
                 is_hooked : Flag::default(),
                 fgnd_info : RwLock::new ( FgndInfo::default() ),
-            } ) )
+            }
             // in theory, we could setup-hooks here before returning, but we'll instead let user-code do that, e.g. based on configs
-        } ) .clone()
+        } )
     }
 
 
-    pub fn setup_win_event_hooks (&self) {
+    pub fn setup_win_event_hooks (&'static self) {
         /* Reference:
             pub unsafe fn SetWinEventHook (
                 eventmin: u32, eventmax: u32, cb_dll: HINSTANCE, cb: WINEVENTPROC,
@@ -99,24 +94,22 @@ impl WinEventsListener {
 
     fn _stamp (&self) -> u128 { std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap().as_millis() }
 
-    fn proc_win_report__title_changed (&self, hwnd:Hwnd) {
+    fn proc_win_report__title_changed (&'static self, hwnd:Hwnd) {
         //println! ("@{:?} title-changed: {:?}", self._stamp(), hwnd);
         if self.fgnd_info.read() .is_ok_and (|fi| fi.hwnd == hwnd) {
-            let wel = self.clone();
-            spawn ( move || { wel.update_fgnd_info_title(hwnd) } );
+            spawn ( move || { self.update_fgnd_info_title(hwnd) } );
         }
     }
-    fn proc_win_report__fgnd_hwnd (&self, hwnd:Hwnd) {
+    fn proc_win_report__fgnd_hwnd (&'static self, hwnd:Hwnd) {
         //println! ("@{:?} fgnd: {:?}", self._stamp(), hwnd);
-        let wel = self.clone();
-        spawn ( move || { wel.update_fgnd_info(hwnd) } );
+        spawn ( move || { self.update_fgnd_info(hwnd) } );
     }
 
-    fn update_fgnd_info_title (&self, hwnd:Hwnd) {
+    fn update_fgnd_info_title (&'static self, hwnd:Hwnd) {
         let mut fi = self.fgnd_info.write().unwrap();
         if fi.hwnd == hwnd { fi.title = utils::get_win_title(hwnd); }
     }
-    fn update_fgnd_info (&self, hwnd:Hwnd) {
+    fn update_fgnd_info (&'static self, hwnd:Hwnd) {
         let fi_new = FgndInfo {
             hwnd,
             title : utils::get_win_title (hwnd),

@@ -64,8 +64,8 @@ impl ActionGenable for ActionGenSt_Inited {}
 # [ derive (Clone) ]
 pub struct ActionGen <S: ActionGenSt = ActionGenSt_Init> {
 
-    /// we'll hold an Arc clone of KrustyState for internal referencing
-    pub ks : KrustyState,
+    /// we'll hold a 'static ref to KrustyState for internal referencing
+    pub ks : &'static KrustyState,
 
     /// modifier-keys to wrap the specified action-function for this combo-action
     mks : Vec<ModKey>,
@@ -291,7 +291,7 @@ impl From <ActionGen <ActionGenSt_Wheel>> for AG {
     fn from (ag : ActionGen <ActionGenSt_Wheel>) -> Self {
         // Note : This is a lil hacky as we've so far avoided passing in event data to AFs ..
         // .. so for wheel scroll delta, we'll just try and use last recorded .. meh
-        let af = if let Some(ws) = ag.ks.mouse.get_wheel_state(ag.st.wheel) {
+        let af = if let Some(ws) = ag.ks.mouse.get_wheel_state(ag.st.wheel).cloned() {
             let mult = if ag.st.action == MouseWheelEv_T::WheelForwards { 1 } else { -1 };
             Arc::new ( move || {
                 let delta = ws.last_delta.load(Ordering::Relaxed).abs() * mult;

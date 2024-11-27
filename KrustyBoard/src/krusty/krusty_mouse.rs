@@ -157,42 +157,40 @@ impl Mouse {
 
     }
 
-    pub fn get_btn_state (&self, btn:MouseButton) -> Option<MouseBtnState> {
+    pub fn get_btn_state (&self, btn:MouseButton) -> Option<&MouseBtnState> {
         use crate::MouseButton::*;
         match btn {
-            LeftButton   => Some(self.lbtn.clone()),
-            RightButton  => Some(self.rbtn.clone()),
-            MiddleButton => Some(self.mbtn.clone()),
-            X1Button     => Some(self.x1btn.clone()),
-            X2Button     => Some(self.x2btn.clone()),
+            LeftButton   => Some (&self.lbtn),
+            RightButton  => Some (&self.rbtn),
+            MiddleButton => Some (&self.mbtn),
+            X1Button     => Some (&self.x1btn),
+            X2Button     => Some (&self.x2btn),
             _ => None
         }
     }
-    pub fn get_wheel_state (&self, wheel:MouseWheel) -> Option<MouseWheelState> {
+    pub fn get_wheel_state (&self, wheel:MouseWheel) -> Option<&MouseWheelState> {
         match wheel {
-            MouseWheel::DefaultWheel    => Some (self.vwheel.clone()),
-            MouseWheel::HorizontalWheel => Some (self.hwheel.clone()),
+            MouseWheel::DefaultWheel    => Some (&self.vwheel),
+            MouseWheel::HorizontalWheel => Some (&self.hwheel),
             _ => None
         }
     }
 
     // mod-keys notify here in case we need to do some cleanup/flagging etc
-    pub fn proc_notice__modkey_down (&self, mk:ModKey, ks:&KrustyState) {
+    pub fn proc_notice__modkey_down (&self, mk:ModKey, ks:KSR) {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
             // we'll want to capture/refresh win-snap-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            let ks = ks.clone();
             let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
             let _ = InputProcessor::instance().input_af_queue .send (action);
         }
     }
-    pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:&KrustyState) {
+    pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:KSR) {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
         if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
             // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
-            let ks = ks.clone();
             let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
             let _ = InputProcessor::instance().input_af_queue .send (action);
         }
@@ -241,7 +239,7 @@ pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
         .. So instead, we check for that in the inline binding handler itself so we can let it through in that special case
     */
     use crate::{MouseButton::*, MouseBtnEv_T::*};
-    let ks = k.ks.clone();
+    let ks = k.ks;
     k.iproc.input_bindings .bind_btn_event (RightButton, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         //cb : EvCbFn_Inline ( Arc::new ( move |ev| handle_mouse_right_btn_up (&ks, ev) ) )
@@ -332,20 +330,20 @@ fn check_wheel_spaced (whl:&MouseWheelState) -> bool {
 
 pub fn setup_mouse_move_handling (k:&Krusty) {
     use crate::EventDat::*;
-    let ks = k.ks.clone();
+    let ks = k.ks;
     k.iproc.input_bindings .bind_pointer_event ( EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Continue, ComboProc_Disable),
         cb: EvCbFn_Queued ( Arc::new ( move |ev| {
             if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 ks.mod_keys.lwin.consumed.set();
                 if let move_event { x_pos, y_pos, .. } = ev.dat {
-                    handle_lwin_mouse_drag (x_pos, y_pos, &ks)
+                    handle_lwin_mouse_drag (x_pos, y_pos, ks)
             } }
         } ) ),
     } );
 }
 
-fn handle_lwin_mouse_drag (x:i32, y:i32, ks:&KrustyState) {
+fn handle_lwin_mouse_drag (x:i32, y:i32, ks:KSR) {
     // NOTE that mouse move is inline pass-through before these handler calls get queued
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself

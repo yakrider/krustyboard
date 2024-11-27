@@ -4,7 +4,6 @@ use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
-use derive_deref::Deref;
 
 use once_cell::sync::OnceCell;
 
@@ -111,7 +110,7 @@ pub fn jiggle_cursor (n:isize) {
 
 # [ derive (Debug) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
 /// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
-pub struct _KrustyState {
+pub struct KrustyState {
     // having this disallows direct instantiation
     _private: (),
 
@@ -127,7 +126,7 @@ pub struct _KrustyState {
     /// mouse obj manages the mouse btns, wheels, wheel-spin invalidations etc
     pub mouse: Mouse,
 
-    /// win-groups obj maanges the three supported window-grouping functionalty
+    /// win-groups obj maanges the qks[1-4] associated window-grouping functionalty
     pub win_groups: WinGroups,
 
     /// flag marking right-mouse-btn-wheel scroll switche support <br>
@@ -146,11 +145,8 @@ pub struct _KrustyState {
 }
 
 
-# [ derive (Debug, Clone, Deref) ]
-/// Arc wrapped KrustyState for cheap cloning/sharing
-pub struct KrustyState ( Arc <_KrustyState> );
-// ^^ we'll use this wrapped type so cloning and passing around is cheap
-
+// since we'll be passing 'static refs everywhere, we'll just alias it for ease
+pub type KSR = &'static KrustyState;
 
 
 
@@ -159,14 +155,14 @@ pub struct KrustyState ( Arc <_KrustyState> );
 pub struct Krusty {
     // this is mostly just a utility wrapper sugar to pass things around
     _private : (),   // prevents direct instantiation of this struct
-    // ks is Arc<KrustyState>, holds all state flags
-    pub ks : KrustyState,
+    // KrustyState holds all state flags
+    pub ks : &'static KrustyState,
     // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
-    pub cm : CombosMap,
+    pub cm : &'static CombosMap,
     // we have the InputProcessor itself, which will hold the kbd/mouse bindings, combo-processing-af, the side-thread-queues
-    pub iproc : InputProcessor,
+    pub iproc : &'static InputProcessor,
     // we'll also (optionally) listen to window-events like fgnd-win or fgnd-win-title change (to have fngd-win details pre-fetched)
-    pub wel : WinEventsListener,
+    pub wel : &'static WinEventsListener,
 }
 
 
@@ -174,11 +170,12 @@ pub struct Krusty {
 /// impl for Krusty-State
 impl KrustyState {
 
-    /// Get a clone of the sole (arc-wrapped) instance of the global krusty-state
-    pub fn instance () -> KrustyState {
+    /// Get a 'static ref of the sole instance of the global krusty-state
+    pub fn instance () -> &'static KrustyState {
         static INSTANCE: OnceCell<KrustyState> = OnceCell::new();
+
         INSTANCE .get_or_init ( ||
-            KrustyState ( Arc::new ( _KrustyState {
+            KrustyState {
                 _private : (),
                 in_disabled_state : Flag::default(),
 
@@ -193,17 +190,17 @@ impl KrustyState {
 
                 sticky_first_stroke   : ComboHashAtomic::default(),
                 latching_first_stroke : ComboHashAtomic::default(),
-            } ) )
-        ) .clone()
+            }
+        )
     }
 
-    pub fn proc_notice__modkey_down (&self, mk:ModKey) {
+    pub fn proc_notice__modkey_down (&'static self, mk:ModKey) {
         if mk == ModKey::caps {
             self.mod_keys.proc_notice__caps_down(self)
         }
-        self.mouse.proc_notice__modkey_down (mk, self);
+        self.mouse.proc_notice__modkey_down (mk,self);
     }
-    pub fn proc_notice__modkey_up (&self, mk:ModKey) {
+    pub fn proc_notice__modkey_up (&'static self, mk:ModKey) {
         if !self.sticky_first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
             self.sticky_first_stroke.clear();
             if self.latching_first_stroke.is_empty() {
@@ -217,19 +214,19 @@ impl KrustyState {
     }
 
 
-    pub fn capture_fgnd_win_snap_dat (&self) {
+    pub fn capture_fgnd_win_snap_dat (&'static self) {
         //thread::spawn ( move || {     // .. nuh uh
         // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
         // .. but also often right after calling this we're doing other related work that expects this to be filled out!
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
     }
-    pub fn capture_pointer_win_snap_dat (&self, wgo:Option<WinGroups_E>) {
+    pub fn capture_pointer_win_snap_dat (&'static self, wgo:Option<WinGroups_E>) {
         // again, we'll not spawn this here, but those who can tolerate being spawned can call this on a spawned thread etc
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
     /// Goes through all keys and mouse-btns doing press/rel, and clears out all internal states
-    pub fn unstick_all (&self) {
+    pub fn unstick_all (&'static self) {
         println! ("WARNING: Attempting to UNSTICK_ALL !!");
 
         self.mode_states.clear_flags();

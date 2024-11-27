@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::{thread, time::Duration};
 
 use atomic_refcell::AtomicRefCell;
-use derive_deref::Deref;
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -26,7 +25,7 @@ impl WcCombosMapKey {
 
 # [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
-pub struct _CombosMap {
+pub struct CombosMap {
     // Note that we're using AtomicRefCell instead of Arc-RwLock because we should be doing all the building before
     //   we start running it, so there should never be a write attempted while some other thread is trying to read these
     _private : (),
@@ -41,8 +40,6 @@ pub struct _CombosMap {
     /// holds a registry for keys that only need default/fallback bindings
     handled_keys_set : AtomicRefCell <FxHashSet <Key>>,
 }
-# [ derive (Clone, Deref) ]
-pub struct CombosMap ( Arc <_CombosMap> );
 
 
 
@@ -50,16 +47,16 @@ pub struct CombosMap ( Arc <_CombosMap> );
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 impl CombosMap {
 
-    pub fn instance () -> CombosMap {
+    pub fn instance () -> &'static CombosMap {
         static INSTANCE: OnceCell<CombosMap> = OnceCell::new();
-        INSTANCE .get_or_init (||
-            CombosMap ( Arc::new ( _CombosMap {
+        INSTANCE .get_or_init ( ||
+            CombosMap {
                 _private : (),
                 combos_map        : AtomicRefCell::new ( FxHashMap::default() ),
                 wildcard_combos   : AtomicRefCell::new ( FxHashMap::default() ),
                 handled_keys_set  : AtomicRefCell::new ( FxHashSet::default() ),
-            } ) )
-        ) .clone()
+            }
+        )
     }
 
 
@@ -95,7 +92,7 @@ impl CombosMap {
     /// Note that sfscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid sfsc
     pub fn register_combo_sticky_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
-        let fsc = Combo::gen_fsc_hash(cg.clone());
+        let fsc = Combo::gen_fsc_hash(&cg);
         self.setup_af_sticky_first_stroke (cg, fsc);
         fsc
     }
@@ -104,7 +101,7 @@ impl CombosMap {
         self.setup_af_sticky_first_stroke (cg.into(), fsc);
     }
     fn setup_af_sticky_first_stroke (&self, cg:CG, fsc:ComboHash) {
-        let ks = cg.ks.clone();
+        let ks = cg.ks;
         let af = Arc::new ( move || {
             // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
             // (fscs are required to have some mod-key in them and are active until all modkeys are released)
@@ -122,7 +119,7 @@ impl CombosMap {
     /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered
     pub fn register_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
-        let fsc = Combo::gen_fsc_hash(cg.clone());
+        let fsc = Combo::gen_fsc_hash(&cg);
         self.setup_af_latching_first_stroke (cg,fsc);
         fsc
     }
@@ -131,7 +128,7 @@ impl CombosMap {
         self.setup_af_latching_first_stroke (cg.into(), fsc);
     }
     fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
-        let ks = cg.ks.clone();
+        let ks = cg.ks;
         let af = Arc::new ( move || {
             ks.latching_first_stroke.store(fsc);
             Cursors::instance().apply_lfsc();
@@ -143,7 +140,7 @@ impl CombosMap {
     /// Registers a combo to CLEAR any active latching-first-stroke-combo
     pub fn register_combo_clear_latching_first_stroke (&self, cg: impl Into<CG>) {
         let cg = cg.into();
-        let ks = cg.ks.clone();
+        let ks = cg.ks;
         let af = Arc::new ( move || {
             if ks.latching_first_stroke.is_empty() {
                 jiggle_cursor(2);
@@ -198,48 +195,46 @@ impl CombosMap {
 
 
 
-    pub fn debug_print_combos_map (&self) {
-        let cm = self.clone();
+    pub fn debug_print_combos_map (&'static self) {
         thread::spawn ( move || {
             println! ("\nCombo entries and their combo-values counts \n# (first-stroke-combos, combos-total, conditional-combos)");
-            cm.combos_map .borrow() .iter() .map ( |(c,cvs)| {
+            self.combos_map .borrow() .iter() .map ( |(c,cvs)| {
                 let conds = cvs.iter().filter(|cv| cv.cond.is_some()).count();
                 let fscs = cvs.iter().filter(|cv| cv.is_fsc).count();
                 //note : same combos might be both tscs and cond .. i.e adding the ones above can be > cvs.len()
                 format! ("fsc: {:?}, tot: {:?}, cond: {:?}   {:?}", fscs, cvs.len(), conds, c)
             } ) .sorted() .for_each (|s| println!("{}",s));
-            println! ("nTot = {:?}", cm.combos_map.borrow().len());
+            println! ("nTot = {:?}", self.combos_map.borrow().len());
 
             println! ("combo counts by underlying bindings-map-key:");
-            cm.combos_map .borrow() .keys() .map(|c| c.bmk) .counts() .iter()
+            self.combos_map .borrow() .keys() .map(|c| c.bmk) .counts() .iter()
                 .map (|(bmk,n)| format!("  {:3}  {:?}", n, bmk)) .sorted() .for_each (|s| println!("{}",s));
 
             println! ("\nwildcarded combos:");
-            cm.wildcard_combos.borrow() .values() .flatten()
+            self.wildcard_combos.borrow() .values() .flatten()
                 .map (|(c,_cs)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
 
             println! ("\nfirst-stroke-combo registrations:");
-            cm.combos_map .borrow() .iter()
+            self.combos_map .borrow() .iter()
                 .filter (|(_c,cvs)| cvs.iter().any(|cv| cv.is_fsc))
                 .map (|(c,_v)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
 
-            cm.info_print_simult_active_combos_check();
+            self.info_print_simult_active_combos_check();
         } );
     }
 
-    pub fn info_print_simult_active_combos_check (&self) {
-        let cm = self.clone();
+    pub fn info_print_simult_active_combos_check (&'static self) {
         thread::spawn ( move || {
             thread::sleep (Duration::from_millis(10));  // just to avoid printout garbling at startup
-            println! ("## total combos count: {:?}", cm.combos_map.borrow().len());
-            println! ("## total combo-map-keys count: {:?}", cm.combos_map.borrow().keys() .map (|c| c.bmk) .unique() .count());
-            println! ("## two-stroke combos count: {:?}", cm.combos_map.borrow().keys() .filter (|c| !c.first_stroke.is_empty()) .count());
-            println! ("## combo-map-keys with wildcards: {:?}", cm.wildcard_combos.borrow().len());
+            println! ("## total combos count: {:?}", self.combos_map.borrow().len());
+            println! ("## total combo-map-keys count: {:?}", self.combos_map.borrow().keys() .map (|c| c.bmk) .unique() .count());
+            println! ("## two-stroke combos count: {:?}", self.combos_map.borrow().keys() .filter (|c| !c.first_stroke.is_empty()) .count());
+            println! ("## combo-map-keys with wildcards: {:?}", self.wildcard_combos.borrow().len());
 
-            let fscs_count = cm.combos_map .borrow() .values() .filter (|cvs| cvs.iter().any (|cv| cv.is_fsc)) .count();
+            let fscs_count = self.combos_map .borrow() .values() .filter (|cvs| cvs.iter().any (|cv| cv.is_fsc)) .count();
             println! ("## first-stroke registrations: {:?}", fscs_count);
 
-            let combos_w_mult_non_cond_cvs = cm .combos_map .borrow() .iter() .map ( |(c,cvs)| {
+            let combos_w_mult_non_cond_cvs = self .combos_map .borrow() .iter() .map ( |(c,cvs)| {
                 (*c, cvs.iter() .filter (|cv| cv.cond.is_none() && !cv.is_fsc) .count())
             } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
             println! ("## combos with multiple non-cond combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
@@ -254,7 +249,7 @@ impl CombosMap {
     /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
     /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
     /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
-    fn gen_fallback_base_af (&self, ks:KrustyState, ev:&Event) -> Option<AF> {
+    fn gen_fallback_base_af (&self, ks:KSR, ev:&Event) -> Option<AF> {
         match ev.dat {
             EventDat::key_event {key, ev_t, ..} => { match ev_t {
                 KbdEvent_T::KbdEvent_KeyDown | KbdEvent_T::KbdEvent_SysKeyDown => {
@@ -287,7 +282,7 @@ impl CombosMap {
 
 
 
-    fn handle_caps_combo_fallback (&self, fbaf:AF, _e:&Event, ks:&KrustyState) {
+    fn handle_caps_combo_fallback (&self, fbaf:AF, _e:&Event, ks:KSR) {
         // if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
         // Note that caps combo with mode-state active (incl modekeys themselves) have no fallbacks, they wont even get here
@@ -328,7 +323,7 @@ impl CombosMap {
     // Note that this is repeated for each category of first-stroke-combo (fsc) [sticky, latched, no-fsc], and with and w/o wildcards ..
     // However, if any fsc-stage executed either a direct-match or wildcard-match, then the rest of the fsc stages are ignored
     //
-    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:&KrustyState) -> bool {
+    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:KSR) -> bool {
         let mut cond_matched = false;
         let mut combo_execd = false;
         for cv in cvs {
@@ -349,7 +344,7 @@ impl CombosMap {
     }
 
     // Exact Combo Matching : we try directly looking up a combo and executing it
-    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:&KrustyState) -> bool {
+    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:KSR) -> bool {
         //let pcm = self.combos_map.borrow();
         // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
         // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
@@ -370,7 +365,7 @@ impl CombosMap {
     // - so for wc proc, we check cur wc-map-key in wc-table, if found, we search through the wc combos under that wcmk for wc-match w cur combo
     // - then if we found a cur-combo matching wc-combo, we use its wc-stripped version to lookup the actual combos_map for the combo-values!
     //
-    fn try_proc_wildcard_combo_afs (&self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, ks:&KrustyState) -> bool {
+    fn try_proc_wildcard_combo_afs (&self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, ks:KSR) -> bool {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
         let mut combo_execd = false;
         if let Some(cs) = cwm.get(&wcmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
@@ -390,7 +385,7 @@ impl CombosMap {
     // - Next we'll try to match wildcard combos (for the same fsc state .. i.e [sticky, latched, no-fsc])
     // - (Note that under any fsc category, wildcard-combos can run even after direct-match combos have been matched and ran)
     //
-    fn try_proc_fsc_combo (&self, combo:&Combo, ev:&Event, fsc:ComboHash, ks:&KrustyState) -> bool {
+    fn try_proc_fsc_combo (&self, combo:&Combo, ev:&Event, fsc:ComboHash, ks:KSR) -> bool {
 
         let combo = Combo::gen_fsc_combo (combo, fsc);
         let combo_execd = self.try_proc_combo_afs (&combo, ev, ks);
@@ -407,7 +402,7 @@ impl CombosMap {
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        let ks = &KrustyState::instance();
+        let ks = KrustyState::instance();
         let combo = Combo::gen_cur_combo (bmk, ks);
 
         //println! ("{:?}",combo);
@@ -435,7 +430,7 @@ impl CombosMap {
             || ( ks.mode_states.some_mode_state_active.is_set() && ks.mod_keys.caps.down.is_set() )
         { return }
 
-        let fbaf = self.gen_fallback_base_af (ks.clone(), ev);
+        let fbaf = self.gen_fallback_base_af (ks, ev);
         if fbaf.is_none() { return }
         // ^^ if we explicitly didnt want to do anything, no point trying to wrap mods below etc
         let fbaf = fbaf.unwrap();
