@@ -291,7 +291,7 @@ impl From <ActionGen <ActionGenSt_Wheel>> for AG {
     fn from (ag : ActionGen <ActionGenSt_Wheel>) -> Self {
         // Note : This is a lil hacky as we've so far avoided passing in event data to AFs ..
         // .. so for wheel scroll delta, we'll just try and use last recorded .. meh
-        let af = if let Some(ws) = ag.ks.mouse.get_wheel_state(ag.st.wheel).cloned() {
+        let af = if let Some(ws) = ag.ks.mouse.get_wheel_state(ag.st.wheel) {
             let mult = if ag.st.action == MouseWheelEv_T::WheelForwards { 1 } else { -1 };
             Arc::new ( move || {
                 let delta = ws.last_delta.load(Ordering::Relaxed).abs() * mult;

@@ -20,32 +20,48 @@ pub type Key = KbdKey ;
 
 
 
-# [ derive (Debug, Default, Clone) ]
-/// representation for all our flags for states mod-states, modifier-keys, mouse-btn-state etc
-pub struct Flag (Arc<AtomicBool>);
+# [ derive (Debug, Default) ]
+/// representation for all our atomic flags for states mod-states, modifier-keys, mouse-btn-state etc <br>
+/// (Note that this uses Acquire/Release memory ordering semantics, and shouldnt be used as lock/mutex etc)
+pub struct Flag (AtomicBool);
 // ^^ simple sugar that helps reduce clutter in code
 
 impl Flag {
-    pub fn new (state:bool) -> Flag { Flag ( Arc::new ( AtomicBool::new(state) ) ) }
+    /* Note regarding Atomic Memory Ordering usage here ..
+       - The Flag struct is intended for use as simple flags, not as synchronization primitives (i.e locks)
+       - On x86, there is strong memory model and Acq/Rel is free .. so no benefit to using Relaxed
+       - SeqCst however requires a memory fence that could be potentially be costly (flush writes before atomic op etc)
+       - For the very rare cases that would require total global ordering with SeqCst, we should just use lib facilities instead!!
+    */
+    pub fn new (state:bool) -> Flag { Flag (AtomicBool::new(state)) }
 
-    pub fn set    (&self) { self.0 .store (true,  Ordering::SeqCst) }
-    pub fn clear  (&self) { self.0 .store (false, Ordering::SeqCst) }
-    pub fn toggle (&self) { self.0 .store ( !self.0.load (Ordering::SeqCst), Ordering::SeqCst) }
-    pub fn store  (&self, state:bool) { self.0 .store (state, Ordering::SeqCst) }
+    /// toggling returns prior state .. better to use this than to check and set
+    pub fn toggle (&self) -> bool { self.0 .fetch_xor (true, Ordering::AcqRel) }
 
-    pub fn is_set   (&self) -> bool {  self.0 .load (Ordering::SeqCst) }
-    pub fn is_clear (&self) -> bool { !self.0 .load (Ordering::SeqCst) }
+    /// swap stores new state and returns prior state .. better to use this than to update and check/load separately
+    pub fn swap   (&self, state:bool) -> bool { self.0 .swap (state, Ordering::AcqRel) }
+
+    pub fn set   (&self) { self.0 .store (true,  Ordering::Release) }
+    pub fn clear (&self) { self.0 .store (false, Ordering::Release) }
+
+    pub fn store  (&self, state:bool) { self.0.store (state, Ordering::Release) }
+
+    pub fn is_set   (&self) -> bool {  self.0 .load (Ordering::Acquire) }
+    pub fn is_clear (&self) -> bool { !self.0 .load (Ordering::Acquire) }
+
+
+
 }
 
 
 
 
-# [ derive (Debug, Clone) ]
-pub struct TimeStamp (Arc<RwLock<Instant>>);
+# [ derive (Debug) ]
+pub struct TimeStamp (RwLock<Instant>);
 
 impl TimeStamp {
     pub fn new() -> TimeStamp {
-        TimeStamp ( Arc::new ( RwLock::new ( Instant::now() ) ) )
+        TimeStamp (RwLock::new (Instant::now()))
     }
     pub fn capture (&self) -> Instant {
         let stamp = Instant::now();
@@ -59,12 +75,12 @@ impl TimeStamp {
 
 
 
-# [ derive (Debug, Clone, Default) ]
-pub struct EventStamp (Arc<RwLock<u32>>);
+# [ derive (Debug, Default) ]
+pub struct EventStamp (RwLock<u32>);
 
 impl EventStamp {
     pub fn new() -> EventStamp {
-        EventStamp ( Arc::new ( RwLock::new(0) ) )
+        EventStamp (RwLock::new(0))
     }
     pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
     pub fn get (&self) -> u32 { *self.0.read().unwrap() }
@@ -118,16 +134,16 @@ pub struct KrustyState {
     pub in_disabled_state: Flag,
 
     /// mod_keys obj manage the modifier-keys, their flags, and their action-wrapping
-    pub mod_keys: ModKeys,
+    pub mod_keys: &'static ModKeys,
 
     /// mode_states obj manage the flagged caps-mode states, their trigger keys etc
-    pub mode_states: ModeStates,
+    pub mode_states: &'static ModeStates,
 
     /// mouse obj manages the mouse btns, wheels, wheel-spin invalidations etc
-    pub mouse: Mouse,
+    pub mouse: &'static Mouse,
 
     /// win-groups obj maanges the qks[1-4] associated window-grouping functionalty
-    pub win_groups: WinGroups,
+    pub win_groups: &'static WinGroups,
 
     /// flag marking right-mouse-btn-wheel scroll switche support <br>
     /// note that although we have that native in swi now, since we want to overload alt-wheel for brightness etc, we still want to track it
@@ -154,15 +170,22 @@ pub type KSR = &'static KrustyState;
 /// Representation for all full state and data fro our Krusty-Board application
 pub struct Krusty {
     // this is mostly just a utility wrapper sugar to pass things around
-    _private : (),   // prevents direct instantiation of this struct
+
+    // we'll have a _private guard to allow direct instantiation from outside
+    _private : (),
+
     // KrustyState holds all state flags
     pub ks : &'static KrustyState,
+
     // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
     pub cm : &'static CombosMap,
+
     // we have the InputProcessor itself, which will hold the kbd/mouse bindings, combo-processing-af, the side-thread-queues
     pub iproc : &'static InputProcessor,
+
     // we'll also (optionally) listen to window-events like fgnd-win or fgnd-win-title change (to have fngd-win details pre-fetched)
     pub wel : &'static WinEventsListener,
+
 }
 
 
@@ -179,10 +202,10 @@ impl KrustyState {
                 _private : (),
                 in_disabled_state : Flag::default(),
 
-                mod_keys    : ModKeys::new(),
-                mode_states : ModeStates::new(),
-                mouse       : Mouse::new(),
-                win_groups  : WinGroups::new(),
+                mod_keys    : ModKeys::instance(),
+                mode_states : ModeStates::instance(),
+                mouse       : Mouse::instance(),
+                win_groups  : WinGroups::instance(),
 
                 in_right_btn_scroll_state  : Flag::default(),
 

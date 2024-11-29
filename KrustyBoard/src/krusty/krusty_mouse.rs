@@ -5,18 +5,21 @@ use std::{
     sync::Arc,
     sync::atomic::{AtomicI32, Ordering},
 };
-use derive_deref::Deref;
+use once_cell::sync::OnceCell;
 
 use crate::{
     *, utils::*,
     EvProp_D::*, ComboProc_D::*, EvCbFn_T::*
 };
 
+
+
 pub const DEFAULT_MOUSE_WHEEL_DELTA: i32 = 120;
 
 
+
 # [ derive (Debug) ]
-pub struct _MouseBtnState {
+pub struct MouseBtnState {
     pub btn      : MouseButton,
     pub down     : Flag,
     pub active   : Flag,
@@ -25,24 +28,21 @@ pub struct _MouseBtnState {
     pub dbl_tap  : Flag,
 }
 
-# [ derive (Debug, Clone, Deref) ]
-pub struct MouseBtnState ( Arc <_MouseBtnState> );
-
-
 // since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
 /// Debounced-Arc/Action-Function Fn(InputEvent) representation that can be passed around to debounce wrapper
 //pub type DBAF  = Arc <dyn Fn(InputEvent) + Send + Sync + 'static> ;
 
+
 impl MouseBtnState {
     pub fn new (btn:MouseButton) -> MouseBtnState {
-        MouseBtnState ( Arc::new ( _MouseBtnState {
+        MouseBtnState {
             btn,
             down     : Flag::default(),
             active   : Flag::default(),
             consumed : Flag::default(),
             stamp    : EventStamp::default(),
             dbl_tap  : Flag::default(),
-        } ) )
+        }
     }
 
     // note: we intended to impl shared debounce logic for btns here, but after queued setup we see very few actual debounce issues
@@ -56,8 +56,9 @@ impl MouseBtnState {
 }
 
 
+
 # [ derive (Debug) ]
-pub struct _MouseWheelState {
+pub struct MouseWheelState {
     pub wheel : MouseWheel,
     pub last_stamp : TimeStamp,
     pub last_delta : AtomicI32,
@@ -65,34 +66,32 @@ pub struct _MouseWheelState {
     pub spin_invalidated : Flag,
 }
 
-# [ derive (Debug, Clone, Deref) ]
-pub struct MouseWheelState ( Arc <_MouseWheelState> );
-
-
 impl MouseWheelState {
     pub fn new (wheel:MouseWheel) -> MouseWheelState {
-        MouseWheelState ( Arc::new ( _MouseWheelState {
+        MouseWheelState {
             wheel,
             last_stamp       : TimeStamp::new(),
             last_delta       : AtomicI32::from(DEFAULT_MOUSE_WHEEL_DELTA),
             spin_invalidated : Flag::default(),
-        } ) )
+        }
     }
 }
+
+
 
 # [ derive (Debug) ]
 pub struct Mouse {
     _private  : (),
-    pub lbtn  : MouseBtnState,
-    pub rbtn  : MouseBtnState,
-    pub mbtn  : MouseBtnState,
-
-    pub x1btn : MouseBtnState,
-    pub x2btn : MouseBtnState,
-
-    pub vwheel : MouseWheelState,
-    pub hwheel : MouseWheelState,
-
+    // btns
+    pub lbtn  : &'static MouseBtnState,
+    pub rbtn  : &'static MouseBtnState,
+    pub mbtn  : &'static MouseBtnState,
+    pub x1btn : &'static MouseBtnState,
+    pub x2btn : &'static MouseBtnState,
+    // wheels
+    pub vwheel : &'static MouseWheelState,
+    pub hwheel : &'static MouseWheelState,
+    // pointer
     //pub pointer : MousePointer,
 }
 
@@ -100,78 +99,94 @@ pub struct Mouse {
 
 impl Mouse {
 
-    pub fn new() -> Mouse {
+    pub fn instance () -> &'static Mouse {
         use crate::{MouseButton::*, MouseWheel::*};
-        Mouse {
-            _private: (),
-            lbtn   : MouseBtnState::new(LeftButton),
-            rbtn   : MouseBtnState::new(RightButton),
-            mbtn   : MouseBtnState::new(MiddleButton),
-            x1btn  : MouseBtnState::new(X1Button),
-            x2btn  : MouseBtnState::new(X2Button),
-            vwheel : MouseWheelState::new(DefaultWheel),
-            hwheel : MouseWheelState::new(HorizontalWheel),
-            //pointer: MousePointerState::default(),
-        }
+
+        static VERT_WHEEL  : OnceCell<MouseWheelState> = OnceCell::new();
+        static HORIZ_WHEEL : OnceCell<MouseWheelState> = OnceCell::new();
+
+        static LEFT_BTN   : OnceCell<MouseBtnState> = OnceCell::new();
+        static RIGHT_BTN  : OnceCell<MouseBtnState> = OnceCell::new();
+        static MIDDLE_BTN : OnceCell<MouseBtnState> = OnceCell::new();
+        static X1_BTN     : OnceCell<MouseBtnState> = OnceCell::new();
+        static X2_BTN     : OnceCell<MouseBtnState> = OnceCell::new();
+
+        static INSTANCE : OnceCell<Mouse> = OnceCell::new();
+
+        INSTANCE .get_or_init ( || {
+            Mouse {
+                _private: (),
+
+                lbtn   : LEFT_BTN   .get_or_init (|| MouseBtnState::new(LeftButton  )),
+                rbtn   : RIGHT_BTN  .get_or_init (|| MouseBtnState::new(RightButton )),
+                mbtn   : MIDDLE_BTN .get_or_init (|| MouseBtnState::new(MiddleButton)),
+                x1btn  : X1_BTN     .get_or_init (|| MouseBtnState::new(X1Button    )),
+                x2btn  : X2_BTN     .get_or_init (|| MouseBtnState::new(X2Button    )),
+
+                vwheel : VERT_WHEEL .get_or_init (|| MouseWheelState::new(DefaultWheel)),
+                hwheel : HORIZ_WHEEL.get_or_init (|| MouseWheelState::new(HorizontalWheel)),
+            }
+        } )
     }
 
     pub fn clear_flags (&self) {
         for mbtn in [ &self.lbtn, &self.rbtn, &self.mbtn, &self.x1btn, &self.x2btn ] {
             mbtn.down.clear(); mbtn.dbl_tap.clear(); mbtn.active.clear(); mbtn.consumed.clear();
         }
-        self.vwheel.spin_invalidated.clear(); self.hwheel.spin_invalidated.clear();
+        self.vwheel.spin_invalidated.clear();
+        self.hwheel.spin_invalidated.clear();
     }
 
     pub fn setup_mouse (&self, k:&Krusty) {
 
         // for most mouse btn actions, we can setup standard skeleton bindings, and let actual 'business-logic' be setup via combo bindings
 
-        setup_standard_mbtn_press_handling   (k.ks.mouse.lbtn.clone(), k);
-        setup_standard_mbtn_release_handling (k.ks.mouse.lbtn.clone(), k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.lbtn, k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.lbtn, k);
 
-        setup_standard_mbtn_press_handling   (k.ks.mouse.mbtn.clone(), k);
-        setup_standard_mbtn_release_handling (k.ks.mouse.mbtn.clone(), k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.mbtn, k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.mbtn, k);
 
-        setup_standard_mbtn_press_handling   (k.ks.mouse.x1btn.clone(), k);
-        setup_standard_mbtn_release_handling (k.ks.mouse.x1btn.clone(), k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.x1btn, k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.x1btn, k);
 
-        setup_standard_mbtn_press_handling   (k.ks.mouse.x2btn.clone(), k);
-        setup_standard_mbtn_release_handling (k.ks.mouse.x2btn.clone(), k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.x2btn, k);
+        setup_standard_mbtn_release_handling (k.ks.mouse.x2btn, k);
 
-        setup_standard_mbtn_press_handling   (k.ks.mouse.rbtn.clone(), k);
-        //setup_standard_mbtn_release_handling (k.ks.mouse.rbtn.clone(), k);
+        setup_standard_mbtn_press_handling   (k.ks.mouse.rbtn, k);
+        //setup_standard_mbtn_release_handling (k.ks.mouse.rbtn, k);
         setup_mouse_right_btn_release_handling (k);
         // ^^ for the mouse right-btn, we have to make small special case for switche-injected events, so we do it separately
 
 
         // for wheels, we set up uniform binding for all wheels/directions, and let combo mapping add specific behavior
         use MouseWheelEv_T::*;
-        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel.clone(), WheelForwards );
-        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel.clone(), WheelBackwards);
+        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel, WheelForwards );
+        setup_mouse_wheel_handling (k, k.ks.mouse.vwheel, WheelBackwards);
 
-        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel.clone(), WheelForwards );
-        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel.clone(), WheelBackwards);
+        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel, WheelForwards );
+        setup_mouse_wheel_handling (k, k.ks.mouse.hwheel, WheelBackwards);
 
 
         setup_mouse_move_handling (k);
 
     }
 
-    pub fn get_btn_state (&self, btn:MouseButton) -> Option<&MouseBtnState> {
+    pub fn get_btn_state (&self, btn:MouseButton) -> Option<&'static MouseBtnState> {
         use crate::MouseButton::*;
         match btn {
-            LeftButton   => Some (&self.lbtn),
-            RightButton  => Some (&self.rbtn),
-            MiddleButton => Some (&self.mbtn),
-            X1Button     => Some (&self.x1btn),
-            X2Button     => Some (&self.x2btn),
+            LeftButton   => Some (self.lbtn),
+            RightButton  => Some (self.rbtn),
+            MiddleButton => Some (self.mbtn),
+            X1Button     => Some (self.x1btn),
+            X2Button     => Some (self.x2btn),
             _ => None
         }
     }
-    pub fn get_wheel_state (&self, wheel:MouseWheel) -> Option<&MouseWheelState> {
+    pub fn get_wheel_state (&self, wheel:MouseWheel) -> Option<&'static MouseWheelState> {
         match wheel {
-            MouseWheel::DefaultWheel    => Some (&self.vwheel),
-            MouseWheel::HorizontalWheel => Some (&self.hwheel),
+            MouseWheel::DefaultWheel    => Some (self.vwheel),
+            MouseWheel::HorizontalWheel => Some (self.hwheel),
             _ => None
         }
     }
@@ -203,7 +218,7 @@ impl Mouse {
 
 
 /// setup standard mouse btn PRESS handling expecting the actual 'business-logic' to be setup via combo mappings
-pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
+pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:&Krusty) {
     use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnDown, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -217,7 +232,7 @@ pub fn setup_standard_mbtn_press_handling (mbs:MouseBtnState, k:&Krusty) {
 }
 
 /// setup standard mouse btn RELEASE handling expecting the actual 'business-logic' to be setup via combo mappings
-pub fn setup_standard_mbtn_release_handling (mbs:MouseBtnState, k:&Krusty) {
+pub fn setup_standard_mbtn_release_handling (mbs: &'static MouseBtnState, k:&Krusty) {
     use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -291,7 +306,7 @@ pub fn mouse_action_masked (af:AF) {
 
 
 /// sets up mouse wheel (vert-wheel or horiz-wheel as specified in params)
-pub fn setup_mouse_wheel_handling (k:&Krusty, whl:MouseWheelState, ev_t:MouseWheelEv_T) {
+pub fn setup_mouse_wheel_handling (k:&Krusty, whl: &'static MouseWheelState, ev_t:MouseWheelEv_T) {
     // we'll define a common binding AF for wheel types and direction, and let combo mapping add specific behavior
     k.iproc.input_bindings .bind_wheel_event (whl.wheel, ev_t, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -299,7 +314,7 @@ pub fn setup_mouse_wheel_handling (k:&Krusty, whl:MouseWheelState, ev_t:MouseWhe
             if let EventDat::wheel_event {delta, ..} = ev.dat {
                 whl.last_delta.store (delta, Ordering::Relaxed);
             }
-            let combo_proc_d = if check_wheel_spaced(&whl) { ComboProc_Enable } else { ComboProc_Disable };
+            let combo_proc_d = if check_wheel_spaced(whl) { ComboProc_Enable } else { ComboProc_Disable };
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, combo_proc_d)
         } ) ),

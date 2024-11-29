@@ -52,18 +52,6 @@ General Principles On Combo Mapping Allocation
 
 
 
-// we'll define some common combo-conds that can be reused later
-
-#[allow (dead_code)] fn c_true()  -> ComboCond { Arc::new ( move |_,_| { true  } ) }
-#[allow (dead_code)] fn c_false() -> ComboCond { Arc::new ( move |_,_| { false } ) }
-
-#[allow (dead_code)] fn c_flag   (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_set() } ) }
-#[allow (dead_code)] fn c_flag_n (flag:Flag) -> ComboCond { Arc::new ( move |_,_| { flag.is_clear() } ) }
-
-#[allow (dead_code)] fn af_set_flag   (flag:Flag) -> AF { Arc::new ( move || flag.set() ) }
-#[allow (dead_code)] fn af_clear_flag (flag:Flag) -> AF { Arc::new ( move || flag.clear() ) }
-
-
 fn check_switche_fgnd (wel:&WinEventsListener) -> bool {
     wel.fgnd_info.read().unwrap().exe == "Switche.exe"
 }
@@ -135,12 +123,12 @@ fn media_next_action (ks:KSR, next_not_prev:bool)  -> AF {
 
 /// caps-d wheel to directly **_ SWITCH WINDOWS _** through cur window-list snapshot (via switche)
 // (and instead of adding a flag in krusty itself to track while we're in this mode, we'll just define a flag here)
-fn get_switche_snap_switch_flag () -> Flag {
+fn get_switche_snap_switch_flag () -> &'static Flag {
     // alt-tab snapshot switch mode flag .. we'll check this to take a snapshot everytime we start
     static SWITCHE_SNAPSHOT_FLAG : OnceCell<Flag> = OnceCell::new();
-    SWITCHE_SNAPSHOT_FLAG .get_or_init (Flag::default) .clone()
+    SWITCHE_SNAPSHOT_FLAG .get_or_init (Flag::default)
 }
-fn gen_af_switche_snap_switch (nav_key:Key, flag:Flag) -> AF {
+fn gen_af_switche_snap_switch (nav_key:Key, flag: &'static Flag) -> AF {
     // nav-key should be .. next:F16, prev:F17, top:F18, bottom:F19
     let refresh_af = ag().k(F15).m(alt).m(shift).gen_af();
     let nav_af = ag().k(nav_key).m(alt).m(shift).gen_af();
@@ -350,13 +338,13 @@ fn setup_caps_dbl_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(T).m(caps_dbl),   ag().k(CapsLock) );
 
     // we'll set dbl-caps-win-S/C/A/W as tmp shift/ctrl/alt/win lock (useful for doing mouse horiz scroll on say moon-reader etc)
-    fn gen_af_ensure_mk (mk:UnifModKey) -> AF { Arc::new ( move || {
+    fn gen_af_ensure_mk (mk: &'static UnifModKey) -> AF { Arc::new ( move || {
         mk.ensure_active(); mk.mngd_active.clear();
     } ) }
-    k.cm .add_combo ( cg().k(S).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lshift.clone()) ) );
-    k.cm .add_combo ( cg().k(C).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lctrl.clone()) ) );
-    k.cm .add_combo ( cg().k(A).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lalt.clone()) ) );
-    //k.cm .add_combo ( cg().k(W).m(caps_dbl).m(lalt),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lwin.clone()) ) );
+    k.cm .add_combo ( cg().k(S).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lshift ) ) );
+    k.cm .add_combo ( cg().k(C).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lctrl  ) ) );
+    k.cm .add_combo ( cg().k(A).m(caps_dbl).m(lwin),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lalt   ) ) );
+    //k.cm .add_combo ( cg().k(W).m(caps_dbl).m(lalt),   ag().af ( gen_af_ensure_mk (k.ks.mod_keys.lwin ) ) );
     // ^^ win is now dbled modkey (and so not full-managed), and so ensure-active doesnt make sense for it
 
 
@@ -550,7 +538,8 @@ fn setup_mouse_left_btn (k:&Krusty) {
             ks.win_groups.add_to_group (wg, hwnd);
             jiggle_window(hwnd);
         } );
-        k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())),  ag().af(add_af) );
+        let cc : ComboCond = Arc::new (move |_,_| ks.mouse.lbtn.dbl_tap.is_set());
+        k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s) .c(cc),  ag().af(add_af) );
         // also, on single-click we should capture dat to allow group window drag
         let wsd_af = gen_af_win_snap_dat (k.ks, Some(wg));
         k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s),           ag().af(wsd_af.clone()) );
@@ -567,8 +556,9 @@ fn setup_mouse_left_btn (k:&Krusty) {
     fn gen_af_win_tog_max (ks:KSR) -> AF { Arc::new ( move || {
         win_toggle_maximize (ks.win_snap_dat.read().unwrap().hwnd)
     } ) }
-    k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin) .c(c_flag(k.ks.mouse.lbtn.dbl_tap.clone())),
-                      ag().af (gen_af_win_tog_max(k.ks)) );
+    let ks = k.ks;
+    let cc : ComboCond = Arc::new (move |_,_| ks.mouse.lbtn.dbl_tap.is_set());
+    k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin) .c(cc),  ag().af (gen_af_win_tog_max(k.ks)) );
 
 
     // for caps-alt-click, we want to bring up find usages window in IDE (for word under cursor)
@@ -653,11 +643,11 @@ fn setup_middle_and_xbtn_combos (k:&Krusty) {
         k.cm .add_combo ( cg().mbtn(btn),  ag().af (gen_xbtn_base_press_af (k.ks)) );
 
         // for release, we'll specify full wildcards (modkeys, modes), to avoid missing btn releases regardless of mode-states
-        fn gen_xbtn_base_rel_af (ks:KSR, mbs:MouseBtnState) -> AF { Arc::new ( move || {
+        fn gen_xbtn_base_rel_af (ks:KSR, mbs: &'static MouseBtnState) -> AF { Arc::new ( move || {
             if ks.mouse.mbtn.active.is_set() { ks.mouse.mbtn.active.clear(); MiddleButton.release(); }
             if mbs.active.is_set() { mbs.active.clear(); mbs.btn.release(); }
         } ) }
-        let x_btn_base_rel_af = gen_xbtn_base_rel_af (k.ks, k.ks.mouse.get_btn_state(btn).unwrap().clone());
+        let x_btn_base_rel_af = gen_xbtn_base_rel_af (k.ks, k.ks.mouse.get_btn_state(btn).unwrap());
         k.cm .add_combo ( cg().mbtn(btn).rel().wcma().wcsa(),  ag().af (x_btn_base_rel_af) );
 
     }
@@ -1046,23 +1036,23 @@ fn setup_brightness_vol_media (k:&Krusty) {
         k.cm .add_combo ( cg().k(Numrow_1).m(lalt).s(ms),  ag().af (no_action()) );
         k.cm .add_combo ( cg().k(Numrow_1).m(lwin).s(ms),  ag().af (no_action()) );
     } );
-    fn setup_fine_mode_ms_key (k:&Krusty, ms:&ModeState, mk:ModKey, fine_ms_t:ModeState_T, af:AF) {
+    fn setup_fine_mode_ms_key (k:&Krusty, ms:&'static ModeState, mk:ModKey, fine_ms_t:ModeState_T, af:AF) {
         if let Some(key) = ms.key() {
             k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_t    ).s(fine_ms_t),  ag().af (af.clone()) );
             k.cm .add_combo ( cg().k(key).m(mk).s(ms.ms_dbl_t).s(fine_ms_t),  ag().af (af.clone()) );
         }
     }
     // alt-2 is brightness down, alt-3 is brightness up .. (fine mode when 1 is held)
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks2, lalt, no_ms, gen_incr_brightness(-4));
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks3, lalt, no_ms, gen_incr_brightness( 4));
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks2, lalt, qks1,  gen_incr_brightness(-1));
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks3, lalt, qks1,  gen_incr_brightness( 1));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lalt, no_ms, gen_incr_brightness(-4));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lalt, no_ms, gen_incr_brightness( 4));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lalt, qks1,  gen_incr_brightness(-1));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lalt, qks1,  gen_incr_brightness( 1));
 
     // win-2 is vol down, win-3 is vol up .. (fine mode does nothing different for volume)
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks2, lwin, no_ms, ag().k(VolumeDown).gen_af());
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks3, lwin, no_ms, ag().k(VolumeUp  ).gen_af());
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks2, lwin, qks1,  ag().k(VolumeDown).gen_af());
-    setup_fine_mode_ms_key (k, &k.ks.mode_states.qks3, lwin, qks1,  ag().k(VolumeUp  ).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lwin, no_ms, ag().k(VolumeDown).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lwin, no_ms, ag().k(VolumeUp  ).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lwin, qks1,  ag().k(VolumeDown).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lwin, qks1,  ag().k(VolumeUp  ).gen_af());
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke, ralt for actual F1
     // (Note that there also a bunch of F1 and F2 combos in switche sections)
@@ -1322,34 +1312,28 @@ fn setup_window_action_sfsc (k:&Krusty) {
 fn setup_switch_windows_sfsc (k:&Krusty) {
 
     // sfsc : caps-d-w ..  we'll **_ navigate across WINDOWS _** (via switche snapshots)
-    // non-fsc : caps-d-d .. non-fsc usage while holding down caps-d-dbl (can pick one later from usage patterns)
     // note that nav-key should be .. next:F16, prev:F17, top:F18, bottom:F19 (w/ alt-shift)
 
     let ssf = get_switche_snap_switch_flag();
     let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(W).no_rpt().m(caps).s(msD) );
 
     // for the fsc
-    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F16, ssf.clone())) );
-    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F17, ssf.clone())) );
-
-    // and for the held version
-    k.cm .add_combo ( cg().whl().bkwd().m(caps).s(msD_dbl),   ag().af (gen_af_switche_snap_switch (F16, ssf.clone())) );
-    k.cm .add_combo ( cg().whl().frwd().m(caps).s(msD_dbl),   ag().af (gen_af_switche_snap_switch (F17, ssf.clone())) );
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F16, ssf)) );
+    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F17, ssf)) );
 
     // and similar using keyboard keys too ..
     [ (K,F16), (Comma,F16), (J,F17), (I,F17), (U,F18), (M,F19) ] .iter().for_each ( |&(k1,k2)| {
-        k.cm .add_combo ( cg().k(k1).m(caps).s(msD_dbl),   ag().af (gen_af_switche_snap_switch (k2, ssf.clone())) );
-        k.cm .add_combo ( cg().k(k1).m(caps).fsc(fsc),     ag().af (gen_af_switche_snap_switch (k2, ssf.clone())) );
+        k.cm .add_combo ( cg().k(k1).m(caps).fsc(fsc),     ag().af (gen_af_switche_snap_switch (k2, ssf)) );
     } );
 
     // and once we're done w the switching, we clear the flag so we'll check and refresh the snap next time we start
-    k.cm .add_combo (cg().k(D).rel()         .c(c_flag(ssf.clone())),   ag().af (af_clear_flag(ssf.clone())) );
-    k.cm .add_combo (cg().k(D).rel().m(caps) .c(c_flag(ssf.clone())),   ag().af (af_clear_flag(ssf.clone())) );
+    let cc : ComboCond = Arc::new (move |_,_| ssf.is_set());
+    k.cm .add_combo ( cg().k(D).rel()         .c(cc.clone()),   ag().af ( Arc::new (move || ssf.clear())) );
+    k.cm .add_combo ( cg().k(D).rel().m(caps) .c(cc.clone()),   ag().af ( Arc::new (move || ssf.clear())) );
 
     // and while doing that, we'll enable caps-d-d-o to send windows to back while doing that (
     //let send_to_back = Arc::new ( || win_send_to_back (win_get_fgnd()) );
     let send_to_back = Arc::new ( win_fgnd_min_and_back );
-    k.cm .add_combo ( cg().k(O).m(caps).s(msD_dbl),   ag().af (send_to_back.clone()) );
     k.cm .add_combo ( cg().k(O).m(caps).fsc(fsc),     ag().af (send_to_back) );
 
 }
@@ -1652,8 +1636,7 @@ fn setup_IDE_combos (k:&Krusty) {
     k.cm .add_combo ( cg().k(U).m(caps).s(qks2),  caret_bookmark_toggle  );
 
     k.cm .add_combo ( cg().k(N).m(caps).s(msF),  popup_quick_nav_bar );
-    k.cm .add_combo ( cg().k(O).m(caps).s(msD),  _open_in_other_view_pane.clone() );
-    k.cm .add_combo ( cg().k(O).m(caps).s(msF),  _open_in_other_view_pane ); // todo ^^ pick one later
+    k.cm .add_combo ( cg().k(O).m(caps).s(msF),  _open_in_other_view_pane );
 
     k.cm .add_combo ( cg().k(I    ).m(caps).s(qks2),  bookmark_prev );
     k.cm .add_combo ( cg().k(Comma).m(caps).s(qks2),  bookmark_next );
@@ -1752,7 +1735,7 @@ fn setup_IDE_combos (k:&Krusty) {
 
     k.cm .add_combo ( cg() .k(F2) .c(intellij_fgnd()),                   ag().af (line_to_repl) );
     k.cm .add_combo ( cg() .k(F2) .c(intellij_fgnd()) .m(caps).m(ralt),  ag().af (page_to_repl.clone()) );
-    k.cm .add_combo ( cg() .k(I ) .c(intellij_fgnd()) .m(caps).s(qks ),  ag().af (page_to_repl.clone()) );
+    k.cm .add_combo ( cg() .k(I ) .c(intellij_fgnd()) .m(caps).s(qks ),  ag().af (page_to_repl) );
     k.cm .add_combo ( cg() .k(F ) .c(intellij_fgnd()) .m(caps).s(qks ),  ag().af (format_page) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
