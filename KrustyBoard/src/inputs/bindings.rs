@@ -69,31 +69,34 @@ impl From<KbdEvent_T> for KbdEv_MapKey_T {
 /// (This is defined matching the EventDat types minus the actual event-specific data)
 #[derive (Eq, PartialEq, Hash, Copy, Clone)]
 pub enum BindingsMapKey {
-    key_ev_t   ( KbdKey,       KbdEv_MapKey_T ),
-    btn_ev_t   ( MouseButton,  MouseBtnEv_T   ),
-    wheel_ev_t ( MouseWheel,   MouseWheelEv_T ),
-    move_ev_t
+    key_ev_t      ( KbdKey,       KbdEv_MapKey_T ),
+    btn_ev_t      ( MouseButton,  MouseBtnEv_T   ),
+    wheel_ev_t    ( MouseWheel,   MouseWheelEv_T ),
+    pointer_ev_t,
+    internal_ev_t ( InternalEvent_T ),
 }
 impl BindingsMapKey {
     pub fn from_event (event: &Event) -> BindingsMapKey {
         match event.dat {
-            key_event   {key,   ev_t, ..}  => key_ev_t   (key, ev_t.into()),
-            btn_event   {btn,   ev_t, ..}  => btn_ev_t   (btn, ev_t),
-            wheel_event {wheel, delta   }  => wheel_ev_t (wheel, delta.into()),
-            move_event  {..}               => move_ev_t,
+            key_event      { key,   ev_t, .. }  => key_ev_t   (key, ev_t.into()),
+            btn_event      { btn,   ev_t, .. }  => btn_ev_t   (btn, ev_t),
+            wheel_event    { wheel, delta    }  => wheel_ev_t (wheel, delta.into()),
+            pointer_event  { .. }               => pointer_ev_t,
+            internal_event { ev_t }             => internal_ev_t (ev_t),
     }  }
 }
 impl std::fmt::Debug for BindingsMapKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use {KbdEv_MapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
         match &self {
-            key_ev_t   (key,   KeyEventCb_KeyDown) => write! (f, "Down  {:?}", key),
-            key_ev_t   (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {:?}", key),
-            btn_ev_t   (btn,   BtnDown)            => write! (f, "Down  {:?}", btn),
-            btn_ev_t   (btn,   BtnUp)              => write! (f, "  Up  {:?}", btn),
-            wheel_ev_t (wheel, WheelBackwards)     => write! (f, "Bkwd  {:?}", wheel),
-            wheel_ev_t (wheel, WheelForwards)      => write! (f, " Fwd  {:?}", wheel),
-            move_ev_t                              => write! (f, "Mouse Moved"),
+            key_ev_t     (key,   KeyEventCb_KeyDown) => write! (f, "Down  {:?}", key),
+            key_ev_t     (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {:?}", key),
+            btn_ev_t     (btn,   BtnDown)            => write! (f, "Down  {:?}", btn),
+            btn_ev_t     (btn,   BtnUp)              => write! (f, "  Up  {:?}", btn),
+            wheel_ev_t   (wheel, WheelBackwards)     => write! (f, "Bkwd  {:?}", wheel),
+            wheel_ev_t   (wheel, WheelForwards)      => write! (f, " Fwd  {:?}", wheel),
+            pointer_ev_t                             => write! (f, "Mouse Moved"),
+            internal_ev_t (ev_t)                     => write! (f, "Internal Event: {:?}", ev_t),
         }
     }
 }
@@ -129,7 +132,10 @@ impl Bindings {
         self .borrow_mut() .insert ( wheel_ev_t (whl, ev_t), cbe );
     }
     pub fn bind_pointer_event (&self, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( move_ev_t, cbe );
+        self .borrow_mut() .insert ( pointer_ev_t, cbe );
+    }
+    pub fn bind_internal_event (&self, ev_t:InternalEvent_T, cbe:EvCbEntry) {
+        self .borrow_mut() .insert ( internal_ev_t (ev_t), cbe );
     }
 
 
@@ -146,7 +152,10 @@ impl Bindings {
         self .borrow_mut() .remove ( & wheel_ev_t (whl, ev_t) );
     }
     pub fn unbind_pointer_event (&self) {
-        self .borrow_mut() .remove ( & move_ev_t );
+        self .borrow_mut() .remove ( & pointer_ev_t );
+    }
+    pub fn unbind_internal_event (&self, ev_t:InternalEvent_T) {
+        self .borrow_mut() .remove ( & internal_ev_t (ev_t) );
     }
 
 }

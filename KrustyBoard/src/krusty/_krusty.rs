@@ -130,9 +130,6 @@ pub struct KrustyState {
     // having this disallows direct instantiation
     _private: (),
 
-    /// used for toggling key processing .. should only listen to turn-back-on combo
-    pub in_disabled_state: Flag,
-
     /// mod_keys obj manage the modifier-keys, their flags, and their action-wrapping
     pub mod_keys: &'static ModKeys,
 
@@ -200,7 +197,6 @@ impl KrustyState {
         INSTANCE .get_or_init ( ||
             KrustyState {
                 _private : (),
-                in_disabled_state : Flag::default(),
 
                 mod_keys    : ModKeys::instance(),
                 mode_states : ModeStates::instance(),
@@ -224,16 +220,21 @@ impl KrustyState {
         self.mouse.proc_notice__modkey_down (mk,self);
     }
     pub fn proc_notice__modkey_up (&'static self, mk:ModKey) {
-        if !self.sticky_first_stroke.is_empty() && !self.mod_keys.some_mk_down() {
-            self.sticky_first_stroke.clear();
-            if self.latching_first_stroke.is_empty() {
-                Cursors::instance().apply_norm()
-            } else { Cursors::instance().apply_lfsc() }
-        }
         if mk == ModKey::caps {
             self.mod_keys.proc_notice__caps_up(self)
         }
         self.mouse.proc_notice__modkey_up (mk, self);
+
+        // only after the regular updates etc are finished, do we want to check for any fsc actions
+        // (this lines up w how combos proc is done after bindings are executed, and ensures flags are updated)
+        let sfsc = self.sticky_first_stroke.get();
+        if !sfsc.is_empty() && !self.mod_keys.some_mk_down() {
+            self.sticky_first_stroke.clear();
+            CombosMap::inject_event_sticky_fsc_cleared(sfsc);
+            if self.latching_first_stroke.is_empty() {
+                Cursors::instance().apply_norm()
+            } else { Cursors::instance().apply_lfsc() }
+        }
     }
 
 
@@ -248,6 +249,7 @@ impl KrustyState {
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
 
+
     /// Goes through all keys and mouse-btns doing press/rel, and clears out all internal states
     pub fn unstick_all (&'static self) {
         println! ("WARNING: Attempting to UNSTICK_ALL !!");
@@ -257,12 +259,14 @@ impl KrustyState {
         self.mouse.clear_flags();
 
         self.in_right_btn_scroll_state.clear();
+
         self.sticky_first_stroke.clear();
         self.latching_first_stroke.clear();
         Cursors::instance().apply_norm();
 
-        // lets clear out capslock external state too
-        if Key::CapsLock.is_toggled() { Key::CapsLock.press_release() }
+        CapsModKey::clear_caps_lock_state();
+
+        update_tray__krusty_suspend_state (false);    // is_suspended = false
 
         let mouse_masked_af = Arc::new ( || {
             use MouseButton::*;
@@ -290,6 +294,24 @@ impl KrustyState {
 
     }
 
+    pub fn suspend_krusty (&'static self) {
+        let iproc = InputProcessor::instance();
+        if iproc.are_hooks_set() {
+            iproc.stop_input_processing();
+        }
+        update_tray__krusty_suspend_state(true);
+        Cursors::reset_system_cursors();
+    }
+    pub fn un_suspend_krusty (&'static self) {
+        //InputProcessor::instance().begin_input_processing();
+        //update_tray__krusty_suspend_state(false);
+        self.unstick_all();
+        // ^^ will also update tray-menu suspended state
+    }
+    pub fn check_krusty_suspended (&'static self) -> bool {
+        !InputProcessor::instance().are_hooks_set()
+    }
+
 }
 
 
@@ -308,14 +330,6 @@ impl Krusty {
             iproc : InputProcessor::instance(),
             wel   : WinEventsListener::instance(),
         }
-    }
-
-
-    #[allow(dead_code)]
-    /// utility fn to globally disable krusty functionality
-    pub fn setup_global_disable (&self) {
-        // todo: might not be straight-forward if we want to handle this at hook receipt
-        // .. will need a global check there, as well as selective listening for the re-enable combo when disabled
     }
 
 }
@@ -376,14 +390,20 @@ pub mod key_utils {
 
 
     /// wraps a given AF into an action that is spawned in its own thread
-    pub fn spawned_action (af:AF) -> AF {
+    pub fn spawned_action<F> (f:F) -> AF
+        where F: Fn() + Send + Sync + 'static
+    {
+        let af = Arc::new(f);
         Arc::new ( move || {
             let af = af.clone();
             thread::spawn ( move || af() );
     } ) }
 
     /// wraps a given AF into an action that is spawned in its own thread and executed with the specified milliseconds delay
-    pub fn delayed_action (tms:u64, af:AF) -> AF {
+    pub fn delayed_action<F> (tms:u64, f:F) -> AF
+        where F: Fn() + Send + Sync + 'static
+    {
+        let af = Arc::new(f);
         Arc::new ( move || {
             let af = af.clone();
             thread::spawn ( move || { thread::sleep(Duration::from_millis(tms)); af() } );

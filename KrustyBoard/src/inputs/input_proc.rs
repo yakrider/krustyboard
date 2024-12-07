@@ -1,14 +1,15 @@
 #![ allow (non_camel_case_types) ]
 
+use std::{panic, thread};
+use std::os::raw::c_int;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::os::raw::c_int;
-use std::{panic, thread};
-
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, BOOL, GetLastError};
-use windows::Win32::UI::WindowsAndMessaging::*;
 
 use once_cell::sync::{OnceCell};
+
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, BOOL, GetLastError};
+use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{ *, EvCbFn_T::* };
 
@@ -110,7 +111,7 @@ impl InputProcessor {
     }
 
 
-    /// caches kbd-ev in compact form, and returns whether the new and old values match
+    /// caches kbd-ev in compact form, and returns whether the new and old values match (for key-repeat flagging)
     pub fn cache_kbd_event (&self, vk_code:u32, ev_t: KbdEvent_T ) -> bool {
         let digest = ((ev_t as u64) << 32) | (vk_code as u64);
         digest == self.last_kbd_event .swap (digest, Ordering::Relaxed)
@@ -147,21 +148,23 @@ impl InputProcessor {
         }
         false
     }
-    pub fn unset_kbd_hook   (&self) -> bool { InputProcessor::unset_hook (&self.kbd_hook) }
-    pub fn unset_mouse_hook (&self) -> bool { InputProcessor::unset_hook (&self.mouse_hook) }
+    fn unset_kbd_hook   (&self) -> bool { InputProcessor::unset_hook (&self.kbd_hook) }
+    fn unset_mouse_hook (&self) -> bool { InputProcessor::unset_hook (&self.mouse_hook) }
 
 
-    pub fn re_set_hooks (&self) {
-        self.stop_input_processing();
+    pub fn re_set_hooks (&'static self) {
+        if self.are_hooks_set() {
+            self.stop_input_processing();
+        }
         self.begin_input_processing();
     }
 
-    pub fn are_hooks_set (&self) -> bool {
+    pub fn are_hooks_set (&'static self) -> bool {
         HHOOK (self.kbd_hook.load(Ordering::Relaxed)) != HHOOK::default()
             || HHOOK (self.mouse_hook.load(Ordering::Relaxed)) != HHOOK::default()
     }
 
-    pub fn stop_input_processing (&self) { unsafe {
+    pub fn stop_input_processing (&'static self) { unsafe {
         // we'll unhook any prior hooks and signal prior input-processing thread to terminate
         self.unset_kbd_hook();
         self.unset_mouse_hook();
@@ -170,13 +173,15 @@ impl InputProcessor {
 
 
     /// Starts listening for bound input events.
-    pub fn begin_input_processing (&self) {
+    pub fn begin_input_processing (&'static self) {
 
         thread::spawn ( || unsafe {
 
-            let iproc = InputProcessor::instance();
-            iproc.set_kbd_hook();
-            iproc.set_mouse_hook();
+            self.set_kbd_hook();
+            self.set_mouse_hook();
+
+            // we'll store the thread-id so we can send a message to kill the thread if need be later
+            self.iproc_thread .store ( GetCurrentThreadId(), Ordering::Relaxed );
 
             // before starting to listen to events, lets set this thread dpi-aware (for rare cases we do direct processing upon callback)
             utils::win_set_thread_dpi_aware();
@@ -199,6 +204,20 @@ impl InputProcessor {
 
         } );
 
+    }
+
+
+
+    /// This can be used to directly send internal-events to the input processor .. <br>
+    /// which will lookup bindings for the event, and if has queued cb-types, those will get sent to af-queue for in-order processing
+    pub fn inject_internal_event (ev_t:InternalEvent_T) {
+        let event = Event {
+            stamp: 0,
+            injected: true,
+            extra_info: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
+            dat: ( EventDat::internal_event { ev_t } ),
+        };
+        let _ = InputProcessor::instance().proc_input_event (event);
     }
 
 
@@ -285,6 +304,7 @@ fn _print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
              wp.0, KbdKey::from(kbs.vkCode as u64), kbs.scanCode, kbs.flags.0, kbs.time, kbs.dwExtraInfo);
 }
 
+
 /// Keyboard lower-level-hook processor
 pub unsafe extern "system"
 fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
@@ -354,6 +374,7 @@ fn print_mouse_ev (ev: Event) {
     thread::spawn(move || println!("{:?}, {:?}", ev, gap_dur));
 }
 
+
 /// mouse lower-level-hook processor
 pub unsafe extern "system"
 fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
@@ -405,7 +426,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         WM_MOUSEWHEEL  => Some ( wheel_event { wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
         WM_MOUSEHWHEEL => Some ( wheel_event { wheel: HorizontalWheel, delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
 
-        WM_MOUSEMOVE => Some ( move_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
+        WM_MOUSEMOVE => Some ( pointer_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
         _ => None,
     } {
         let event = Event { stamp, injected, extra_info, dat };

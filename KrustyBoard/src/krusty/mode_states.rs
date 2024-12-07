@@ -141,7 +141,8 @@ impl ModeState {
 
                 // we'll set modkey behavior to disable repeat by default (if caps is held) ..
                 // .. and for other cases, can set that selectively at combo declaration time
-                if ks.mod_keys.caps.down.is_set() { self.consumed.set() }
+                //if ks.mod_keys.caps.down.is_set() { self.consumed.set() }
+                // ^^ naah, not even this, there are combos we want to allow this
 
                 EvProc_Ds::new (EvProp_Continue, ComboProc_Enable)
             }

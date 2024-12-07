@@ -189,6 +189,7 @@ pub struct ModKeys {
 fn afq_send (action : EvCbFn_QueuedProc_T) {
     if let Err(_err) = InputProcessor::instance().input_af_queue.send(action) {
         // meh, if we cant send it, the queue itself is fubared, oh well
+        println! ("error trying to send to input-processor af queue !!")
     }
 }
 
@@ -332,6 +333,15 @@ impl CapsModKey {
         )
     }
 
+    pub fn clear_caps_lock_state () {
+        // we want to ensure caps-lock state and light are clear upon startup, reset etc
+        if Key::CapsLock.is_toggled() {
+            if Key::CapsLock.is_pressed() { Key::CapsLock.release() }
+            // ^^ important if we reset while caps is held down (e.g. our un-suspend global-hotkey caps-alt-Insert)
+            Key::CapsLock.press_release()
+        }
+    }
+
     fn handle_key_down (&self, ks:KSR, ev:&Event) {
         //println!("Caps DOWN : {:?}, inj: {:?}", ev.key, ev.injected);
 
@@ -341,10 +351,11 @@ impl CapsModKey {
             self.down.set();
             update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
             ks.proc_notice__modkey_down(caps);
-        }
-        if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
+
             // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
-            afq_send (Box::new (move || ks.mod_keys.lctrl.ensure_active()));
+            if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
+                afq_send (Box::new (move || ks.mod_keys.lctrl.ensure_active()));
+            }
         }
     }
 
@@ -361,7 +372,7 @@ impl CapsModKey {
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*, KbdKey::CapsLock};
 
         // toggle off first if necessary (to clear key light)
-        if CapsLock.is_toggled() { CapsLock.press_release() }
+        Self::clear_caps_lock_state();
 
         let ks = k.ks;
         let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
@@ -532,9 +543,12 @@ impl KeyHandling for ModKey_Managed {
         // note that only checking ourselves works even if the paired was held down, the pair would just reactivate itself afterwards
         // (because each of the pair gets its own caps-up/dn notification)
         if bmk.mngd_active.is_set() {
-            bmk.mngd_active.clear();
             if bmk.active.is_set() && !bmk.down.is_set() {
                 afq_send (Box::new (move || bmk.ensure_inactive()));
+                // ^^ the ensure_inactive will also clear mngd_active flag when it gets executed
+            } else {
+                // but even if we cant release now, e.g coz modkey is still down, we still want to clear mngd_active
+                bmk.mngd_active.clear();
             }
         }
         // since we deactivate mod-keys on caps press, check to see if we want to reactivate them
@@ -543,12 +557,15 @@ impl KeyHandling for ModKey_Managed {
         // .. so to check the logic here must use lower level key inspections like via ahk key history!!
         // plus if doing caps release while both shift down, on my machine even the raw events are wonky (no caps evnt until one releases!!)
         if bmk.down.is_set() {
-            // the delayed action ofc, we dont want to send off to af-queue, so we'll just spawn a thread
+            // we'll spawn a thread to delay sleep, then put it into af-queue (avoids any races)
             thread::spawn ( move || {
                 thread::sleep(time::Duration::from_millis(150));
-                if bmk.down.is_set() && !bmk.active.is_set() {
-                    bmk.mk.key().press(); bmk.active.set(); bmk.consumed.set();
-            } } );
+                afq_send (Box::new (move || {
+                    if bmk.down.is_set() && !bmk.active.is_set() {
+                        bmk.mk.key().press(); bmk.active.set(); bmk.consumed.set();
+                    }
+                } ) );
+            } );
         }
     }
 
@@ -745,7 +762,7 @@ impl UnifModKey {
 
 
     /// Use this to wrap actions ONLY when setting combos with this mod key itself AND we want the mod-key to be INACTIVE in the combo.
-    /// .. e.g. if setting up alt-X to send win-y, we'd set lalt-mapping on Key::X as k.alt.inactive_action(k.win.inactive_on_key(Key::Y))
+    /// .. e.g. if setting up alt-X to send win-y, we'd set lalt-mapping on Key::X as k.alt.inactive_action(k.win.active_on_key(Key::Y))
     pub fn inactive_action (&'static self, af:AF) -> AF { // note that given our setup, this only gets called for left-side of LR mod keys
         // in theory, we should be able to just do a masked release here, and that work for alt .. win however is finicky
         // apparently win start menu triggers unless there's some timing gap between the masked release and another press

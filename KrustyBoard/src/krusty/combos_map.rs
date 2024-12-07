@@ -106,11 +106,27 @@ impl CombosMap {
             // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
             // (fscs are required to have some mod-key in them and are active until all modkeys are released)
             if ks.mod_keys.some_mk_down() {
-                ks.sticky_first_stroke.store(fsc);
-                Cursors::instance().apply_sfsc();
+                let last_sfsc = ks.sticky_first_stroke.get();
+                if fsc != last_sfsc {
+                    if !last_sfsc.is_empty() { Self::inject_event_sticky_fsc_cleared (last_sfsc) }
+                    ks.sticky_first_stroke.store(fsc);
+                    Cursors::instance().apply_sfsc();
+                }
             }
         } );
         self._add_combo (cg, ag().af(af), true);
+    }
+
+    /// Registers an action to be performed when this particular fsc is cleared
+    pub fn register_af_sticky_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
+        let ev_t = InternalEvent_T::Fsc_Sticky_Cleared { fsc };
+        self.setup_af_fsc_cleared (ev_t, af);
+    }
+    fn setup_af_fsc_cleared (&self, ev_t:InternalEvent_T, af:AF) {
+        InputProcessor::instance().input_bindings.bind_internal_event (ev_t, EvCbEntry {
+            ev_proc_ds: EvProc_Ds::new (EvProp_D::EvProp_Stop, ComboProc_D::ComboProc_Disable),
+            cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |_| af() ) ),
+        } );
     }
 
 
@@ -130,10 +146,18 @@ impl CombosMap {
     fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
         let ks = cg.ks;
         let af = Arc::new ( move || {
+            let last_lfsc = ks.latching_first_stroke.get();
+            if !last_lfsc.is_empty() { Self::inject_event_latching_fsc_cleared (last_lfsc) }
             ks.latching_first_stroke.store(fsc);
             Cursors::instance().apply_lfsc();
         } );
         self._add_combo (cg, ag().af(af), true);
+    }
+
+    /// Registers an action to be performed when this particular fsc is cleared
+    pub fn register_af_latching_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
+        let ev_t = InternalEvent_T::Fsc_Latching_Cleared { fsc };
+        self.setup_af_fsc_cleared (ev_t, af);
     }
 
 
@@ -142,14 +166,25 @@ impl CombosMap {
         let cg = cg.into();
         let ks = cg.ks;
         let af = Arc::new ( move || {
-            if ks.latching_first_stroke.is_empty() {
+            let last_lfsc = ks.latching_first_stroke.get();
+            if last_lfsc.is_empty() {
                 jiggle_cursor(2);
             } else {
-                Cursors::instance().apply_norm();
                 ks.latching_first_stroke.clear();
+                Cursors::instance().apply_norm();
+                Self::inject_event_latching_fsc_cleared (last_lfsc);
             }
         } );
         self._add_combo (cg, ag().af(af), true);
+    }
+
+    pub fn inject_event_sticky_fsc_cleared (fsc:ComboHash) {
+        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
+        // ^^ this will immediately call input-processor with this event .. which will lookup bindings for it ..
+        // .. and if it has queued cb type bindings (as intended), those cbs will get sent to af-queue for in-order processing
+    }
+    pub fn inject_event_latching_fsc_cleared (fsc:ComboHash) {
+        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
     }
 
 
@@ -275,8 +310,11 @@ impl CombosMap {
             EventDat::wheel_event {wheel, delta} => {
                 Some ( Arc::new (move || wheel.scroll(delta) ) )
             }
-            EventDat::move_event {..} => None
-            // ^^ move events wont even get here, but eitherway we'd do nothing
+            EventDat::pointer_event {..} => None,
+            // ^^ pointer events wont even get here, but eitherway we'd do nothing
+
+            EventDat::internal_event {..} => None,
+            // ^^ internal actions should typically be taken care of at bindings level, we do nothing here
         }
     }
 

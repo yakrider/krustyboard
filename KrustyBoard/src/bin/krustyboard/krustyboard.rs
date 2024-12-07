@@ -159,12 +159,13 @@ fn setup_default_keys  (k:&Krusty) {
     let char_keys  = "qwertasdfgzxcvb`123456yuiop[]\\hjkl;\'nm,./7890-=" .chars() .filter_map(Key::from_char);
     let fnum_keys  = (u64::from(F1) .. u64::from(F24)) .map(Key::from);
     let nav_keys   = [Left, Right, Up, Down, PageUp, PageDown, Home, End];
+    let ext_keys   = [ExtLeft, ExtRight, ExtUp, ExtDown, ExtPgUp, ExtPgDn, ExtHome, ExtEnd, ExtInsert, ExtDelete];
     let spcl_keys  = [Backspace, Delete, Space, Tab, Enter, Escape, Insert, Apps];
     //let media_keys = [BrowserBack, BrowserForward, BrowserRefresh, VolumeMute, VolumeDown, VolumeUp,
     //                  MediaNextTrack, MediaPrevTrack, MediaStop, MediaPlayPause];
     //let mouse_keys = [MouseLeftBtn, MouseRightBtn, MouseMiddleBtn, MouseX1Btn, MouseX1Btn];
 
-    char_keys .chain (fnum_keys) .chain (nav_keys) .chain (spcl_keys) .for_each ( |key| {
+    char_keys .chain (fnum_keys) .chain (nav_keys) .chain (ext_keys) .chain (spcl_keys) .for_each ( |key| {
         k.cm .add_to_handled_keys_set (key);
     } );
     // ^^ we can ofc put combos for these later in code .. all these do is register for default binding if no combo gets mapped!
@@ -175,13 +176,17 @@ fn setup_default_keys  (k:&Krusty) {
 
 fn setup_unstick_all  (k:&Krusty) {
     // we want to set up a combo to unstick-all in case we get into weird states due to other hooks stealing/suppressing key events etc
-    // lets do dbl-caps (Insert) for reset .. (Insert because End is on Fn key F12, Insert is direct key on this pc)
     // note that since we want the combo to be active even in presence of 'stuck' combo keys etc, we want to define that w global wildcards
+    // caps-caps-Insert -> unstick-all
     let ks = k.ks;
     let clear = Arc::new (move || ks.unstick_all());
-    k.cm .add_combo ( cg().k(Insert).m(caps_dbl).wcma().wcsa(),  ag().af(clear) );
+    k.cm .add_combo ( cg().k(Insert).m(caps_dbl).wcma().wcsa(),  ag().af(clear) );      // caps-caps-Insert -> unstick-all
 
-    // could prob add something simple to quit too? .. and thatd be easier coz expectation is usage while nothing-stuck?
+    // caps-caps-F12 -> suspend  .. (F12 typically has 'End' as oem Fn overload, next to Insert)
+    k.cm .add_combo ( cg().k(F12).m(caps_dbl),  ag().af (Arc::new (move || ks.suspend_krusty())) );     // caps-caps-F12/End --> Suspend
+
+    // sadly, there's no easy way to do 'resume' once we stop listening to kbd inputs .. (and would have to use tray-menu)
+    // (if really wanted, could try and use hotkeys-manager from tauri and set that one at that level .. meh)
 
     /// debug printout of cur state
     let print_ks = Arc::new (move || println!("{:#?}",ks));
@@ -672,13 +677,17 @@ fn setup_middle_and_xbtn_combos (k:&Krusty) {
 
 
 
-    // caps-x2 to search highlighted in chrome (via macro like sets of steps w available chrome hotkeys)
+    // caps-x2 or caps-q-rbtn to search highlighted in chrome (via macro like sets of steps w available chrome hotkeys)
     fn chrome_search_highlighted () {
+        LeftButton.press_release(); LeftButton.press_release(); LeftButton.press_release();
+        thread::sleep (Duration::from_millis(100));
         shift_press_release(F10);
+        thread::sleep (Duration::from_millis(100));
         ExtDown.press_release(); ExtDown.press_release(); ExtDown.press_release();
         Enter.press_release();
     }
-    k.cm .add_combo ( cg().mbtn(X2Button).m(caps),  ag().af (action(chrome_search_highlighted)) );
+    k.cm .add_combo ( cg().mbtn(X2Button).m(caps),            ag().af (spawned_action (chrome_search_highlighted)) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(caps).s(qks),  ag().af (spawned_action (chrome_search_highlighted)) );
 
 }
 
@@ -1158,6 +1167,11 @@ fn setup_caps_2wsx_combos (k:&Krusty) {
     // .. it turns out (on this kbd) caps-shift-[F2, 2, w, s, x] dont produce any key event at the hook at all .. maybe from the driver itself
     // funnily enough, there's a bunch of complaints about specifically those keys for dell/hp laptops .. looks like hardware
     //    appears to be a common kbd pcb layout issue .. heres from 2007: (https://www.joachim-breitner.de/blog/250-Shift-Caps-2)
+
+    // turns out its a well known issue called key-rollover (kro) .. fancier n-kro and 6-kro keyboards are apparently avaiable
+    // .. sadly enough, they'd have to be external, no way to replace a laptop kbd to something with higher-kro
+
+
     // sooo .. to makeup, we'll set those on caps_dbl instead
     fn map_caps_dbl_as_ctrl_shift (k:&Krusty, key:Key) {
         k.cm .add_combo ( cg().k(key).m(caps_dbl),           ag().k(key).m(ctrl).m(shift) );
@@ -1311,27 +1325,74 @@ fn setup_window_action_sfsc (k:&Krusty) {
 
 fn setup_switch_windows_sfsc (k:&Krusty) {
 
-    // sfsc : caps-d-w ..  we'll **_ navigate across WINDOWS _** (via switche snapshots)
+    // sfsc : caps-d-w .. we'll use as alt-tab alternative .. via switche
+
+    let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(W).m(caps).s(msD) );
+
+    // but we'll also act on the fsc trigger too (similar to how alt-tab and ctrl-tab work)
+    k.cm .add_combo ( cg().k(W).m(caps).s(msD),  ag().k(F1) );
+
+    // and once in the fsc, we'll make it continue to do next
+    k.cm .add_combo ( cg().k(W).m(caps).fsc(fsc).msk_nc(),  ag().k(ExtDown) );
+
+    // and have D (this fsc combo's mode-key) do prev
+    k.cm .add_combo ( cg().k(D).m(caps).s(msD    ).fsc(fsc).msk_nc(),  ag().k(ExtUp) );
+    k.cm .add_combo ( cg().k(D).m(caps).s(msD_dbl).fsc(fsc).msk_nc(),  ag().k(ExtUp) );
+
+    // because caps-tab usually triggers ctrl-tab fsc (replacing this fsc), we'll override it while under this fsc
+    k.cm .add_combo ( cg().k(Tab).m(caps).fsc(fsc),  ag().k(Tab) );
+
+    // the arrows, wheel etc should continue working as usual, but we'll set R-overloadings for block-only nav
+    [ (Tab,ExtDown), (Comma,ExtDown), (I,ExtUp), (U,ExtPgUp), (M,ExtPgDn) ] .iter().for_each ( |&(k1,k2)| {
+        k.cm .add_combo ( cg().k(k1).m(caps).s(msR) .fsc(fsc) .c(switche_fgnd()),  ag().k(k2).m(alt).m(shift) )
+    } );
+    // and do similar with R for wheel-spin (as regular caps-wheel w switche would do block-only nav already)
+    setup_frwd_bkwd_whl ( k, |cg| cg.m(caps).fsc(fsc),          ExtDown, ExtUp,   |ag,key| ag.k(key) );
+    setup_frwd_bkwd_whl ( k, |cg| cg.m(caps).fsc(fsc).s(msR),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt).m(shift) );
+
+    // finally we'll setup fsc clearing action upon caps-release to actually switch to the selected window
+    let wel = WinEventsListener::instance();
+    let enter_af = ag().k(Enter).gen_af();
+    let af = Arc::new (move || { if check_switche_fgnd (wel) { enter_af() } } );
+    k.cm .register_af_sticky_first_stroke_cleared (fsc, af);
+
+}
+
+
+
+
+fn setup_switch_windows_blind_sfsc (k:&Krusty) {
+
+    // sfsc : caps-e-2 ..  we'll **_ navigate across windows _** (via switche snapshots w/o switche popup)
+    // ^^ wanted to do caps-e-w, but ofc the 2wsx mess rears up there too
     // note that nav-key should be .. next:F16, prev:F17, top:F18, bottom:F19 (w/ alt-shift)
 
     let ssf = get_switche_snap_switch_flag();
-    let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(W).no_rpt().m(caps).s(msD) );
+    let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(Numrow_2).no_rpt().m(caps).s(msE) );
+
+    // we'll make the fsc itself switch first, similar to how alt-tab works
+    k.cm .add_combo ( cg().k(Numrow_2).m(caps).s(msE).no_rpt(),     ag().af (gen_af_switche_snap_switch (F16, ssf)) );
 
     // for the fsc
     k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F16, ssf)) );
     k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().af (gen_af_switche_snap_switch (F17, ssf)) );
 
     // and similar using keyboard keys too ..
+    // we'll set W the fsc key do next and D the fsc combo's mode-key as prev .. (and the rest of the arrows as expected)
     [ (K,F16), (Comma,F16), (J,F17), (I,F17), (U,F18), (M,F19) ] .iter().for_each ( |&(k1,k2)| {
-        k.cm .add_combo ( cg().k(k1).m(caps).fsc(fsc),     ag().af (gen_af_switche_snap_switch (k2, ssf)) );
+        k.cm .add_combo ( cg().k(k1).m(caps).fsc(fsc).no_rpt(),     ag().af (gen_af_switche_snap_switch (k2, ssf)) );
     } );
+    // specifically for E since its a mode-key that cares about _dbl, we'll set that too
+    k.cm .add_combo ( cg().k(E).m(caps).s(msE    ).fsc(fsc).no_rpt(),  ag().af (gen_af_switche_snap_switch (F17, ssf)) );
+    k.cm .add_combo ( cg().k(E).m(caps).s(msE_dbl).fsc(fsc).no_rpt(),  ag().af (gen_af_switche_snap_switch (F17, ssf)) );
+    // same for Numrow_2
+    k.cm .add_combo ( cg().k(Numrow_2).m(caps).s(qks2    ).fsc(fsc).no_rpt(),  ag().af (gen_af_switche_snap_switch (F16, ssf)) );
+    k.cm .add_combo ( cg().k(Numrow_2).m(caps).s(qks2_dbl).fsc(fsc).no_rpt(),  ag().af (gen_af_switche_snap_switch (F16, ssf)) );
 
-    // and once we're done w the switching, we clear the flag so we'll check and refresh the snap next time we start
-    let cc : ComboCond = Arc::new (move |_,_| ssf.is_set());
-    k.cm .add_combo ( cg().k(D).rel()         .c(cc.clone()),   ag().af ( Arc::new (move || ssf.clear())) );
-    k.cm .add_combo ( cg().k(D).rel().m(caps) .c(cc.clone()),   ag().af ( Arc::new (move || ssf.clear())) );
+    // when we exit the fsc, we want to clear the snap-switch flag so we'll check and refresh the snap next time we start
+    k.cm .register_af_sticky_first_stroke_cleared ( fsc, Arc::new (move || ssf.clear()) );
 
-    // and while doing that, we'll enable caps-d-d-o to send windows to back while doing that (
+    // we'll enable caps-o to send windows to back while doing that
     //let send_to_back = Arc::new ( || win_send_to_back (win_get_fgnd()) );
     let send_to_back = Arc::new ( win_fgnd_min_and_back );
     k.cm .add_combo ( cg().k(O).m(caps).fsc(fsc),     ag().af (send_to_back) );
@@ -1402,6 +1463,7 @@ fn setup_ctrl_tab_sfsc (k:&Krusty) {
     k.cm .add_combo ( cg().k(Tab).m(ctrl),           ag().k(Tab).m(ctrl) );
 
     // note that shift/ralt will work on these as-is .. as the fallbacks dont care about our fscs!
+    // and caps-release activation will also auto-work as caps release will send ctrl release as normal!
     // and now we can set about the rest of behavior under that fsc ..
 
     // we'll set up the wheel for caps-tab (and ctrl-tab)
@@ -2083,6 +2145,8 @@ pub fn setup_krusty_board () {
     setup_window_action_sfsc (&k);
 
     setup_switch_windows_sfsc (&k);
+
+    setup_switch_windows_blind_sfsc (&k);
 
     setup_switch_desktop_sfsc (&k);
 

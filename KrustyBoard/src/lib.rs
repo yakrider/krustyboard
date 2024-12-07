@@ -48,7 +48,7 @@ pub mod krusty {
     pub mod mod_keys;
     pub mod mode_states;
     pub mod combo;
-    pub mod combo_maps;
+    pub mod combos_map;
     pub mod combo_gen;
     pub mod action_gen;
     pub mod krusty_mouse;
@@ -61,7 +61,7 @@ pub mod krusty {
     pub use self::mod_keys::*;
     pub use self::mode_states::*;
     pub use self::combo::*;
-    pub use self::combo_maps::*;
+    pub use self::combos_map::*;
     pub use self::combo_gen::*;
     pub use self::action_gen::*;
     pub use self::krusty_mouse::*;
