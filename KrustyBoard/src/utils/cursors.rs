@@ -62,10 +62,11 @@ pub struct Cursors {
     enabled : Flag,      // we'll only swap cursors if explicitly enabled
 
     // the idea is to keep a backup of orig sys cursors, but use our triad colors for normal, sticky-fsc, latching-fsc
-    sys  : CursorSet,    // copy of system cursors
-    norm : CursorSet,    // colorized -> normal use
-    sfsc : CursorSet,    // colorized -> first-stroke-combos : sticky
-    lfsc : CursorSet,    // colorized -> first-stroke-combos : latching
+    sys   : CursorSet,    // copy of system cursors
+    norm  : CursorSet,    // colorized -> normal use
+    sfsc  : CursorSet,    // colorized -> first-stroke-combos : sticky
+    lfsc  : CursorSet,    // colorized -> first-stroke-combos : latching
+    flash : CursorSet,    // colorized -> flashing transition between modes
 }
 
 
@@ -75,7 +76,7 @@ struct RGB { pub r:u8, pub g:u8, pub b:u8 }
 const NORM_COLOR : RGB = RGB {
     //r: 0xFF, g: 0xFF, b: 0x40      // yellowish
     //r: 0xE0, g: 0xFF, b: 0x00      // yellowish
-      r: 0xC0, g: 0xE0, b: 0x00      // yellowish
+      r: 0xC0, g: 0xE0, b: 0x00      // yellow-greenish
     //r: 0xC0, g: 0xFF, b: 0x00      // yellow-greenish
 };
 const SFSC_COLOR : RGB = RGB {
@@ -85,6 +86,10 @@ const SFSC_COLOR : RGB = RGB {
 const LFSC_COLOR : RGB = RGB {
     //r: 0xFF, g: 0x50, b: 0xE0       // pinkish
       r: 0xFF, g: 0x50, b: 0xFF       // pinkish
+};
+const FLASH_COLOR : RGB = RGB {
+  //r: 0xFF, g: 0x20, b: 0x20,      // red
+    r: 0xF0, g: 0xF0, b: 0xF0,      // white
 };
 
 
@@ -103,12 +108,13 @@ impl Cursors {
             // and reset system cursors in case we were restarted from some prior switched cursors (by ourselves or others)
             Cursors::reset_system_cursors();
 
-            let sys  = Self::load_sys_cursors() .expect ("error loading system cursors");
-            let norm = Self::colorized_sys_cursors (&sys, &NORM_COLOR) .expect("error colorizing cursors");
-            let sfsc = Self::colorized_sys_cursors (&sys, &SFSC_COLOR) .expect("error colorizing cursors");
-            let lfsc = Self::colorized_sys_cursors (&sys, &LFSC_COLOR) .expect("error colorizing cursors");
+            let sys   = Self::load_sys_cursors() .expect ("error loading system cursors");
+            let norm  = Self::colorized_sys_cursors (&sys, &NORM_COLOR)  .expect("error colorizing cursors");
+            let sfsc  = Self::colorized_sys_cursors (&sys, &SFSC_COLOR)  .expect("error colorizing cursors");
+            let lfsc  = Self::colorized_sys_cursors (&sys, &LFSC_COLOR)  .expect("error colorizing cursors");
+            let flash = Self::colorized_sys_cursors (&sys, &FLASH_COLOR) .expect("error colorizing cursors");
 
-            Cursors { enabled : Flag::default(), sys, norm, sfsc, lfsc }
+            Cursors { enabled : Flag::default(), sys, norm, sfsc, lfsc, flash }
         } )
     }
 
@@ -130,12 +136,14 @@ impl Cursors {
             } );
         }
         else if !enabled && self.enabled.is_set() {
-            //self.apply_sys();
-            // ^^ cached sys cursor are still lower resolution than windows native .. so we'll just reset cursors instead
-            Self::reset_system_cursors()
+            self.apply_sys();
+            // ^^ will actually reset cursors as cached sys cursors are still lower res than native
         }
         // finally we can update the flags
         self.enabled.store(enabled);
+    }
+    pub fn is_enabled (&self) -> bool {
+        self.enabled.is_set()
     }
 
 
@@ -181,28 +189,40 @@ impl Cursors {
         } )
     }
 
-    fn apply_fsc <SEL> (selector:SEL)
+
+    fn apply_fsc <SEL> (selector:SEL, do_flash:bool)
         where SEL : Fn (&'static Cursors) -> &CursorSet + Send + Sync + 'static,
-        // ^^ we're taking selector closures so we dont have to try to clone fsc cursor-sets
     {
         thread::spawn ( move || {
             let cursors = Cursors::instance();
             if cursors.enabled.is_set() {
-                for hc in selector(cursors).get_swap_set() { hc.apply() }
+                if do_flash {
+                    for hc in cursors.flash.get_swap_set() { hc.apply() }
+                    thread::sleep (Duration::from_millis(100));
+                }
+                //for hc in selector(cursors).get_swap_set() { hc.apply() }
+                // ^^ stored sys cursors are still lower res, so we'd rather just reset cursors :
+                if  std::ptr::eq (selector(cursors), &cursors.sys) {
+                    Self::reset_system_cursors()
+                } else {
+                    for hc in selector(cursors).get_swap_set() { hc.apply() }
+                }
             }
         } );
     }
-    pub fn apply_sys  (&self) { Self::apply_fsc (|cs| &cs.sys ) }
-    pub fn apply_norm (&self) { Self::apply_fsc (|cs| &cs.norm) }
-    pub fn apply_sfsc (&self) { Self::apply_fsc (|cs| &cs.sfsc) }
-    pub fn apply_lfsc (&self) { Self::apply_fsc (|cs| &cs.lfsc) }
 
+    pub fn apply_sys  (&self) { Self::apply_fsc (|cs| &cs.sys,  true) }
+    pub fn apply_norm (&self) { Self::apply_fsc (|cs| &cs.norm, true) }
+    pub fn apply_sfsc (&self) { Self::apply_fsc (|cs| &cs.sfsc, true) }
+    pub fn apply_lfsc (&self) { Self::apply_fsc (|cs| &cs.lfsc, true) }
 
-    /// resets any system cursor customizations and reloads them from OS configs
-    pub fn reset_system_cursors () { unsafe {
-        let _ = SystemParametersInfoW ( SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE );
+    pub fn apply_norm_no_flash (&self) { Self::apply_fsc (|cs| &cs.norm, false) }
+
+    /// Resets any system cursor customizations and reloads them from OS configs. <br>
+    /// (Instead of making this public, we'd rather encourage using apply_sys which flashes before reset)
+    fn reset_system_cursors () { unsafe {
+        SystemParametersInfoW ( SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE );
     } }
-
 }
 
 

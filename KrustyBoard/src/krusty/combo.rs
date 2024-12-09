@@ -84,6 +84,9 @@ pub(crate) struct ComboValue {
     /// Optional condition that must be valid for this combo to trigger
     pub(crate) cond : Option <ComboCond>,
 
+    /// The dbl_tap flag marks whether this combo should only trigger upon double-tap of the trigger-key
+    pub(crate) dbl_tap : bool,
+
     /// The no_rpt flag when enabled, suppresses activation of this combo for triggering key-repeats
     pub(crate) no_rpt : bool,
 
@@ -92,8 +95,8 @@ pub(crate) struct ComboValue {
 }
 
 impl ComboValue {
-    fn new (af:AF, cond:Option<ComboCond>, no_rpt:bool, is_fsc:bool) -> ComboValue {
-        ComboValue { _private:(), stamp:Instant::now(), af, cond, no_rpt, is_fsc }
+    fn new (af:AF, cond:Option<ComboCond>, dbl_tap:bool, no_rpt:bool, is_fsc:bool) -> ComboValue {
+        ComboValue { _private:(), stamp:Instant::now(), af, cond, dbl_tap, no_rpt, is_fsc }
     }
 }
 
@@ -175,6 +178,7 @@ impl Combo {
             for ms in cg.ks.mode_states.ordered_mode_states() {
                 if ms.key() == Some(key) {
                     if !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
+                    if cg.dat.dbl_tap && !cg.dat.modes.contains(&ms.ms_dbl_t) { cg.dat.modes.push(ms.ms_dbl_t) }
                     cg = cg.msk_nc();
             } }
         }
@@ -327,10 +331,11 @@ impl Combo {
         let cg = Self::finalize_combo_gen(cg);
         let af = Self::gen_af (&ag, Some(&cg));
         let cond = cg.dat.cond.clone();
+        let dbl_tap = cg.dat.dbl_tap;
         let no_rpt = cg.dat.repeat_suppressed;
 
         Self::gen_combos(cg) .into_iter() .map ( |c|
-            (c, ComboValue::new (af.clone(), cond.clone(), no_rpt, is_fsc))
+            (c, ComboValue::new (af.clone(), cond.clone(), dbl_tap, no_rpt, is_fsc))
         ) .collect()
     }
 

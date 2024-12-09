@@ -3,7 +3,7 @@
 use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use once_cell::sync::OnceCell;
 
@@ -59,6 +59,8 @@ impl Flag {
 # [ derive (Debug) ]
 pub struct TimeStamp (RwLock<Instant>);
 
+// Note that we have moved everything to using the EventStamp instead so this is just vestigial now
+
 impl TimeStamp {
     pub fn new() -> TimeStamp {
         TimeStamp (RwLock::new (Instant::now()))
@@ -76,50 +78,66 @@ impl TimeStamp {
 
 
 # [ derive (Debug, Default) ]
-pub struct EventStamp (RwLock<u32>);
+pub struct EventStamp (AtomicU32);
 
 impl EventStamp {
     pub fn new() -> EventStamp {
-        EventStamp (RwLock::new(0))
+        EventStamp (AtomicU32::default())
     }
-    pub fn set (&self, stamp:u32) { *self.0.write().unwrap() = stamp }
-    pub fn get (&self) -> u32 { *self.0.read().unwrap() }
+
+    pub fn get  (&self) -> u32 { self.0.load (Ordering::Relaxed) }
+    pub fn set  (&self, stamp:u32) { self.0.store (stamp, Ordering::Relaxed) }
+    pub fn swap (&self, stamp:u32) -> u32 { self.0.swap (stamp, Ordering::Relaxed) }
 }
 
 
 
-
-
-
-pub const KEY_DOUBLE_TAP_MS  : u32 = 400;
-pub const MBTN_DOUBLE_TAP_MS : u32 = 500;
-
-pub fn update_stamp_key_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
-    let is_double_tap = update_stamp_dbl_tap (ev_t, stamp, dbl_flag, KEY_DOUBLE_TAP_MS);
-    if is_double_tap { jiggle_cursor(1) }
-    is_double_tap
+/// utility sugar to extract the dbl_tap from the right EventDat variant to update flag
+pub fn update_dbl_tap (ev:&Event, dbl_flag:&Flag) -> bool {
+    let is_dbl_tap = match ev.dat {
+        EventDat::btn_event { is_dbl_tap, .. } => is_dbl_tap,
+        EventDat::key_event { is_dbl_tap, .. } => is_dbl_tap,
+        _ => false
+    };
+    dbl_flag.store (is_dbl_tap);
+    is_dbl_tap
 }
-pub fn update_stamp_mouse_dbl_click (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag) -> bool {
-    update_stamp_dbl_tap (ev_t, stamp, dbl_flag, MBTN_DOUBLE_TAP_MS)
-}
-fn update_stamp_dbl_tap (ev_t:u32, stamp:&EventStamp, dbl_flag:&Flag, thresh_ms:u32) -> bool {
-    let dt = ev_t - stamp.get();
-    stamp.set(ev_t);
-    let is_double_tap = dt < thresh_ms && dt > 50;  // we'll put a small mandatory gap for debounce
-    dbl_flag .store (is_double_tap);
-    is_double_tap
-}
-pub fn jiggle_cursor (n:isize) {
+
+
+/// jiggle the cursor for a short duration as visual reminder of some state change etc
+fn jiggle_cursor (n:isize) {
     thread::spawn ( move || {
         for _ in 0 .. n {
             MousePointer::move_rel(5,5);
-            thread::sleep (Duration::from_millis(100));
+            thread::sleep (Duration::from_millis(50));
             MousePointer::move_rel(-5,-5);
-            thread::sleep (Duration::from_millis(100));
         }
     } );
 }
-
+/// flash the cursor with a transient color as visual indicator of some state change etc
+fn flash_cursor (_n:isize) {
+    // re _n .. currently we'll ignore the flash count .. oh well
+    let ks = KrustyState::instance();
+    let cursors = Cursors::instance();
+    // the apply below is spawned, so we wont spawn here
+    // .. and it will flash before it switches too
+    if !ks.sticky_first_stroke.is_empty() {
+        cursors.apply_sfsc()
+    } else if !ks.latching_first_stroke.is_empty() {
+        cursors.apply_lfsc()
+    } else {
+        cursors.apply_norm()
+    }
+}
+/// apply transient visual indicator to the cursor (flash cursor if enabled, else jiggle it)
+pub fn blip_cursor (n:isize) {
+    let cursors = Cursors::instance();
+    if cursors.is_enabled() {
+        flash_cursor(n)
+    } else {
+        jiggle_cursor(n)
+    }
+}
 
 
 
@@ -213,6 +231,7 @@ impl KrustyState {
         )
     }
 
+
     pub fn proc_notice__modkey_down (&'static self, mk:ModKey) {
         if mk == ModKey::caps {
             self.mod_keys.proc_notice__caps_down(self)
@@ -227,15 +246,83 @@ impl KrustyState {
 
         // only after the regular updates etc are finished, do we want to check for any fsc actions
         // (this lines up w how combos proc is done after bindings are executed, and ensures flags are updated)
+        if !self.mod_keys.some_mk_down() { self.clear_cur_sticky_fsc() }
+    }
+
+
+    /// this is typically called upon caps-release, but users could manually call this for complex scenarios <br>
+    /// (note that user-registered fsc-clearing AFs are bound separately to clearing event for this fsc)
+    pub fn clear_cur_sticky_fsc (&'static self) {
         let sfsc = self.sticky_first_stroke.get();
-        if !sfsc.is_empty() && !self.mod_keys.some_mk_down() {
+        if !sfsc.is_empty() {
+            //println! ("clearing sticky fsc: {:?}", sfsc);
             self.sticky_first_stroke.clear();
-            CombosMap::inject_event_sticky_fsc_cleared(sfsc);
+
             if self.latching_first_stroke.is_empty() {
                 Cursors::instance().apply_norm()
             } else { Cursors::instance().apply_lfsc() }
+
+            // we'll inject an event to trigger user-registered clearing actions .. (which goes to queue)
+            Self::inject_event_sticky_fsc_cleared(sfsc);
         }
     }
+    /// this is called upon combo-af of explicit latch-clearing combo, but users could manually call this for complex scenarios <br>
+    /// (note that user-registered fsc-clearing AFs are bound separately to clearing event for this fsc)
+    pub fn clear_cur_latching_fsc (&'static self) {
+        //println! ("clearing latching fsc: {:?}", last_lfsc);
+        let last_lfsc = self.latching_first_stroke.get();
+        if last_lfsc.is_empty() {
+            blip_cursor(2);
+        } else {
+            self.latching_first_stroke.clear();
+
+            if self.sticky_first_stroke.is_empty() {
+                Cursors::instance().apply_norm()
+            } else { Cursors::instance().apply_sfsc() }
+
+            Self::inject_event_latching_fsc_cleared (last_lfsc);
+        }
+    }
+    /// this action is typically auto registered for combos that trigger sticky fscs
+    pub(crate) fn activate_sticky_fsc (&'static self, fsc:ComboHash) {
+        // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
+        // (fscs are required to have some mod-key in them and are active until all modkeys are released)
+        if self.mod_keys.some_mk_down() {
+            //println! ("activating sticky fsc: {:?}", fsc);
+            let last_sfsc = self.sticky_first_stroke.get();
+            if fsc != last_sfsc {
+                self.sticky_first_stroke.store(fsc);
+                Cursors::instance().apply_sfsc();
+                if !last_sfsc.is_empty() {
+                    // we'll inject (into the queue) the last fsc cleared event so any user registered action can run
+                    Self::inject_event_sticky_fsc_cleared (last_sfsc)
+                }
+            }
+        }
+    }
+    /// this action is typically auto registered for combos that trigger latching fscs
+    pub(crate) fn activate_latching_fsc (&'static self, fsc:ComboHash) {
+        //println! ("activating latching fsc: {:?}", fsc);
+        let last_lfsc = self.latching_first_stroke.get();
+        if !last_lfsc.is_empty() {
+            Self::inject_event_latching_fsc_cleared (last_lfsc)
+        }
+        self.latching_first_stroke.store(fsc);
+        Cursors::instance().apply_lfsc();
+    }
+
+
+    pub fn inject_event_sticky_fsc_cleared (fsc:ComboHash) {
+        //println! ("injecting sticky fsc cleared action for : {:?}", fsc);
+        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
+        // ^^ this will immediately call input-processor with this event .. which will lookup bindings for it ..
+        // .. and if it has queued cb type bindings (as intended), those cbs will get sent to af-queue for in-order processing
+    }
+    pub fn inject_event_latching_fsc_cleared (fsc:ComboHash) {
+        //println! ("injecting latching fsc cleared action for : {:?}", fsc);
+        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
+    }
+
 
 
     pub fn capture_fgnd_win_snap_dat (&'static self) {
@@ -248,6 +335,7 @@ impl KrustyState {
         // again, we'll not spawn this here, but those who can tolerate being spawned can call this on a spawned thread etc
         *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
     }
+
 
 
     /// Goes through all keys and mouse-btns doing press/rel, and clears out all internal states
@@ -284,7 +372,7 @@ impl KrustyState {
             InputProcessor::instance().re_set_hooks();
 
             // and setup visual cue
-            jiggle_cursor(3);
+            blip_cursor(3);
         } );
         mouse_action_masked (mouse_masked_af);
         // ^^ this moves pointer to 0xFF,0FF before attempting clicks (is spawned out, ~50ms)
@@ -300,7 +388,7 @@ impl KrustyState {
             iproc.stop_input_processing();
         }
         update_tray__krusty_suspend_state(true);
-        Cursors::reset_system_cursors();
+        Cursors::instance().apply_sys();
     }
     pub fn un_suspend_krusty (&'static self) {
         //InputProcessor::instance().begin_input_processing();

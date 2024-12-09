@@ -59,6 +59,9 @@ pub struct _ComboGen {
     /// Mode-states that can be ignored (marked as wildcard)   .. (defined but empty-list means global wc)
     pub wc_modes : Option<Vec<ModeState_T>>,
 
+    /// The dbl_tap flag marks that this combo should only be activated upon double-tap of the trigger key/btn
+    pub dbl_tap : bool,
+
     /// Optional condition to check before triggering this combo
     # [ derivative (Debug="ignore") ]
     pub cond : Option<ComboCond>,
@@ -86,7 +89,7 @@ impl _ComboGen {
         _ComboGen {
             mks:Vec::new(), modes:Vec::new(),
             wc_mks:None, wc_modes:None, cond:None, first_stroke:ComboHash::default(),
-            mod_key_no_consume:false, mode_kdn_no_consume:false, repeat_suppressed:false,
+            dbl_tap:false, mod_key_no_consume:false, mode_kdn_no_consume:false, repeat_suppressed:false,
         }
     }
 }
@@ -231,7 +234,15 @@ impl ComboGen <ComboGenSt_Key> {
         self.st.action = KbdEv_MapKey_T::KeyEventCb_KeyUp;
         self
     }
-    /// Enable triggering this combo on key-repeats without having to press the key again. <br>
+    /// Specify that this combo should only activate when the trigger-key is double-tapped. <br>
+    /// Note that upon the second tap of the dbl-tap, if combos for both single and dbl-tap are specified
+    /// then first the single tap AF, then the dbl-tap AF will execute. <br>
+    /// As such care must be taken if defining both, that such behavior (which is also typical of OS btns etc) is acceptable.
+    pub fn dbl (mut self) -> Self {
+        self.dat.dbl_tap = true;
+        self
+    }
+    /// Disable triggering this combo on key-repeats (without having to press the key again). <br>
     /// (The default is to allow repeated combo activation on key-repeats)
     pub fn no_rpt (mut self) -> Self {
         self.dat.repeat_suppressed = true; self
@@ -243,6 +254,11 @@ impl ComboGen <ComboGenSt_MouseBtn> {
     /// Specify the mouse btn trigger action to be release (instead of the default press)
     pub fn rel (mut self) -> Self {
         self.st.action = MouseBtnEv_T::BtnUp;
+        self
+    }
+    /// Specify that this combo should only activate when the trigger-mbtn is double-tapped
+    pub fn dbl (mut self) -> Self {
+        self.dat.dbl_tap = true;
         self
     }
 }

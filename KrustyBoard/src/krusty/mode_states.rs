@@ -49,7 +49,6 @@ pub struct ModeState {
         key      : AtomicRefCell <Option<KbdKey>>,
     pub down     : Flag,
     pub consumed : Flag,
-    pub stamp    : EventStamp,
     pub dbl_tap  : Flag,
 }
 
@@ -95,7 +94,6 @@ impl ModeState {
             key      : AtomicRefCell::new(None),
             down     : Flag::default(),
             consumed : Flag::default(),
-            stamp    : EventStamp::default(),
             dbl_tap  : Flag::default(),
         }
     }
@@ -133,8 +131,9 @@ impl ModeState {
         let cb = EvCbFn_Inline ( Arc::new ( move |ev:Event| {
             if self.down.is_clear() {
                 // i.e. not a repeat
-                if update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap) {
-                    ks.mode_states.some_mode_dbl_active.set()
+                if update_dbl_tap (&ev, &self.dbl_tap) {
+                    ks.mode_states.some_mode_dbl_active.set();
+                    blip_cursor(1);
                 }
                 self.down.set(); ks.mode_states.some_mode_state_active.set(); mss_cba();
                 ks.mouse.vwheel.spin_invalidated.set();

@@ -9,7 +9,6 @@ use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
-use crate::utils::Cursors;
 
 
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
@@ -102,22 +101,12 @@ impl CombosMap {
     }
     fn setup_af_sticky_first_stroke (&self, cg:CG, fsc:ComboHash) {
         let ks = cg.ks;
-        let af = Arc::new ( move || {
-            // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
-            // (fscs are required to have some mod-key in them and are active until all modkeys are released)
-            if ks.mod_keys.some_mk_down() {
-                let last_sfsc = ks.sticky_first_stroke.get();
-                if fsc != last_sfsc {
-                    if !last_sfsc.is_empty() { Self::inject_event_sticky_fsc_cleared (last_sfsc) }
-                    ks.sticky_first_stroke.store(fsc);
-                    Cursors::instance().apply_sfsc();
-                }
-            }
-        } );
+        let af = Arc::new ( move || ks.activate_sticky_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
     }
 
-    /// Registers an action to be performed when this particular fsc is cleared
+    /// Registers an action to be performed when this particular fsc is cleared. <br>
+    /// Note that by the time the registered AF gets called, the fsc will already have been cleared
     pub fn register_af_sticky_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
         let ev_t = InternalEvent_T::Fsc_Sticky_Cleared { fsc };
         self.setup_af_fsc_cleared (ev_t, af);
@@ -132,7 +121,8 @@ impl CombosMap {
 
     /// Registers a combo as a possible 'latching-first-stroke-combo' (lfsc), and returns its combo-hash. <br>
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
-    /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered
+    /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered <br>
+    /// Note also that any AF desired on fsc activation, can ofc be separately added as another regular combo
     pub fn register_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
         let fsc = Combo::gen_fsc_hash(&cg);
@@ -145,16 +135,12 @@ impl CombosMap {
     }
     fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
         let ks = cg.ks;
-        let af = Arc::new ( move || {
-            let last_lfsc = ks.latching_first_stroke.get();
-            if !last_lfsc.is_empty() { Self::inject_event_latching_fsc_cleared (last_lfsc) }
-            ks.latching_first_stroke.store(fsc);
-            Cursors::instance().apply_lfsc();
-        } );
+        let af = Arc::new ( move || ks.activate_latching_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
     }
 
-    /// Registers an action to be performed when this particular fsc is cleared
+    /// Registers an action to be performed when this particular fsc is cleared. <br>
+    /// Note that by the time the registered AF gets called, the fsc will already have been cleared
     pub fn register_af_latching_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
         let ev_t = InternalEvent_T::Fsc_Latching_Cleared { fsc };
         self.setup_af_fsc_cleared (ev_t, af);
@@ -165,26 +151,8 @@ impl CombosMap {
     pub fn register_combo_clear_latching_first_stroke (&self, cg: impl Into<CG>) {
         let cg = cg.into();
         let ks = cg.ks;
-        let af = Arc::new ( move || {
-            let last_lfsc = ks.latching_first_stroke.get();
-            if last_lfsc.is_empty() {
-                jiggle_cursor(2);
-            } else {
-                ks.latching_first_stroke.clear();
-                Cursors::instance().apply_norm();
-                Self::inject_event_latching_fsc_cleared (last_lfsc);
-            }
-        } );
+        let af = Arc::new ( move || { ks.clear_cur_latching_fsc() } );
         self._add_combo (cg, ag().af(af), true);
-    }
-
-    pub fn inject_event_sticky_fsc_cleared (fsc:ComboHash) {
-        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
-        // ^^ this will immediately call input-processor with this event .. which will lookup bindings for it ..
-        // .. and if it has queued cb type bindings (as intended), those cbs will get sent to af-queue for in-order processing
-    }
-    pub fn inject_event_latching_fsc_cleared (fsc:ComboHash) {
-        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
     }
 
 
@@ -219,8 +187,9 @@ impl CombosMap {
             // note that we allow multiple conditional or mult non-conditional combos to trigger ..
             // .. but if any conditional combo triggers, then non-conditional combos for that are ignored
             cvs.push(cv);
-            cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.stamp));
-            // ^^ we want to sort such that conditionals are up top .. (hence the is_none supplied)
+            cvs.sort_by_cached_key (|cv| (cv.cond.is_none(), cv.dbl_tap, cv.stamp));
+            // ^^ we want to sort such that conditionals are up top .. (hence the is_none supplied) ..
+            // .. otoh, for dbl_tap, we want them to sort after regular, so the seq of exec upon second-tap is first regular, then dbl-tap
         } else {
             cm.insert (c, vec![cv]);
         }
@@ -270,9 +239,9 @@ impl CombosMap {
             println! ("## first-stroke registrations: {:?}", fscs_count);
 
             let combos_w_mult_non_cond_cvs = self .combos_map .borrow() .iter() .map ( |(c,cvs)| {
-                (*c, cvs.iter() .filter (|cv| cv.cond.is_none() && !cv.is_fsc) .count())
+                (*c, cvs.iter() .filter (|cv| cv.cond.is_none() && !cv.is_fsc && !cv.dbl_tap) .count())
             } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
-            println! ("## combos with multiple non-cond combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
+            println! ("## combos with multiple non-cond non-dbl-tap combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
             combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
         } );
     }
@@ -292,7 +261,7 @@ impl CombosMap {
                 }
                 _ => None   // no default fallback for key-release types (w/ or w/o syskey)
             } }
-            EventDat::btn_event {btn, ev_t} => { match ev_t {
+            EventDat::btn_event {btn, ev_t, ..} => { match ev_t {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
                 MouseBtnEv_T::BtnDown => {
                     Some ( Arc::new ( move || {
@@ -338,14 +307,27 @@ impl CombosMap {
     }
 
 
-    // For the actual matched combo, we still filter actual execution by any specified repeat-supression
-    fn exec_combo_value (&self, cv:&ComboValue, ev:&Event) {
+    // For the actual matched combo, we still filter actual execution by any specified repeat-supression or dbl-tap req
+    fn exec_combo_value (&self, cv:&ComboValue, ev:&Event) -> bool {
+        // for cvs with no_rpt specified, if this was a repeat and therefore not executed ..
+        // .. we still want stop looking for other combo matching stages .. hence returning combo_execd = true
         if cv.no_rpt {
-            if let EventDat::key_event {is_repeat, ..} = ev.dat {
-                if is_repeat { return }
+            if let EventDat::key_event { is_repeat, .. } = ev.dat {
+                if is_repeat { return true }
+            }
+        }
+        // for cvs specified as dbl_tap however, this event not being dbl_tap shouldnt block further combo matching stages
+        // note also, that we allow second-taps to activate regular combos (other than for mode-keys which will need their _dbl flags specified)
+        // further, dbl_tap cvs sort after regular cvs, so if there are both, then first the regular, then the dbl-tap cv will execute
+        if cv.dbl_tap {
+            match ev.dat {
+                EventDat::key_event { is_dbl_tap, .. } => { if !is_dbl_tap { return false } },
+                EventDat::btn_event { is_dbl_tap, .. } => { if !is_dbl_tap { return false } },
+                _ => { }
             }
         }
         cv.af.as_ref()();
+        true
     }
 
 
@@ -368,14 +350,13 @@ impl CombosMap {
             if let Some(cond) = cv.cond.as_ref() {
                 // all conditional combos that are satisfied can be run
                 if cond(ks,ev) {
-                    cond_matched = true;
-                    combo_execd = true;
-                    self.exec_combo_value (cv, ev);
+                    // but we should only mark cond-matched if we did actually exec a cond matched cv
+                    cond_matched |= self.exec_combo_value (cv, ev);
+                    combo_execd |= cond_matched
                 }
             } else if !cond_matched {
                 // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
-                combo_execd = true;
-                self.exec_combo_value (cv, ev);
+                combo_execd |= self.exec_combo_value (cv, ev);
             }
         }
         combo_execd
@@ -437,13 +418,14 @@ impl CombosMap {
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
     pub fn combo_maps_handle_input (&self, bmk:BindingsMapKey, ev:&Event) {
         //println! ("combo-map-key: {:?}", bmk);
+        //println! ("event: {:?}", ev);
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
         let ks = KrustyState::instance();
         let combo = Combo::gen_cur_combo (bmk, ks);
 
-        //println! ("{:?}",combo);
+        //println! ("{:?}   {:?}",combo, ks.sticky_first_stroke.get());
 
         // Combo-processing order w respect to first-stroke-combos [sticky-fsc, latching-fsc, no-fsc] :
         // - We first try to match sticky-fscs (if a sticky-fsc cur active) .. (separately for direct-match, and wild-card match)

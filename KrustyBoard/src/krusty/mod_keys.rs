@@ -63,7 +63,6 @@ pub struct CapsModKey {
     _private : (),
     pub down    : Flag,         // physically down
     pub dbl_tap : Flag,         // marker that two presses came within dbl-tab window
-    pub stamp   : EventStamp,   // stamp when it was last pressed, used for dbl-tap marking
 }
 
 
@@ -92,8 +91,6 @@ pub struct UnifModKey {
     pub mngd_active : Flag,    // forced/latched down via code (e.g. for ctrl-wheel etc)
     pub consumed    : Flag,    // used to suppress key-repeat and/or mask/suppress release events
     pub dbl_tap     : Flag,    // marker that two presses came within dbl-tab window
-
-    pub stamp : EventStamp,    // stamp when it was last pressed, used for dbl-tap marking
 
     // we'll also hold a pairing to the left/right counterpart if desired ..
     // .. this is intended to be populated once, right after post creation .. hence the AtomicRefCell
@@ -328,7 +325,6 @@ impl CapsModKey {
                 _private : (),
                 down        : Flag::default(),
                 dbl_tap     : Flag::default(),
-                stamp       : EventStamp::default(),
             }
         )
     }
@@ -349,7 +345,7 @@ impl CapsModKey {
         if !self.down.is_set() {
             // capslock can come as repeats like other mod keys .. this was a fresh one
             self.down.set();
-            update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+            if update_dbl_tap (ev, &self.dbl_tap) { blip_cursor(1) }
             ks.proc_notice__modkey_down(caps);
 
             // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
@@ -588,7 +584,6 @@ impl UnifModKey {
             mngd_active : Flag::default(),
             consumed    : Flag::default(),
             dbl_tap     : Flag::default(),
-            stamp       : EventStamp::default(),
             pair        : AtomicRefCell::default(),
         }
     }
@@ -617,7 +612,7 @@ impl UnifModKey {
 
         // now first lets do some common work (physical state etc) ..
         self.down.set();
-        update_stamp_key_dbl_tap (ev.stamp, &self.stamp, &self.dbl_tap);
+        if update_dbl_tap (&ev, &self.dbl_tap) { blip_cursor(1) }
         ks.proc_notice__modkey_down (self.mk);
 
         // then for external active state etc updates, we'll call the mgmt specific fns

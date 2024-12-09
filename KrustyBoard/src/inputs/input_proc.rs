@@ -23,6 +23,13 @@ pub const SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO : usize = 0x5317C7EE;      // s
 pub const MSG_LOOP_KILL_MSG: u32 = WM_USER + 1;
 
 
+pub const DBL_TAP_THRESH_MS_KEY  : u32 = 300;
+pub const DBL_TAP_THRESH_MS_MBTN : u32 = 400;
+
+pub const SRC_ID_MASK_KBD   : u64 = 1 << 63;
+pub const SRC_ID_MASK_MOUSE : u64 = 1 << 62;
+
+
 # [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
 /// The directive on whether to continue OS event propagation upon an event-callback or combo-processing
 pub enum EvProp_D {
@@ -69,7 +76,13 @@ pub struct InputProcessor {
     pub input_af_queue : SyncSender <EvCbFn_QueuedProc_T>,
 
     /// cached last-kbd-event (digest) .. used for setting is_repeat flag for kbd events
-    last_kbd_event : AtomicU64,
+    last_kbd_event   : AtomicU64,
+    /// cache only for key-press events .. used for setting is_dbl_tap flag for kbd keys
+    last_press_event : AtomicU64,
+    last_press_stamp : AtomicU32,
+    /// and the same for mouse .. (needs to be separate from kbd since kbd key-repeats can interleave between mouse clicks)
+    last_click_event : AtomicU64,
+    last_click_stamp : AtomicU32,
 }
 
 
@@ -99,12 +112,19 @@ impl InputProcessor {
             });
 
             InputProcessor {
-                kbd_hook       : AtomicIsize::default(),
-                mouse_hook     : AtomicIsize::default(),
-                iproc_thread   : AtomicU32::default(),
-                input_bindings : Bindings::new(),
-                input_af_queue : input_queue_sender,
-                last_kbd_event : AtomicU64::default(),
+                kbd_hook         : AtomicIsize::default(),
+                mouse_hook       : AtomicIsize::default(),
+                iproc_thread     : AtomicU32::default(),
+
+                input_bindings   : Bindings::new(),
+                input_af_queue   : input_queue_sender,
+
+                last_kbd_event   : AtomicU64::default(),
+                last_press_event : AtomicU64::default(),
+                last_press_stamp : AtomicU32::default(),
+
+                last_click_event : AtomicU64::default(),
+                last_click_stamp : AtomicU32::default(),
             }
         } )
 
@@ -112,11 +132,27 @@ impl InputProcessor {
 
 
     /// caches kbd-ev in compact form, and returns whether the new and old values match (for key-repeat flagging)
-    pub fn cache_kbd_event (&self, vk_code:u32, ev_t: KbdEvent_T ) -> bool {
-        let digest = ((ev_t as u64) << 32) | (vk_code as u64);
-        digest == self.last_kbd_event .swap (digest, Ordering::Relaxed)
+    pub fn cache_kbd_event (&self, src_id:u64) -> bool {
+        src_id == self.last_kbd_event .swap (src_id, Ordering::Relaxed)
     }
 
+    /// caches kbd last_press_event/stamp and returns whether this is a double-tap event (matches last-press, ignoring releases)
+    pub fn cache_last_press_event (&self, src_id:u64, cur_stamp:u32) -> bool {
+        self.cache_last_input_event (src_id, cur_stamp, &self.last_press_event, &self.last_press_stamp, DBL_TAP_THRESH_MS_KEY)
+    }
+    /// caches mouse-btn last_press_event/stamp and returns whether this is a double-tap event (matches last-press, ignoring releases)
+    pub fn cache_last_click_event (&self, src_id:u64, cur_stamp:u32) -> bool {
+        self.cache_last_input_event (src_id, cur_stamp, &self.last_click_event, &self.last_click_stamp, DBL_TAP_THRESH_MS_MBTN)
+    }
+    fn cache_last_input_event (
+        &self, src_id:u64, cur_stamp:u32, cached_event:&AtomicU64, cached_stamp:&AtomicU32, thresh_ms:u32
+    ) -> bool {
+        let last_press_id = cached_event .swap (src_id, Ordering::Relaxed);
+        let last_stamp = cached_stamp .swap (cur_stamp, Ordering::Relaxed);
+        let dt = cur_stamp - last_stamp;
+        // for dbl-tap, it has to match last, be within threshold, but also with a small mandatory gap for debounce
+        src_id == last_press_id  &&  dt < thresh_ms  &&  dt > 50
+    }
 
 
     fn set_hook (
@@ -340,10 +376,16 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
         let extra_info = kb_struct.dwExtraInfo;
 
-        let is_repeat = iproc.cache_kbd_event (kb_struct.vkCode, ev_t);
+        let ev_src_id = ((ev_t as u64) << 32) | (kb_struct.vkCode as u64) | SRC_ID_MASK_KBD;
+        let is_repeat = iproc.cache_kbd_event (ev_src_id);
         // ^^ note that currently we're allowing injected events to affect key-repeat flag
 
-        let dat = EventDat::key_event { key, ev_t, is_repeat, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
+        let is_dbl_tap = if ev_t == KbdEvent_KeyDown || ev_t == KbdEvent_SysKeyDown {
+            let is_dbl_tap = iproc.cache_last_press_event (ev_src_id, kb_struct.time);
+            !is_repeat && is_dbl_tap
+        } else { false };
+
+        let dat = EventDat::key_event { key, ev_t, is_repeat, is_dbl_tap, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
 
         let event = Event { stamp, injected, extra_info, dat };
 
@@ -364,6 +406,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
 #[allow(non_snake_case)]
 fn hi_word (l: u32) -> u16 { ((l >> 16) & 0xffff) as u16 }
+
 
 
 static LAST_STAMP: AtomicU32 = AtomicU32::new(0);
@@ -403,24 +446,32 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     //println!("{:#?}", mh_struct);
 
+    let gen_btn_ev = |btn:MouseButton, ev_t:MouseBtnEv_T| {
+        let src_id = ((ev_t as u64) << 32) | u32::from(btn) as u64 | SRC_ID_MASK_MOUSE;
+        let is_dbl_tap = if ev_t == BtnDown {
+            iproc.cache_last_click_event (src_id, stamp)
+        } else { false };
+        Some ( btn_event { btn, ev_t, is_dbl_tap } )
+    };
+
     use { MouseButton::*, MouseWheel::*, EventDat::*, MouseBtnEv_T::* };
     if let Some (dat) = match w_param.0 as u32 {
-        WM_LBUTTONDOWN => Some ( btn_event { btn: LeftButton,   ev_t: BtnDown } ),
-        WM_RBUTTONDOWN => Some ( btn_event { btn: RightButton,  ev_t: BtnDown } ),
-        WM_MBUTTONDOWN => Some ( btn_event { btn: MiddleButton, ev_t: BtnDown } ),
+        WM_LBUTTONDOWN => gen_btn_ev ( LeftButton,   BtnDown ),
+        WM_RBUTTONDOWN => gen_btn_ev ( RightButton,  BtnDown ),
+        WM_MBUTTONDOWN => gen_btn_ev ( MiddleButton, BtnDown ),
         WM_XBUTTONDOWN => {
             match hi_word(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { btn: X1Button, ev_t: BtnDown } ),
-                XBUTTON2 => Some ( btn_event { btn: X2Button, ev_t: BtnDown } ),
+                XBUTTON1 => gen_btn_ev ( X1Button, BtnDown ),
+                XBUTTON2 => gen_btn_ev ( X2Button, BtnDown ),
                 _ => None,
         } }
-        WM_LBUTTONUP => Some ( btn_event { btn: LeftButton,   ev_t: BtnUp } ),
-        WM_RBUTTONUP => Some ( btn_event { btn: RightButton,  ev_t: BtnUp } ),
-        WM_MBUTTONUP => Some ( btn_event { btn: MiddleButton, ev_t: BtnUp } ),
+        WM_LBUTTONUP => gen_btn_ev ( LeftButton,   BtnUp ),
+        WM_RBUTTONUP => gen_btn_ev ( RightButton,  BtnUp ),
+        WM_MBUTTONUP => gen_btn_ev ( MiddleButton, BtnUp ),
         WM_XBUTTONUP => {
             match hi_word(mh_struct.mouseData) {
-                XBUTTON1 => Some ( btn_event { btn: X1Button, ev_t: BtnUp } ),
-                XBUTTON2 => Some ( btn_event { btn: X2Button, ev_t: BtnUp } ),
+                XBUTTON1 => gen_btn_ev ( X1Button, BtnUp ),
+                XBUTTON2 => gen_btn_ev ( X2Button, BtnUp ),
                 _ => None,
         } }
         WM_MOUSEWHEEL  => Some ( wheel_event { wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
@@ -440,5 +491,9 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     return_call()
 }
+
+
+
+
 
 

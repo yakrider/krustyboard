@@ -24,7 +24,6 @@ pub struct MouseBtnState {
     pub down     : Flag,
     pub active   : Flag,
     pub consumed : Flag,
-    pub stamp    : EventStamp,
     pub dbl_tap  : Flag,
 }
 
@@ -40,7 +39,6 @@ impl MouseBtnState {
             down     : Flag::default(),
             active   : Flag::default(),
             consumed : Flag::default(),
-            stamp    : EventStamp::default(),
             dbl_tap  : Flag::default(),
         }
     }
@@ -60,7 +58,7 @@ impl MouseBtnState {
 # [ derive (Debug) ]
 pub struct MouseWheelState {
     pub wheel : MouseWheel,
-    pub last_stamp : TimeStamp,
+    pub last_stamp : EventStamp,
     pub last_delta : AtomicI32,
     // we'll also hold a flag to invalidate an ongoing inertial spin by e.g. mid-spin mod press (or actual spin stop (spacing > 120ms))
     pub spin_invalidated : Flag,
@@ -70,7 +68,7 @@ impl MouseWheelState {
     pub fn new (wheel:MouseWheel) -> MouseWheelState {
         MouseWheelState {
             wheel,
-            last_stamp       : TimeStamp::new(),
+            last_stamp       : EventStamp::new(),
             last_delta       : AtomicI32::from(DEFAULT_MOUSE_WHEEL_DELTA),
             spin_invalidated : Flag::default(),
         }
@@ -224,7 +222,7 @@ pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:&Krust
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
             mbs.down.set(); mbs.consumed.clear();
-            update_stamp_mouse_dbl_click (ev.stamp, &mbs.stamp, &mbs.dbl_tap);
+            update_dbl_tap (&ev, &mbs.dbl_tap);
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
         } ) ),
@@ -314,26 +312,28 @@ pub fn setup_mouse_wheel_handling (k:&Krusty, whl: &'static MouseWheelState, ev_
             if let EventDat::wheel_event {delta, ..} = ev.dat {
                 whl.last_delta.store (delta, Ordering::Relaxed);
             }
-            let combo_proc_d = if check_wheel_spaced(whl) { ComboProc_Enable } else { ComboProc_Disable };
+            let combo_proc_d = if check_wheel_spaced(whl, &ev) { ComboProc_Enable } else { ComboProc_Disable };
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, combo_proc_d)
         } ) ),
     } );
 }
 
-fn check_wheel_spaced (whl:&MouseWheelState) -> bool {
+fn check_wheel_spaced (whl:&MouseWheelState, ev:&Event) -> bool {
     // the invalidation setup below prevents things like caps down when wheel is still unintentionally inertially spinning to trigger zooms etc
     // however, we NO-LONGER space out the super-fast inertial smooth-scroll wheel (e.g. on my MX3 mouse) for improved usability
     // so here, we suppress wheel event if wheel-spin spacing is below guard-dur AND it has already been invalidated
-    let last_stamp = whl.last_stamp.get();
-    whl.last_stamp.capture();
-    //let gap = whl.last_stamp.read().unwrap().duration_since(last_stamp);
-    //println!("{:#?}", dur.as_millis());
-    const GUARD_DUR_MS: u128 = 120;  // from dur printouts above, looked like max inertial gap is 120 (min 7ms, usually <100)
+
+    let last_stamp = whl.last_stamp.swap(ev.stamp);
+
+    //println!("{:#?}", ev.stamp - last_stamp);
+    // from ^^ these, looked like max inertial gap is 120 (min 7ms, usually <100)
+
     if !whl.spin_invalidated.is_set() {
         return true
     }
-    if GUARD_DUR_MS < whl.last_stamp.get().duration_since(last_stamp).as_millis() {
+    const GUARD_DUR_MS: u32 = 120;
+    if GUARD_DUR_MS < ev.stamp - last_stamp {
         whl.spin_invalidated.clear();
         return true
     }
