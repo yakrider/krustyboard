@@ -267,39 +267,47 @@ fn setup_mode_keys (k:&Krusty) {
 
 
 
-/// returns the shared ComboHash of the sticky fsc we use by convention to in latching mode trigger fscs <br>
-/// caps-caps-l .. or .. caps-q-w (rolling only due to 2wsx) <br>
-/// Note that since these are on caps-dbl, any combos (for some latching-mode trigger etc) specifying this fsc should also specify caps-dbl)
+/// this sets-up/returns the fsc for a shared caps-sticky mode which we'll use (as the first-stroke-mode) to trigger various latching-modes <br>
+/// caps-q-w (rolling only due to 2wsx) <br>
+/// Note that since this is on caps, any combos (for some latching-mode trigger etc) specifying this fsc should also specify caps)
 fn latch_init_sfsc () -> ComboHash {
     // we'll setup a latch-init latch (sticky) just to make latch-triggers easier to remember
     // (.. can ofc still use whatever combo for any latch trigger .. we're just trying out this convention)
     static FSC : OnceCell<ComboHash> = OnceCell::new();
     *FSC .get_or_init ( || {
-        let (ks, cm) = (KrustyState::instance(), CombosMap::instance());
+        // latch-init -> caps-q-w .. (sticky) .. must be pressed rolling (2wsx limitation) .. (cf caps-q for many sticky modes)
+        let fsc = CombosMap::instance() .register_combo_sticky_first_stroke ( cg() .k(W).no_rpt() .m(caps).s(qks) );
 
-        // latch-init -> caps-caps-L .. (sticky)
-        let fsc = cm.register_combo_sticky_first_stroke ( cg() .k(L).no_rpt() .m(caps_dbl) );
-
-        // latch-init -> caps-caps-q-w .. (sticky) .. must be pressing rolling (2wsx limitation)
-        cm.co_register_combo_sticky_first_stroke ( cg() .k(W).no_rpt() .m(caps_dbl).s(qks),  fsc);
-        // for ease we'll also co-register it on caps-q-w for one handed use .. (cf caps-q for many sticky modes)
-        cm.co_register_combo_sticky_first_stroke ( cg() .k(W).no_rpt() .m(caps).s(qks),  fsc);
-        // note however, that the other is on caps-dbl, and we'll define our latches on caps-dbl too..
-        // .. so we'll set this also set the caps-dbl flag .. meh
-        cm .add_combo ( cg() .k(W).no_rpt() .m(caps).s(qks),  ag().af (Arc::new (move || ks.mod_keys.caps.dbl_tap.set())) );
+        // note that we've added and removed various co-registrations here in the past, incl caps-caps-Q, caps-caps-L etc ..
+        // .. (and can add more if feel the need) .. but for now, we seem to exclusively end up using the caps-qw-<?> above
 
         fsc
     } )
 }
 
-
+/// This returns a static pre-defined combo-hash that we'll use to as fsc to mark mode for x2-rbtn-wheel ctrl-tab <br><br>
+/// Note that fsc ComboHashes are simply unique ids, and dont really neeed to be actually hashed from Combos. <br><br>
+/// Note also, that we're using this in a very un-orthodox manner, in that we dont intend to actually define combos w this.
+/// Instead, we'll use this in setting appropriate combo-conditionss. <br>
+/// Similarly, we dont expect this to have registered activation/clearing triggers or actions.
+/// Instead, we'll also activate/clear this fsc ourselves at appropriate points in the rbtn ctrl-tab/alt-tab choreography! <br><br>
+/// This allows for sharing mode-specific combos between fsc and non-fsc states, gated by combo-conds checking for this fsc.
+fn x2_wheel_fsc () -> ComboHash {
+    static FSC : OnceCell<ComboHash> = OnceCell::new();
+    *FSC .get_or_init (|| ComboHash::wrapped (0xDEADBEEF))
+}
 
 
 fn setup_latching_first_stroke_clear (k:&Krusty) {
     /// clear active latching fscs
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt().m(caps_dbl) );
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt().m(caps_dbl) );
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt().m(caps).s(qks) );
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps_dbl) );            // caps-caps-o
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps_dbl) );            // caps-caps-q
+
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps).s(qks) );         // caps-q-o
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps).s(qks_dbl) );     // caps-q-q
+
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps) .fsc(latch_init_sfsc()) );     // caps-qw-o
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps) .fsc(latch_init_sfsc()) );     // caps-qw-q
 }
 
 
@@ -528,6 +536,16 @@ fn setup_mouse_left_btn (k:&Krusty) {
     } ) }
     k.cm .add_combo ( cg().mbtn(LeftButton).m(caps),  ag().af (gen_af_caps_mngd_lbtn(k.ks)) );
 
+    /// and to also handle caps press after drag-start, we'll put a combo directly on caps-down too!
+    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.lbtn.down.is_set());
+    let ks = k.ks;
+    let af = Arc::new (move || {
+        if ks.mod_keys.lwin.down.is_clear() { ks.mod_keys.lctrl.ensure_active() }
+        // ^^ the lwin conditional is to exclude the window-move/resize w lwin-lbtn-drag impld further below
+    } );
+    k.cm .add_combo ( cg().k(CapsLock) .c(cc),  ag().af(af) );
+
+
     /// for **_ mbtn release _**, we'll specify full wildcards (modkeys, modes) to avoid missing btn releases regardless of mode-states
     fn gen_af_lbtn_release (ks:KSR) -> AF { Arc::new ( move || {
         if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
@@ -555,7 +573,7 @@ fn setup_mouse_left_btn (k:&Krusty) {
             ks.win_groups.add_to_group (wg, hwnd);
             jiggle_window(hwnd);
         } );
-        let cc : ComboCond = Arc::new (move |_,_| ks.mouse.lbtn.dbl_tap.is_set());
+        let cc : ComboCond = Arc::new (move |ks,_| ks.mouse.lbtn.dbl_tap.is_set());
         k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s) .c(cc),  ag().af(add_af) );
         // also, on single-click we should capture dat to allow group window drag
         let wsd_af = gen_af_win_snap_dat (k.ks, Some(wg));
@@ -573,8 +591,7 @@ fn setup_mouse_left_btn (k:&Krusty) {
     fn gen_af_win_tog_max (ks:KSR) -> AF { Arc::new ( move || {
         win_toggle_maximize (ks.win_snap_dat.read().unwrap().hwnd)
     } ) }
-    let ks = k.ks;
-    let cc : ComboCond = Arc::new (move |_,_| ks.mouse.lbtn.dbl_tap.is_set());
+    let cc : ComboCond = Arc::new (move |ks,_| ks.mouse.lbtn.dbl_tap.is_set());
     k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin) .c(cc),  ag().af (gen_af_win_tog_max(k.ks)) );
 
 
@@ -606,6 +623,65 @@ fn setup_mouse_left_btn (k:&Krusty) {
 
 fn setup_mouse_right_btn (k:&Krusty) {
 
+    // we're doing a rel-delayed-rbtn scheme .. we'll postpone rbtn-press till release (to avoid ctx menu on rbtn-scroll swi invocation)
+    // (otherwise if letting sw handle rbtn-scroll natively, we would've been fine with just the default fallback for press)
+    let (ks, wel) = (k.ks, k.wel);
+    let sw_snap_af = ag().k(F15).m(alt).m(shift).gen_af();
+    let rbtn_press_af = Arc::new ( move || {
+        // if we've already got switche up, or are trying to do tab-switching, we'd rather clear pending than set it!
+        if check_switche_fgnd(wel) || ks.mod_keys.caps.down.is_set() {
+            ks.mouse.rbtn.pending.clear();
+            return
+        }
+        // otherwise, we wont send out rbtn-click, but mark it pending for later
+        ks.mouse.rbtn.pending.set();
+        // and to make rbtn-scroll switching faster, we'll also trigger a switche snapshot for preloading/warm-up
+        sw_snap_af();
+    } );
+    k.cm .add_combo ( cg().mbtn(RightButton),           ag().af (rbtn_press_af.clone()) );
+    k.cm .add_combo ( cg().mbtn(RightButton) .m(caps),  ag().af (rbtn_press_af) );
+
+
+    // rbtn-rel handling .. w support for swi .. (whether letting sw do native, or us driving it from here)
+    fn gen_af_rbtn_release (ks:KSR) -> AF { Arc::new ( move || {
+        if ks.in_right_btn_scroll_state.is_set() {
+            ks.in_right_btn_scroll_state.clear();
+            ks.mod_keys.lalt.ensure_inactive();
+            // ^^ for the new kr-driven rbtn-scroll, we want to make sure btn-rel sends alt-rel to activate the switching
+
+            ks.mod_keys.lctrl.ensure_inactive();
+            // ^^ we'll also do the same for caps-rbtn-scroll for ctrl-tab
+
+            if ks.mouse.rbtn.active.is_set() { RightButton.release() }
+            // ^^ this rel is only to suport sw-native rbtn-scroll .. for kr-driven, this will never happen anyway, so we'll let it be
+            // ^^ and it's here coz upon sw-native rbtn scroll, switche sends early rbtn-rel, so when we get this real one, we might be rbtn-inactive
+            // .. so catching this separately here lets us pass this through for switche (for cases its hook is behind us)
+            // (and lower down, for normal cases w rbtn inactive (coz maybe we suppressed it), we'll suppress the release)
+        }
+        else if ks.mouse.rbtn.pending.is_set() {
+            RightButton.press_release();
+        }
+        else if ks.mouse.rbtn.active.is_set() {
+            if ks.mouse.rbtn.consumed.is_set() { mouse_rbtn_release_masked() }
+            else { RightButton.release() }
+            // ^^ if it is active, we'll mask if its marked consumed ..
+            // (this is no longer used since switche started doing mouse-btn handling, but could be useful for other consumption cases)
+        }
+        else { } // if its not even active, we dont need to send a release (presumably we blocked the press going out)
+
+        // either way, we can now clear rbtn flags
+        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear(); ks.mouse.rbtn.pending.clear();
+
+        // finally, we'll also clear the x2-rbtn-wheel ctrl-tab fsc if active
+        if ks.sticky_first_stroke.check_match (x2_wheel_fsc()) {
+            ks.clear_cur_sticky_fsc()
+        }
+    } ) }
+    // we'll setup global wildcard combo (so rbtn never gets stuck)
+    k.cm .add_combo ( cg().mbtn(RightButton).rel().wcma().wcsa(),  ag().af (gen_af_rbtn_release (k.ks)) );
+
+
+
     // win-caps-qks? + rbtn-click is used to remove the pointed window from the corresponding win-group
     fn gen_af_win_grp_remove (wg:WinGroups_E, ks:KSR) -> AF { Arc::new ( move || {
         let hwnd = win_get_hwnd_from_pointer();
@@ -616,31 +692,6 @@ fn setup_mouse_right_btn (k:&Krusty) {
     k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks2),  ag().af (gen_af_win_grp_remove (wg2, k.ks) ) );
     k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks3),  ag().af (gen_af_win_grp_remove (wg3, k.ks) ) );
     k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks4),  ag().af (gen_af_win_grp_remove (wg4, k.ks) ) );
-
-    // for release, we'll again setup global wildcard combo
-    fn gen_af_rbtn_release (ks:KSR) -> AF { Arc::new ( move || {
-        let (mut should_release, mut should_mask) = (true, false);   // for safety, default should be to release w/o masking
-        if ks.in_right_btn_scroll_state.is_set() {
-            // ^^ upon switche rbtn scroll, switche sends early rbtn-rel, so when we get this real one, we might be rbtn-inactive
-            // .. so catching this separately here, lets us pass this through for switche (for cases its hook is behind us)
-            // (and lower down, for normal cases w rbtn inactive (coz maybe we/krusty suppressed it), we suppress the release)
-            ks.in_right_btn_scroll_state.clear();
-            // and the default release w/o masking will work out ok here
-        } else if ks.mouse.rbtn.active.is_clear() {
-            // if its not even active, we dont need to send a release (presumably we blocked the press going out)
-            should_release = false
-        } else if ks.mouse.rbtn.consumed.is_set() {
-            // else if it is active, we'll mask if its marked consumed ..
-            // (this is no longer used since switche started doing mouse-btn handling, but could be useful for other consumption cases)
-            should_mask = true
-        }
-        if should_release {
-            if should_mask { mouse_rbtn_release_masked() }
-            else { RightButton.release() }
-        }
-        ks.mouse.rbtn.consumed.clear(); ks.mouse.rbtn.active.clear();
-    } ) }
-    k.cm .add_combo ( cg().mbtn(RightButton).rel().wcma().wcsa(),  ag().af (gen_af_rbtn_release (k.ks)) );
 
 
     // caps-q2-rbtn to search highlighted in chrome (via macro like sets of steps w available chrome hotkeys)
@@ -661,28 +712,66 @@ fn setup_mouse_right_btn (k:&Krusty) {
 
 fn setup_middle_and_xbtn_combos (k:&Krusty) {
     // we want to set side btns to serve as middle btns too ..
-    // (note x-btns (on mx mouse) seem to report nothing on press, and dn/up on rel .. (and nothing if held down for too long))
-    // (note also that normal no-mod no-caps btn-click will work via fallback)
+    // Note that for the setup below, we assume the mouse firmware has been set to send both press and rel events for x2 buttons
+    // (esp as the default for e.g. Logitech MX mice is to already delay the press to rel, and use down-wheel for horiz-wheel)
 
-    fn setup_middle_btn_eqv_combos (k:&Krusty, btn:MouseButton) {
+    fn setup_middle_btn_eqv_combos (k:&Krusty, mbs : &'static MouseBtnState) {
         // base action rerouting for eqv btns (middle/x1/x2) to middle-btn
-        fn gen_xbtn_base_press_af (ks:KSR) -> AF { Arc::new ( move || {
-            ks.mouse.mbtn.active.set(); MiddleButton.press();
-        } ) }
-        k.cm .add_combo ( cg().mbtn(btn),  ag().af (gen_xbtn_base_press_af (k.ks)) );
 
-        // for release, we'll specify full wildcards (modkeys, modes), to avoid missing btn releases regardless of mode-states
-        fn gen_xbtn_base_rel_af (ks:KSR, mbs: &'static MouseBtnState) -> AF { Arc::new ( move || {
-            if ks.mouse.mbtn.active.is_set() { ks.mouse.mbtn.active.clear(); MiddleButton.release(); }
-            if mbs.active.is_set() { mbs.active.clear(); mbs.btn.release(); }
-        } ) }
-        let x_btn_base_rel_af = gen_xbtn_base_rel_af (k.ks, k.ks.mouse.get_btn_state(btn).unwrap());
-        k.cm .add_combo ( cg().mbtn(btn).rel().wcma().wcsa(),  ag().af (x_btn_base_rel_af) );
+        // first the press action
+        fn gen_xbtn_base_press_af (k:&Krusty) -> AF {
+            let (ks, wel) = (k.ks, k.wel);
+            Arc::new ( move || {
+                // if we're actively doing alt-tab, we completely ignore this
+                if check_switche_fgnd(wel) {
+                    return
+                }
+                // else we want to use rbtn held x2 for tab-switching ..
+                // .. but for easier ergo (since x2 btn is stiff), we want to enter a sticky fsc mode (so we wont have to keep it held down)
+                // .. (we intend for this sticky to be cleared upon rbtn release, and not x2 release!)
+                if ks.mouse.rbtn.down.is_set() {
+                    ks.activate_sticky_fsc (x2_wheel_fsc());
+                    return
+                }
+                // otherwise, we still wont send out a press now, but we'll mark it pending for later
+                ks.mouse.mbtn.pending.set();
+            } )
+        }
+        k.cm .add_combo ( cg().mbtn(mbs.btn),  ag().af (gen_xbtn_base_press_af (k)) );
+
+        // and for release, we'll specify full wildcards (modkeys, modes), to avoid missing btn releases regardless of mode-states
+        fn gen_xbtn_base_rel_af (k:&Krusty, mbs: &'static MouseBtnState) -> AF {
+            // lets define a common fn first
+            fn handle_mbtn_eqv_rel (ks:KSR, wel:&WinEventsListener, mbs: &MouseBtnState) {
+                if check_switche_fgnd(wel) {
+                    // if we're actively doing alt-tab, we shouldnt butt-in
+                } else if ks.in_right_btn_scroll_state.is_set() {
+                    ks.in_right_btn_scroll_state.clear();
+                    ks.mouse.vwheel.spin_invalidated.set();
+                    ks.mod_keys.lctrl.ensure_inactive();
+                } else if mbs.pending.is_set() {
+                    mbs.btn.press_release();
+                } else if mbs.active.is_set() {
+                    mbs.btn.release();
+                }
+                mbs.pending.clear(); mbs.active.clear(); mbs.consumed.clear();
+            }
+            let (ks, wel) = (k.ks, k.wel);
+            Arc::new ( move || {
+                // we'll handle the typical middle-btn mapped states first
+                handle_mbtn_eqv_rel (ks, wel, ks.mouse.mbtn);
+                // but if we had the actual specific btn pending/active, we'll handle those as well
+                if mbs.btn != MiddleButton {
+                    handle_mbtn_eqv_rel (ks, wel, mbs);
+                }
+            } )
+        }
+        k.cm .add_combo ( cg().mbtn(mbs.btn).rel().wcma().wcsa(),  ag().af (gen_xbtn_base_rel_af (k, mbs)) );
 
     }
-    setup_middle_btn_eqv_combos (k, MiddleButton);
-    setup_middle_btn_eqv_combos (k, X1Button);
-    setup_middle_btn_eqv_combos (k, X2Button);
+    setup_middle_btn_eqv_combos (k, k.ks.mouse.mbtn);
+    setup_middle_btn_eqv_combos (k, k.ks.mouse.x1btn);
+    setup_middle_btn_eqv_combos (k, k.ks.mouse.x2btn);
 
     /// and after that we'll do non-common configs specific to x1/x2/mid btns
 
@@ -706,10 +795,10 @@ fn setup_middle_and_xbtn_combos (k:&Krusty) {
 
 
 // helper fn to set both frwd/bkwd CG mappings with a parameterized CG gen fn
-fn setup_frwd_bkwd_whl <CGF, ICG, P, AGPF, IAG> (k:&Krusty, cgFn:CGF, bkwd_p:P, frwd_p:P, agFn:AGPF) where
-    ICG : Into<CG>,  IAG : Into<AG>,
-    CGF  : Fn(ComboGen<ComboGenSt_Wheel>) -> ICG,
-    AGPF : Fn(ActionGen, P) -> IAG,
+fn setup_frwd_bkwd_whl <CGF,ICG,P,AGPF,IAG> (k:&Krusty, cgFn:CGF, bkwd_p:P, frwd_p:P, agFn:AGPF)
+    where ICG : Into<CG>,  IAG : Into<AG>,
+          CGF  : Fn(ComboGen<ComboGenSt_Wheel>) -> ICG,
+          AGPF : Fn(ActionGen, P) -> IAG,
 {
     k.cm .add_combo ( cgFn (cg().whl().bkwd()),  agFn (ag(), bkwd_p) );
     k.cm .add_combo ( cgFn (cg().whl().frwd()),  agFn (ag(), frwd_p) );
@@ -739,10 +828,10 @@ fn setup_vert_wheel (k:&Krusty) {
 
     /* General mouse wheel setup guidelines
         - wheel         -->  wheel       .. (via fallback)
-        - caps/ctrl-wh  -->  ctrl wheel  .. (plus switche and ctrl-tab overloads)
+        - caps/ctrl-wh  -->  ctrl wheel  .. (plus switche and ctrl-tab overloads set-up elsewhere)
         - caps-x2-wh    -->  horiz-wheel
 
-        - alt-wh        -->  brightness  .. (plus switche and alt-tab overloads)
+        - alt-wh        -->  brightness  .. (plus switche and alt-tab overloads set-up elsewhere)
         - alt-1-wh      -->  fine-mode brightness
         - win-wh        -->  volume
         - caps-win-3-wh -->  media skip fwd/bkwd
@@ -803,70 +892,44 @@ fn setup_vert_wheel (k:&Krusty) {
         } )
     }
     setup_frwd_bkwd_whl ( k,  |wg| wg,   true, false,   |ag,p| ag.af (gen_af_base_wheel (p, k.ks) ) );
+    // ^^ this is useful for supporting switche-native rbtn-scroll ..
+    // .. however, for krusty-driven rbtn-scrl (like now), the default fallback would have been fine too ..
+    // .. but, we'll keep it as its useful if we ever want to revert (e.g for sw testing etc)
+    // .. (and its harmless coz for krusty-driven setup, w rbtn-dn the separate conditional combo will trigger w precedence)
 
 
-    fn gen_af_caps_wheel (dir_is_down:bool, ks:KSR) -> AF {
-        // for switche, we send shift-up/dn which will do in-block-only-wrap instead in recents/grouped instead of across the groups
-        // else during ctrl-tab, we'll do ctrl-up/dn, mostly for IDE as it doesnt seem to respond to wheel during ctrl-tab
-        // else for general caps-wheel, we send out managed-ctrl-wheels (managed to avoid having ctrl dn/up be interspersed)
-        let k_sw = if dir_is_down { ExtDown } else { ExtUp };
-        let af_switche_fgnd = ag().k(k_sw).m(shift).mkg_nw().gen_af();
-        let af_ctrl_wheel   = if dir_is_down { ag().whl().bkwd().m(ctrl ).gen_af() } else { ag().whl().frwd().m(ctrl ).gen_af() };
-        let wel = WinEventsListener::instance();
+    fn gen_af_caps_wheel (dir_is_down:bool, k:&Krusty) -> AF {
+        // for general caps-wheel, we send out managed-ctrl-wheels (managed to avoid having ctrl dn/up be interspersed)
+        let af_ctrl_wheel = {
+            if dir_is_down { ag().whl().bkwd().m(ctrl ).gen_af() }
+            else           { ag().whl().frwd().m(ctrl ).gen_af() }
+        };
+        let ks = k.ks;
         Arc::new ( move || {
-            if check_switche_fgnd (wel) {
-                af_switche_fgnd()
-            } else {
-                ks.mod_keys.lctrl.ensure_active();
-                af_ctrl_wheel()
-            }
+            ks.mod_keys.lctrl.ensure_active();
+            af_ctrl_wheel()
         } )
     }
     // we'll also do this for actual ctrl-wheel so the behavior is consistent ('ctrl' expands out to both lctrl and rctrl)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks) ) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(ctrl),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks) ) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(ctrl),  true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p, k.ks) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p,k) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(ctrl),          true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p,k) ) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(ctrl),  true, false,   |ag,p| ag.af ( gen_af_caps_wheel (p,k) ) );
+
 
     // caps-dbl wheel can simply translate to horiz-wheel
     k.cm .add_combo ( cg().whl().bkwd().m(caps_dbl),   ag().hwhl().frwd() );
     k.cm .add_combo ( cg().whl().frwd().m(caps_dbl),   ag().hwhl().bkwd() );
 
 
-    fn gen_af_alt_wheel (dir_is_down:bool) -> AF {
-        // general alt-wheel will do brightness control, and we'll separately support alt-tab and swtiche nav
-        let (k_sw, k_atab) = if dir_is_down { (ExtDown, ExtRight) } else { (ExtUp, ExtLeft) };
-        let af_brightness   = if dir_is_down { gen_af_incr_brightness(-4) } else { gen_af_incr_brightness(4) };
-        let af_switche_fgnd = ag().k(k_sw).m(shift).mkg_nw().gen_af();
-        let af_alt_tab_fgnd = ag().k(k_atab).mkg_nw().gen_af();
-        let wel = WinEventsListener::instance();
-        Arc::new ( move || {
-            if check_switche_fgnd (wel) { af_switche_fgnd() }
-            else if check_alt_tab_fgnd (wel) { af_alt_tab_fgnd() }
-            else { af_brightness() }
-        } )
-    }
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt),   true, false,   |ag,p| ag.af (gen_af_alt_wheel (p)) );
+    // alt-wheel will do brightness control .. (and we'll separately support alt-tab and swtiche nav)
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt),   -4, 4,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
-    // and for alt-wheel w qks1 (i.e. alt+1+wheel), we do finer brightness adjustments
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),    -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
+    // qks1-alt-wheel (i.e. alt+1+wheel) .. we'll do finer brightness adjustments
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),   -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
 
-    fn gen_af_caps_alt_wheel (dir_is_down:bool) -> AF {
-        // general caps-alt-wheel we'll do up/down nav, and we'll support regular alt-tab tab
-        // and for swtiche, we'll do in-block-only nav (via alt-shift-up/dn arrows)
-        let (k_norm, k_sw, k_atab) = if dir_is_down { (ExtDown, ExtDown, ExtRight) } else { (ExtUp, ExtUp, ExtLeft) };
-        let af_normal       = ag().k(k_norm).m(alt).gen_af();
-        let af_switche_fgnd = ag().k(k_sw  ).mkg_nw().gen_af();
-        let af_alt_tab_fgnd = ag().k(k_atab).mkg_nw().gen_af();
-        let wel = WinEventsListener::instance();
-        Arc::new ( move || {
-            if check_switche_fgnd (wel) { af_switche_fgnd() }
-            else if check_alt_tab_fgnd (wel) { af_alt_tab_fgnd() }
-            else { af_normal() }
-        } )
-    }
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(lalt),   true, false,   |ag,p| ag.af (gen_af_caps_alt_wheel (p)) );
-
+    // caps-alt-wheel .. we'll do up/down nav .. (and switche etc is set-up separately)
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(lalt),   ExtDown, ExtUp,   |ag,p| ag.k(p).m(lalt) );
 
     /// setups for **_ Arrow-Up/Down nav _** (in addn to some portions above)
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
@@ -898,8 +961,11 @@ fn setup_vert_wheel (k:&Krusty) {
     /// for win-wheel, we'll do **_ VOLUME control _**
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin),    VolumeDown, VolumeUp,   |ag,key| ag.k(key).mkg_nw() );
 
-    /// caps-win-3 wheel .. **_ media FWD-BKWD SKIP _** .. (cf win-3 for vol, win-f3 skip-fwd)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).m(caps).s(qks3),    true, false,   |ag,p| ag.af (media_skips_action (1, k.ks, p)) );
+    /// win-1 wheel .. **_ media next/prev _** ..
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(qks1),   true, false,   |ag,p| ag.af (media_next_action (k.ks, p)) );
+
+    /// and win-1-1 wheel .. **_ media skip-fwd-bkwd _** ..
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(qks1_dbl),   true, false,   |ag,p| ag.af (media_skips_action (1, k.ks, p)) );
 
     /// caps-d-d-wheel, we'll **_ navigate across WINDOWS _** (via switche snapshots)
     // ^^ moved to switche section
@@ -1044,6 +1110,8 @@ fn setup_win_key_combos (k:&Krusty) {
 
 fn setup_brightness_vol_media (k:&Krusty) {
 
+    // (note that there are also a bunch of wheel combo setups for most of these in the wheel section)
+
     // in cur laptop, Fn-F6/F7 do brightness, but at +10 incrs .. set them to do small incrs with alt combos
     fn gen_incr_brightness (incr:i32) -> AF { Arc::new ( move || { let _ = incr_brightness(incr); } ) }
     k.cm .add_combo ( cg().k(F6).m(lalt),  ag().af (gen_incr_brightness(-1)) );
@@ -1129,13 +1197,13 @@ fn setup_brightness_vol_media (k:&Krusty) {
     k.cm .add_combo ( cg().k(L).m(caps).fsc(fsc),  ag().af (media_skips_action (1, k.ks, true )) );     // skip fwd
 
 
-    // we'll also set these on a latching fsc (C-C-l)-m for sustained sessions of track trawling w arrow keys
-    let fsc = k.cm.register_combo_latching_first_stroke ( cg() .k(M).no_rpt() .m(caps_dbl) .fsc (latch_init_sfsc()) );
+    // we'll also set these on a latching fsc (caps-qw)-m for sustained sessions of track trawling w arrow keys
+    // fsc : caps-qw-M -> media trolling .. (latching)
+    let fsc = k.cm.register_combo_latching_first_stroke ( cg() .k(M).no_rpt() .m(caps) .fsc (latch_init_sfsc()) );
     k.cm .add_combo ( cg().k(Down ).fsc(fsc),  ag().af (media_next_action (k.ks, true )) );
     k.cm .add_combo ( cg().k(Up   ).fsc(fsc),  ag().af (media_next_action (k.ks, false)) );
     k.cm .add_combo ( cg().k(Right).fsc(fsc),  ag().af (media_skips_action (1, k.ks, true)) );
     k.cm .add_combo ( cg().k(Left ).fsc(fsc),  ag().af (media_skips_action (1, k.ks, false)) );
-
 
 }
 
@@ -1233,10 +1301,10 @@ fn setup_space_key (k:&Krusty) {
     k.cm .add_combo ( cg().k(Space).m(ralt),          ag().k(Enter) );                  // ralt-space       -> Enter
     k.cm .add_combo ( cg().k(Space).m(caps).s(msF),   ag().k(Enter) );                  // caps-f-space     -> Enter
 
-    k.cm .add_combo ( cg().k(Space).m(lalt).c(switche_not_fgnd()),   ag().k(Enter) );          // lalt-space  -> Enter ..  (excl switche)
-    k.cm .add_combo ( cg().k(Space).m(lalt_dbl),                     ag().k(Space).m(alt) );   // dbl-lalt-space -> alt-space (orig action)
+    k.cm .add_combo ( cg().k(Space).m(lalt)         .c(switche_not_fgnd()),   ag().k(Enter) );          // lalt-space  -> Enter ..  (excl switche)
+    k.cm .add_combo ( cg().k(Space).m(caps).m(lalt) .c(switche_not_fgnd()),   ag().k(Enter).m(lalt) );  // caps-lalt-space  -> alt-enter
 
-    k.cm .add_combo ( cg().k(Space).m(caps).m(lalt),  ag().k(Enter).m(lalt) );          // caps-lalt-space  -> alt-enter
+    k.cm .add_combo ( cg().k(Space).m(lalt_dbl),   ag().k(Space).m(alt) );   // dbl-lalt-space -> alt-space (orig action)
 
     k.cm .add_combo ( cg().k(Space).m(caps).s(qks),         ag().k(Enter).m(ctrl) );    // caps-q-space     -> ctrl-enter
     k.cm .add_combo ( cg().k(Space).m(caps).s(msF_dbl),     ag().k(Enter).m(ctrl) );    // caps-ff-space    -> ctrl-enter
@@ -1262,10 +1330,11 @@ fn setup_misc_standalone_combos (k:&Krusty) {
 
 
     /// Ctrl-S .. caps-s is now window-switching hotkey, and the actual ctrl-s is not ergo to use ..
-    /// .. so we'll put additional ctrl-s on Alt-s, caps-q-s, and caps-caps-s for now (we'll see what gets used)
-    k.cm .add_combo ( cg().k(S).m(lalt    ),     ag().k(S).m(ctrl) );
+    /// .. so we'll put additional ctrl-s on Alt-s, caps-q-s, caps-f-s, and caps-caps-s for now (we'll see what gets used)
+    k.cm .add_combo ( cg().k(S).m(lalt),         ag().k(S).m(ctrl) );
     k.cm .add_combo ( cg().k(S).m(caps_dbl),     ag().k(S).m(ctrl) );
     k.cm .add_combo ( cg().k(S).m(caps).s(qks),  ag().k(S).m(ctrl) );
+    k.cm .add_combo ( cg().k(S).m(caps).s(msF),  ag().k(S).m(ctrl) );   // (must be rolling due to 2wsx)
 
 
     /// Escape setups .. (there are also more Esc configs in switche-specific and win-grps sections)
@@ -1308,23 +1377,62 @@ fn setup_misc_standalone_combos (k:&Krusty) {
 
 
 fn setup_switche_alt_tab (k:&Krusty) {
-    // (Note that there also a bunch of these in other specific window-switch and mouse/wheel sections)
+    // in general, alt-tab is direclty listened to by switche, so we woudlnt have to drive it from here ..
+    // ^^ no longer true as we wanted many more overloads, so now we drive switche alt-tab from krusty again
 
-    // in general, alt-tab is direclty listened to by switche, so we no longer drive it from here ..
-    // but we'll override F1 so we can use it via ralt-F1 (if we disable F1 in swi-configs)
+    // either way, we'll override F1 so we can use it via ralt-F1 (if we disable F1 in swi-configs)
     k.cm .add_combo ( cg().k(F1),          ag().k(F15).m(alt).m(ctrl)  );
     k.cm .add_combo ( cg().k(F1).m(ralt),  ag().k(F1) );
 
-    // all the caps-l2 -> arrows should work as expected from default l2 bindings
-    // however, for pg-up/down, we want to support in-block on tap, and full-list on dbl-tap setup
+    // now we can setup the actual nav ..
+    // .. and since we might have alt-active and want to avoid alt-release, we'll override to have no-alt, mkg-no-wrap
+    // .. and with actual lalt pressed, we'll switch from doing block-lim to non-block-lim (i.e. w/ and w/o shift)
+    [ (I, ExtUp), (Comma, ExtDown), (U, ExtPgUp), (M, ExtPgDn), (J, ExtLeft), (K, ExtRight),
+    ] .iter().for_each ( |&(k1,k2)| {
+        k.cm .add_combo ( cg() .k(k1) .m(lalt)          .c(switche_fgnd()),   ag().k(k2).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .m(caps)          .c(switche_fgnd()),   ag().k(k2).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .m(caps) .m(lalt) .c(switche_fgnd()),   ag().k(k2).m(shift).mkg_nw() );
+    } );
+    // for the physical arrow keys though, we can make caps alone switch to non-block-lim
+    [ (Up, ExtUp), (Down, ExtDown), (Left, ExtLeft), (Right, ExtRight),
+    ] .iter().for_each ( |&(k1,k2)| {
+        k.cm .add_combo ( cg() .k(k1) .m(lalt)          .c(switche_fgnd()),   ag().k(k2).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .m(caps)          .c(switche_fgnd()),   ag().k(k2).m(shift).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .m(caps) .m(lalt) .c(switche_fgnd()),   ag().k(k2).m(shift).mkg_nw() );
+    } );
+    // plus for pg-up/down, we want to support in-block on tap, and full-list on dbl-tap setup
     [ (U,ExtPgUp), (M,ExtPgDn) ] .iter().for_each ( |&(k1,k2)| {
-        k.cm .add_combo ( cg() .k(k1) .dbl() .m(caps) .c(switche_fgnd()) .no_rpt(),  ag().k(k2).m(alt).m(shift).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .dbl() .m(caps) .c(switche_fgnd()) .no_rpt(),  ag().k(k2).m(shift).mkg_nw() );
         k.cm .add_combo ( cg() .k(k1) .dbl() .m(lalt) .c(switche_fgnd()) .no_rpt(),  ag().k(k2).m(shift).mkg_nw() );
     } );
+
     // we'll also set caps-o/q as Esc eqv .. (to match what we do in fsc-mode invocations)
     k.cm .add_combo ( cg() .k(O) .m(lalt) .c(switche_fgnd()),   ag().k(Escape) );     // alt-o  -> Escape
     k.cm .add_combo ( cg() .k(O) .m(caps) .c(switche_fgnd()),   ag().k(Escape) );     // caps-o -> Escape
     k.cm .add_combo ( cg() .k(Q) .m(caps) .c(switche_fgnd()),   ag().k(Escape) );     // caps-q -> Escape
+
+
+    // we'll separately setup wheel behavior when switche is in fgnd (other conditionals for rbtn-wheel, x2-wheel etc are elsewhere)
+    let wel = k.wel;
+    let cc : ComboCond = Arc::new ( |ks,_ev| {
+        check_switche_fgnd(wel) && !ks.mouse.rbtn.down.is_set() && !ks.sticky_first_stroke.check_match (x2_wheel_fsc())
+    } );
+
+    // regular or alt- wheel can send shift-up/down for non-block-lim nav .. this makes wheel work outside switche window
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()),            ExtDown, ExtUp,   |ag,p| ag.k(p).m(shift).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(lalt),   ExtDown, ExtUp,   |ag,p| ag.k(p).m(shift).mkg_nw() );
+
+    // caps/ctrl wheel should do block-lim nav (which is default and doesnt need shift)
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(ctrl),           ExtDown, ExtUp,   |ag,p| ag.k(p).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(caps),           ExtDown, ExtUp,   |ag,p| ag.k(p).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(caps).m(lalt),   ExtDown, ExtUp,   |ag,p| ag.k(p).mkg_nw() );
+
+
+    // while at it, lets also add some minimal wheel support for when actual native alt-tab is active
+    let cc : ComboCond = Arc::new ( |_ks,_ev| check_alt_tab_fgnd(wel) );
+    //k.cm .add_combo ( cg().whl().bkwd(),  ag().k(Tab) )
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()),           ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(lalt),  ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
 
 
     // for alt-escape, we want to override the default send-to-back behavior, as it has issues detailed in notes ..
@@ -1336,7 +1444,7 @@ fn setup_switche_alt_tab (k:&Krusty) {
     // .. if switche NOT fgnd, we'll switch to next window in switche and send cur to back
     let switche_next_non_minimized_af = ag().k(F20).m(alt).m(shift).gen_af();
     let alt_esc_action = Arc::new ( move || {
-        let hwnd_to_back = WinEventsListener::instance().fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
+        let hwnd_to_back = wel.fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
         switche_next_non_minimized_af();
         win_send_to_back (hwnd_to_back);
     } );
@@ -1346,15 +1454,14 @@ fn setup_switche_alt_tab (k:&Krusty) {
 
 
 
-fn setup_switch_windows_sfsc (k:&Krusty) {
+fn setup_switch_windows_w_caps_sfsc (k:&Krusty) {
 
     // sfsc : caps-s .. we'll use as alt-tab alternative via switche
     // caps-s -> invoke .. then with caps held :
     // w/s -> up/dn, e/d -> block-pg-up/dn, ee/dd -> pg-up/dn
     // caps-rel -> do-switch, space -> unarm, o/q/Esc -> escape
 
-    let ks = k.ks;
-    let wel = WinEventsListener::instance();
+    let (ks, wel) = (k.ks, k.wel);
     let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(S).m(caps) );   // caps-s trigger
 
 
@@ -1365,8 +1472,8 @@ fn setup_switch_windows_sfsc (k:&Krusty) {
         // .. so we'll simulate actual alt-tab itself .. (with its various complications)
         // if we're already active (e.g after disarming caps-release activation) we'll need to Esc out of it (avoids unintended release)
         if check_switche_fgnd(wel) { Escape.press_release() }
-        // now if we had mngd ctrl down (e.g. drag-drop), we'll need to clear that first, then reinstate it afterwards
-        if ks.mod_keys.lctrl.mngd_active.is_set() {
+        // now if we had ctrl active, e.g. caps-[clicked/drag/scroll], we'll need to wrap alt-tab with ctrl release and re-press afterwards
+        if ks.mod_keys.lctrl.active.is_set() {
             LCtrl.release(); alt_tab_af(); LCtrl.press();
         } else { alt_tab_af() }
     } );
@@ -1377,7 +1484,10 @@ fn setup_switch_windows_sfsc (k:&Krusty) {
     k.cm .register_af_sticky_first_stroke_cleared (fsc, fsc_clear_af.clone());
 
     // we'll also setup Space to unarm the key-release-activation trigger .. (similar to switche alt-tab)
-    let unarm_af = Arc::new ( move || Space.press_release() );
+    // and instead of just sending Space (to layer w active-Alt), we'll send Ctrl-Space to avoid win32 ui titlebar ctxt menu
+    let unarm_af = Arc::new ( move || {
+        LCtrl.press(); Space.press_release(); LCtrl.release();
+    } );
     k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc),  ag().af(unarm_af) );
 
     // for escape options, actual Esc, and generic caps-o would still work, but we want those to exit the fsc too ..
@@ -1390,21 +1500,111 @@ fn setup_switch_windows_sfsc (k:&Krusty) {
     // because caps-tab usually triggers ctrl-tab fsc (replacing this fsc), we'll override it while under this fsc
     k.cm .add_combo ( cg() .k(Tab) .m(caps).fsc(fsc),  ag().k(Tab).mkg_nw() );
 
-    // now we can setup the actual nav .. (same as regular alt-tab combos do)
-    // .. but here we have alt-down and want to avoid alt-release, so we'll override with only shift specified (no-alt, no wrap)
-    [ (W, ExtUp), (S,     ExtDown), (E, ExtPgUp), (D, ExtPgDn),
-      (I, ExtUp), (Comma, ExtDown), (U, ExtPgUp), (M, ExtPgDn), (J, ExtLeft), (K, ExtRight)
+    // now we can setup the actual nav .. (the ones defined in alt-tab section will continue to work, but we want E/D/S/W additionally)
+    // .. and again, regular nav we'll do block-lim, and w/ alt we'll do non-block-lim (which needs shift wrapping)
+    [ (W, ExtUp), (S, ExtDown), (E, ExtPgUp), (D, ExtPgDn) ] .iter().for_each ( |&(k1,k2)| {
+        k.cm .add_combo ( cg() .k(k1) .m(caps)          .fsc(fsc),   ag().k(k2).mkg_nw() );
+        k.cm .add_combo ( cg() .k(k1) .m(caps) .m(lalt) .fsc(fsc),   ag().k(k2).m(shift).mkg_nw() );
+    } );
+    // for the physical arrow keys, since we need caps-held here, we'll override them to do block-lim (i.e no shift)
+    // (the rest can work as normal from general alt-tab setup)
+    [ (Up, ExtUp), (Down, ExtDown), (Left, ExtLeft), (Right, ExtRight),
     ] .iter().for_each ( |&(k1,k2)| {
         k.cm .add_combo ( cg() .k(k1) .m(caps) .fsc(fsc),   ag().k(k2).mkg_nw() );
     } );
-    // plus, for pg-up/down, we want to support in-block on tap, and full-list on dbl-tap
-    [ (E, ExtPgUp), (D, ExtPgDn), (U, ExtPgUp), (M, ExtPgDn) ] .iter().for_each ( |&(k1,k2)| {
-        k.cm .add_combo ( cg() .k(k1) .dbl() .m(caps) .fsc(fsc) .no_rpt(),  ag().k(k2).m(shift).mkg_nw() );
+    // plus, for pg-up/down, we want to support in-block on tap (done above), and full-list on dbl-tap
+    [ (E, ExtPgUp), (D, ExtPgDn) ] .iter().for_each ( |&(k1,k2)| {
+        k.cm .add_combo ( cg() .k(k1) .dbl() .m(caps) .fsc(fsc) .no_rpt(),   ag().k(k2).m(shift).mkg_nw() );
     } );
 
-    // (note that the wheel should continue to work identically between this and regular switche alt-tab)
+
+    // wheel scrolls would mostly continue to work identically between this and regular switche alt-tab ..
+    // however, for regular switche, we do caps-wheel as block lim .. but here caps will always be down
+    // .. so we'll map caps-wheel for this fsc to regular wheel .. (and alt-caps will continue to do block-lim as regularly)
+    setup_frwd_bkwd_whl ( k,  |wg| wg .m(caps) .fsc(fsc),   ExtDown, ExtUp,   |ag,p|  ag.k(p).m(shift).mkg_nw() );
 
 }
+
+
+
+
+fn setup_switch_windows_rbtn_scroll (k:&Krusty) {
+    // This is for the alternative krusty driven rbtn switching mechanism where we've set rbtn to release-activation-only
+    // (as opposed to letting rbtn remain natural and letting switche handle rbtn-wheel-invocation natively)
+    // Avoiding the initial rbtn-press like this completely eliminates the annoyance of context menu popping up (when in desktop or explorer)
+    // .. and the cost of this is basically disabling rbtn-drag etc .. which we almost never use in any app etc anyway
+
+    // note that it is impld w up/dn keys below after invocation instead of just Tabs or wheel fallbacks because ..
+    // .. when sw isnt doing mouse hook, it can only listen mouse events in its window .. (and we'd like rbtn scrolls to work anywhere)
+    // further, any injected alt-shift-tab wont work because for alt-tab switche uses kbd-hook and queries phys shift-state directly !!
+    // .. (hence why we're doing the invocation first and then going to list top when the invocation itself is wheel-forward)
+
+    // re the complex combo-condition gating this below .. refer to comments in the rbtn ctrl-tab sections
+
+    let wel = k.wel;
+    let cc : ComboCond = Arc::new ( |ks,_ev| {
+        // rbtn-wheel is for window-switching, but we want to leave x2-rbtn-wheel for tab switching!
+        // (note that caps during rbtn-scroll is handled separately below)
+        ks.mouse.rbtn.down.is_set() &&
+            ( check_switche_fgnd (wel) ||
+                ( !ks.mouse.x2btn.down.is_set() && !ks.sticky_first_stroke.check_match (x2_wheel_fsc()) )
+            )
+    } );
+    fn gen_rbtn_wheel_af (dir_is_bkwd:bool, k:&Krusty) -> AF {
+        let (ks, wel) = (k.ks, k.wel);
+        let whl_key = if dir_is_bkwd { ExtDown } else { ExtUp };
+        Arc::new ( move || {
+            ks.mouse.rbtn.pending.clear();
+            if ks.in_right_btn_scroll_state.is_set() && check_switche_fgnd(wel) {
+                // this is special case where we're already actively in rbtn-scroll w switche fgnd
+                // .. so we want to just nav up/dn .. (but regular up/dn do block-lim, so need shift to do no-block-lim nav)
+                LShift.press(); whl_key.press_release(); LShift.release();
+                return
+            }
+            // everything else is first rbtn-scroll, we have to send alt-tab (which will also set it armed), but shift wont work!
+            ks.in_right_btn_scroll_state.set();
+            ks.mod_keys.lalt.ensure_active();
+            // and here, we dont want any caps-rel during alt-tab to send out alt-rel ..
+            // so we'll clear the managed-active flag that the ensure_active above sets
+            ks.mod_keys.lalt.mngd_active.clear();
+            // now whether sw was fgnd or not, we want to arm it, so we'll have to send an alt-tab (and shift-tab wont work)
+            Tab.press_release();
+            // now if dir was down, Tab is enough, we're done
+            if dir_is_bkwd {
+                return
+            }
+            // else we'll have to workaround..and we'll need some delay for the alt-tab above to be processed and get switche in fgnd
+            thread::spawn ( move || {
+                thread::sleep (Duration::from_millis(100));
+                // ^^ for robustness, looks like we need a delay at least around 100ms
+                // and then we simply move two-steps back, as at first invocation, we'd want to be one-back from current (i.e at bottom)
+                // .. (and if because this is delayed, another fast wheel-up managed to get through before fgnd .. meh its still harmless)
+                if check_switche_fgnd(wel) {
+                    // we'll guard for sw fgnd so we dont send spurious keys to random window if sw is not yet fgnd
+                    LShift.press();  ExtUp.press_release(); ExtUp.press_release(); LShift.release();
+                }
+            } );
+        } )
+    }
+    setup_frwd_bkwd_whl ( k, |wg| wg .c(cc.clone()),   true, false,   |ag,p| ag.af (gen_rbtn_wheel_af(p,k)) );
+
+
+    // for caps-rbtn-scrolls .. only if rbtn-alt-tab already active .. (coz from afresh, we use that for ctrl-tab)
+    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.rbtn.down.is_set() && check_switche_fgnd(wel));
+
+    // and for these we simply want regular switche nav (block-limited)
+    setup_frwd_bkwd_whl ( k, |wg| wg .m(caps) .c(cc.clone()),   ExtDown, ExtUp,   |ag,p| ag.k(p).mkg_nw() );
+
+    // but for alt-rbtn-scroll, we want to do what alt-tab does, so non-block-lim nav
+    setup_frwd_bkwd_whl ( k, |wg| wg .m(lalt) .c(cc.clone()),   ExtDown, ExtUp,   |ag,p| ag.k(p).m(shift).mkg_nw() );
+
+
+    // now on rbtn release, we'll want to send out the alt-release if need be
+    // .. and thats just added to the general rbtn release section instead of here
+    // (where we also postpone regular rbtn-press from going out till it's released)
+
+}
+
 
 
 
@@ -1636,6 +1836,42 @@ fn setup_ctrl_tab_sfsc (k:&Krusty) {
 
 
 
+fn setup_caps_rbtn_mbtn_ctrl_tab (k:&Krusty) {
+    // Given the setup for rbtn-scroll window switching, we'll piggyback on that flag for tab-switching with caps-rbtn-scroll
+    // and for this, we'll enable the same behavior whether caps is held or x2 is held
+
+    // re the complex combo-cond gating this below .. we've setup x2-rbtn-wheel to do ctrl-tab (cf rbtn-wheel for alt-tab) ..
+    // .. but the x2 btn was found to be too stiff, so additionally, we wanted a fsc mode to be activated upon first x2-press w rbtn-down
+    // .. and since the co-ordination between these states is complex, we're just adding the fscs options into the same combo-cond
+    // .. (instead of the typical expectation of defining combos w the fscs specified in them)
+
+    let cc : ComboCond = Arc::new ( |ks,_ev| {
+        // we need rbtn down but dont want to overlay ctrl-tab if we're already doing alt-tab
+        ks.mouse.rbtn.down.is_set() && !check_switche_fgnd (&WinEventsListener::instance())  &&
+            (ks.mod_keys.caps.down.is_set() || ks.mouse.x2btn.down.is_set() || ks.sticky_first_stroke.check_match (x2_wheel_fsc()) )
+    } );
+
+    fn gen_rbtn_wheel_af (dir_is_bkwd:bool, k:&Krusty) -> AF {
+        let ks = k.ks;
+        Arc::new ( move || {
+            ks.mouse.rbtn.pending.clear(); ks.mouse.mbtn.pending.clear(); ks.mouse.x2btn.pending.clear();
+            ks.activate_sticky_fsc (x2_wheel_fsc());    // <- this will clear upon rbtn or caps release
+            ks.in_right_btn_scroll_state.set();
+            ks.mod_keys.lctrl.ensure_active();
+            if !dir_is_bkwd {
+                Shift.press(); Tab.press_release(); Shift.release();
+            } else { Tab.press_release() }
+        } )
+    }
+    k.cm .add_combo ( cg().whl().frwd()          .c(cc.clone()),  ag().af (gen_rbtn_wheel_af (false, k)) );
+    k.cm .add_combo ( cg().whl().bkwd()          .c(cc.clone()),  ag().af (gen_rbtn_wheel_af (true,  k)) );
+    k.cm .add_combo ( cg().whl().frwd() .m(caps) .c(cc.clone()),  ag().af (gen_rbtn_wheel_af (false, k)) );
+    k.cm .add_combo ( cg().whl().bkwd() .m(caps) .c(cc.clone()),  ag().af (gen_rbtn_wheel_af (true,  k)) );
+
+}
+
+
+
 
 
 fn setup_window_action_sfsc (k:&Krusty) {
@@ -1698,24 +1934,20 @@ fn setup_window_action_sfsc (k:&Krusty) {
 
 
 fn setup_kbd_pointer_sfsc (k:&Krusty) {
-    // fsc : caps-e-e-p .. sticky
+
+    // fsc : caps-e-e-P .. sticky
+    // (this is actually the most ergonomic to use for quick editing, esp to put multi-caret .. cf the standard caps-q-p, or caps-qw-p triggers)
     let fsc = k.cm .register_combo_sticky_first_stroke ( cg().k(P).no_rpt().m(caps).s(msE_dbl) );
 
-    // fsc : caps-q-p .. sticky
+    // fsc : caps-q-P .. sticky
     // we've been registering independent stickies under caps-q-<?> for easier recall, so might as well add that
     k.cm .co_register_combo_sticky_first_stroke ( cg() .k(P).no_rpt() .m(caps).s(qks), fsc );
 
-    // fsc : caps-caps-l-p .. sticky
-    // although this is sticky and not latching, it feels latch-like enough that we'll co-register it under common latch-init-fsc
-    // (only coregistering, coz the caps-ee-m is actually more ergonomic to use for quick editing, esp to put multi-caret)
-    k.cm .co_register_combo_sticky_first_stroke ( cg() .k(P).no_rpt() .m(caps_dbl) .fsc(latch_init_sfsc()),  fsc );
+    // fsc : caps-qw-P .. latching
+    // we'll also co-register it under common latch-init fsc for latching mode on the same fsc!
+    k.cm .co_register_combo_latching_first_stroke ( cg() .k(P).no_rpt() .m(caps) .fsc(latch_init_sfsc()),  fsc );
 
-    // this part is a lil hacky, but since ergo requires caps-ee-p, but co-registering w latch-init leaves us on caps-dbl
-    // .. we'll make the trigger also clear the caps-dbl internal flag !! .. (very limited impact to anything else, so oh well)
-    let ks = k.ks;
-    k.cm .add_combo ( cg().k(P).m(caps_dbl).fsc(latch_init_sfsc()),  ag().af ( Arc::new (move || ks.mod_keys.caps.dbl_tap.clear()) ) );
-
-    let v : i32 = 20;
+    let v : i32 = 30;
 
     // first the cardinal mouse directions .. the msE wc simply to avoid inadvertent actions (e.g when adding cursors)
     k.cm .add_combo ( cg().k(I     ).m(caps).fsc(fsc).wcs(msE),  ag().pointer() .move_rel ( 0, -v) );
@@ -1738,13 +1970,20 @@ fn setup_kbd_pointer_sfsc (k:&Krusty) {
     // and finally, the alt-shift-click in IDE to add extra cursors that we wanted
     k.cm .add_combo ( cg().k(Space ).m(caps).fsc(fsc).s(msE),  ag().mbtn(LeftButton ).m(alt).m(shift) );
 
+    // and for actual arrows we'll add direct remaps, esp useful when using latching mode for click etc
+    k.cm .add_combo ( cg().k(Up   ).fsc(fsc),   ag().pointer() .move_rel ( 0, -v) );
+    k.cm .add_combo ( cg().k(Down ).fsc(fsc),   ag().pointer() .move_rel ( 0,  v) );
+    k.cm .add_combo ( cg().k(Left ).fsc(fsc),   ag().pointer() .move_rel (-v,  0) );
+    k.cm .add_combo ( cg().k(Right).fsc(fsc),   ag().pointer() .move_rel ( v,  0) );
+
+    k.cm .add_combo ( cg().k(Enter).fsc(fsc),   ag().mbtn(LeftButton) );
 }
 
 
 
 fn setup_arrow_wheel_lfsc (k:&Krusty) {
-    // fsc : caps-caps-l-a --> wheel to arrows mode (latching)
-    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(A).no_rpt() .m(caps_dbl) .fsc(latch_init_sfsc()) );
+    // fsc : caps-qw-A --> wheel to arrows mode (latching)
+    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(A).no_rpt() .m(caps) .fsc(latch_init_sfsc()) );
 
     // turn regular wheel scroll into arrow-nav
     k.cm .add_combo ( cg().whl().bkwd().fsc(fsc),  ag().k(ExtDown) );
@@ -1752,7 +1991,7 @@ fn setup_arrow_wheel_lfsc (k:&Krusty) {
 
     // and caps-dbl wheel into regular wheel
     k.cm .add_combo ( cg().whl().bkwd().fsc(fsc).m(caps_dbl),  ag().whl().bkwd() );
-    k.cm .add_combo ( cg().whl().frwd().fsc(fsc).m(caps_dbl),  ag().whl().bkwd() );
+    k.cm .add_combo ( cg().whl().frwd().fsc(fsc).m(caps_dbl),  ag().whl().frwd() );
 
 }
 
@@ -1760,11 +1999,11 @@ fn setup_arrow_wheel_lfsc (k:&Krusty) {
 
 fn setup_ide_diff_nav_lfsc (k:&Krusty) {
 
-    // caps-caps-l-d -> diff nav mode .. (latching)
-    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(D).no_rpt() .m(caps_dbl) .fsc(latch_init_sfsc()) );
+    // fsc : caps-qw-D -> diff nav mode .. (latching)
+    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(D).no_rpt() .m(caps) .fsc(latch_init_sfsc()) );
 
     // ^^ we've put this in latching fsc .. and made even regular wheel (w/o caps) do diff nav ..
-    // .. (so we'll have to clear out the latched-fsc (via caps-dbl-End etc) before the wheel reverts to normal!)
+    // .. (so we'll have to clear out the latched-fsc (e.g via caps-qq etc) before the wheel reverts to normal!)
 
     // next/prev diff --> wheel, caps-wheel
     setup_frwd_bkwd_whl ( k, |wg| wg.fsc(fsc),                 ExtDown,  ExtUp,    |ag,key| ag.k(key).m(ctrl).m(alt) );
@@ -2140,7 +2379,8 @@ fn setup_gaming_combos (k:&Krusty) {
         fi.exe == "chrome.exe" && fi.title.contains("Random")
     } ) }
 
-    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(C).no_rpt() .m(caps_dbl) .fsc(latch_init_sfsc()) );
+    // fsc : caps-qw-C -> og macro mode .. (latching)
+    let fsc = k.cm .register_combo_latching_first_stroke ( cg() .k(C).no_rpt() .m(caps) .fsc(latch_init_sfsc()) );
 
     k.cm .add_combo ( cg().k(Left  ).fsc(fsc).c(pc()),   ag().af (gen_pointed_v2 ( xo +     xd, y, Some(Escape))) );
     k.cm .add_combo ( cg().k(Right ).fsc(fsc).c(pc()),   ag().af (gen_pointed_v2 ( xo + 3 * xd, y, Some(Escape))) );
@@ -2193,15 +2433,15 @@ fn setup_gaming_combos (k:&Krusty) {
 
 
 /// setup for the entire krusty-board application, incl setting up key/btn bindings and combos
-pub fn setup_krusty_board () {
+pub fn setup_krusty_board (k:&Krusty) {
 
-    let k = Krusty::new();
+    //let k = Krusty::new();
 
     // setup all the mod-keys .. (can override this with own setup if desired)
-    k.ks.mod_keys.setup_tracking(&k);
+    k.ks.mod_keys.setup_tracking(k);
 
     // mouse setup incl lbtn/rbtn/mbtn/x1btn/x2btn and the scroll wheels
-    k.ks.mouse.setup_mouse(&k);
+    k.ks.mouse.setup_mouse(k);
 
 
 
@@ -2220,98 +2460,103 @@ pub fn setup_krusty_board () {
 
 
     // we're gonna put basically all keys to have at least default combo handling (others just pass through)
-    setup_default_keys (&k);
+    setup_default_keys (k);
 
     // caps-dbl-Insert --> unstick all
-    setup_unstick_all (&k);
+    setup_unstick_all (k);
 
     // [E,D,F,R,Q,1,2,3] as mode-keys
-    setup_mode_keys (&k);
+    setup_mode_keys (k);
 
     // [caps-dbl-F12, caps-dbl-Esc, alt-dbl-Esc, caps-dbl-e-o] --> clear-latching-first-stroke
-    setup_latching_first_stroke_clear (&k);
+    setup_latching_first_stroke_clear (k);
 
 
-    setup_caps_as_shift_mappings (&k);
+    setup_caps_as_shift_mappings (k);
 
-    disable_win_num_combos (&k);
+    disable_win_num_combos (k);
 
-    setup_caps_dbl_combos (&k);
+    setup_caps_dbl_combos (k);
 
 
     // [J,K,I,Comma,U,M,H,L] as l2 keys that are modified under caps, mode-keys etc
-    setup_l2 (&k);
+    setup_l2 (k);
 
 
     // mouse, wheel combos .. (though there are others in tsc or app-specific sections too)
 
-    setup_mouse_left_btn (&k);
+    setup_mouse_left_btn (k);
 
-    setup_mouse_right_btn (&k);
+    setup_mouse_right_btn (k);
 
-    setup_middle_and_xbtn_combos (&k);
+    setup_middle_and_xbtn_combos (k);
 
-    setup_vert_wheel (&k);
+    setup_vert_wheel (k);
 
-    setup_horiz_wheel (&k);
+    setup_horiz_wheel (k);
 
 
     // some specific keys and combo-patterns
 
-    setup_win_key_combos (&k);
+    setup_win_key_combos (k);
 
-    setup_brightness_vol_media (&k);
+    setup_brightness_vol_media (k);
 
-    setup_win_groups (&k);
+    setup_win_groups (k);
 
-    setup_caps_2wsx_combos (&k);
+    setup_caps_2wsx_combos (k);
 
-    setup_space_key (&k);
+    setup_space_key (k);
 
-    setup_misc_standalone_combos (&k);
+    setup_misc_standalone_combos (k);
 
 
     // setups for switching windows via various mechanisms (incl via switche)
 
-    setup_switche_alt_tab (&k);
+    setup_switche_alt_tab (k);
 
-    setup_switch_windows_sfsc (&k);
+    setup_switch_windows_w_caps_sfsc (k);
 
-    setup_switch_windows_blind_sfsc (&k);
+    setup_switch_windows_rbtn_scroll (k);
 
-    setup_switch_windows_direct_sfsc (&k);
+    setup_switch_windows_blind_sfsc (k);
 
-
-    // other two-stroke combos (tsc) thematically grouped under separate sticky-first-strokes (sfsc)
-
-    setup_switch_desktop_sfsc (&k);
-
-    setup_tab_nav_sfsc (&k);
-
-    setup_ctrl_tab_sfsc (&k);
-
-    setup_window_action_sfsc (&k);
-
-    setup_kbd_pointer_sfsc (&k);
+    setup_switch_windows_direct_sfsc (k);
 
 
-    // and some two-stroke combos (tsc) with latching first-stroke (lfsc)
+    // and for switching desktop
+    setup_switch_desktop_sfsc (k);
+
+
+    // and various ways for switching tabs
+    setup_tab_nav_sfsc (k);
+
+    setup_ctrl_tab_sfsc (k);
+
+    setup_caps_rbtn_mbtn_ctrl_tab (k);
+
+
+    // and some two-stroke combos with sticky or latching first-strokes (sfsc/lfsc)
     // (note that there are also other latch setups in sections for media, gaming etc)
 
-    setup_arrow_wheel_lfsc (&k);
+    setup_window_action_sfsc (k);
 
-    setup_ide_diff_nav_lfsc (&k);
+    setup_kbd_pointer_sfsc (k);
+
+    setup_arrow_wheel_lfsc (k);
+
+    setup_ide_diff_nav_lfsc (k);
 
 
     // gaming and app specific combo setups (many with sticky/latching fscs)
 
-    setup_IDE_combos (&k);
+    setup_IDE_combos (k);
 
-    setup_ditto_combos (&k);
+    setup_ditto_combos (k);
 
-    setup_one_note_combos (&k);
+    setup_one_note_combos (k);
 
-    setup_gaming_combos (&k);
+    setup_gaming_combos (k);
 
 
 
@@ -2354,7 +2599,7 @@ pub fn setup_krusty_board () {
     /// **_ END OF USER COMBO SETUPS _**
 
     // finally we can start binding key maps .. first the specialized handling for mode-state trigger keys
-    k.ks.mode_states.bind_mode_keys_actions(&k);
+    k.ks.mode_states.bind_mode_keys_actions(k);
 
     //k.cm.debug_print_combos_map();
     k.cm.info_print_simult_active_combos_check();
@@ -2363,7 +2608,7 @@ pub fn setup_krusty_board () {
 
     // and we'll put any direct special key setups after all this
     // .. which is for safety in case anything above accidentally included those, although ofc we dont want to rely on that!
-    setup_direct_binding_keys (&k);
+    setup_direct_binding_keys (k);
 
     // and we'll give a lil indicator for when we restart etc
     blip_cursor(3);
@@ -2375,17 +2620,18 @@ pub fn setup_krusty_board () {
 
 pub fn main () {
 
-    // setup the whole krusty keyboard configuration
-    setup_krusty_board();
-
-    // we'll enable cursor color swaps betwen [normal, sticky-fsc, latching-fsc] modes
+    // we'll enable cursor color swaps for visual indication
     Cursors::instance().set_swaps_enabled(true);
 
+    // setup the whole krusty keyboard configuration
+    let k = Krusty::new();
+    setup_krusty_board(&k);
+
     // we'll first start the windows-events listener
-    WinEventsListener::instance().setup_win_event_hooks();
+    k.wel.setup_win_event_hooks();
 
     // then start handling inputs
-    InputProcessor::instance().begin_input_processing();
+    k.iproc.begin_input_processing();
 
     // and finally start the system tray monitor event-loop .. (which will NOT return)
     start_system_tray_monitor();

@@ -74,23 +74,43 @@ pub struct Cursors {
 struct RGB { pub r:u8, pub g:u8, pub b:u8 }
 
 const NORM_COLOR : RGB = RGB {
-    //r: 0xFF, g: 0xFF, b: 0x40      // yellowish
-    //r: 0xE0, g: 0xFF, b: 0x00      // yellowish
-      r: 0xC0, g: 0xE0, b: 0x00      // yellow-greenish
-    //r: 0xC0, g: 0xFF, b: 0x00      // yellow-greenish
+    //r: 0xFF, g: 0xFF, b: 0x40     // yellowish
+    //r: 0xE0, g: 0xFF, b: 0x00     // yellowish
+      r: 0xC0, g: 0xE0, b: 0x00     // yellow-greenish
+    //r: 0xC0, g: 0xFF, b: 0x00     // yellow-greenish
 };
 const SFSC_COLOR : RGB = RGB {
-    //r: 0x00, g: 0xC0, b: 0xFF       // blueish
-      r: 0x00, g: 0xE0, b: 0xFF       // blueish
+    //r: 0x00, g: 0xC0, b: 0xFF     // blueish
+      r: 0x00, g: 0xE0, b: 0xFF     // blueish
 };
 const LFSC_COLOR : RGB = RGB {
-    //r: 0xFF, g: 0x50, b: 0xE0       // pinkish
-      r: 0xFF, g: 0x50, b: 0xFF       // pinkish
+    //r: 0xFF, g: 0x50, b: 0xE0     // pinkish
+      r: 0xFF, g: 0x50, b: 0xFF     // pinkish
 };
 const FLASH_COLOR : RGB = RGB {
   //r: 0xFF, g: 0x20, b: 0x20,      // red
     r: 0xF0, g: 0xF0, b: 0xF0,      // white
 };
+
+
+
+trait CursorSelector : Fn(&Cursors) -> Option<&CursorSet> + Send + Sync + 'static {
+    /*
+        - ^^ we have Cursors instance as 'static (so is Send + Sync), but individual Cursors in it are not
+        - so we'll instead send around selector fns for the specific cursor when needed
+        - and for that we're defining this trait out here rather than specifying the type repeatedly in fn defs
+     */
+}
+impl <U> CursorSelector for U
+    where U : Fn(&Cursors) -> Option<&CursorSet> + Send + Sync + 'static
+{
+    /* - ^^ we're defining blanket trait for matching closures so we can use that in param types
+            (otherwise compiler would complain that each closure types is unique)
+       - This lets us use constructions of form .. fn some_fn <C1,C2> (f1:C1, f2:C2) where C1:SEL, C2:SEL { }
+         .. although something like .. fn some_fn (f1:SEL, f2:SEL) { }  .. would still be disallowed as SEL has to be trait not type
+         .. nor even something like .. fn some_fn <C> (f1:C, f2:C) where C:SEL { } .. as f1, f2 would still be different closures/types
+     */
+}
 
 
 
@@ -190,33 +210,40 @@ impl Cursors {
     }
 
 
-    fn apply_fsc <SEL> (selector:SEL, do_flash:bool)
-        where SEL : Fn (&'static Cursors) -> &CursorSet + Send + Sync + 'static,
+    # [ allow (non_camel_case_types) ]
+    fn apply_fsc <SEL_1, SEL_2> (selector:SEL_1, flash_sel:SEL_2)
+        where SEL_1 : CursorSelector,
+              SEL_2 : CursorSelector,
+        // ^^ gotta specify the two selectors as separate types matching the trait, as every passed in closure type is unique
     {
         thread::spawn ( move || {
             let cursors = Cursors::instance();
             if cursors.enabled.is_set() {
-                if do_flash {
-                    for hc in cursors.flash.get_swap_set() { hc.apply() }
-                    thread::sleep (Duration::from_millis(100));
+                if let Some(flash) = flash_sel(cursors) {
+                    for hc in flash.get_swap_set() { hc.apply() }
+                    thread::sleep (Duration::from_millis(150));
                 }
-                //for hc in selector(cursors).get_swap_set() { hc.apply() }
-                // ^^ stored sys cursors are still lower res, so we'd rather just reset cursors :
-                if  std::ptr::eq (selector(cursors), &cursors.sys) {
-                    Self::reset_system_cursors()
-                } else {
-                    for hc in selector(cursors).get_swap_set() { hc.apply() }
+                if let Some(cs) = selector(cursors) {
+                    //for hc in selector(cursors).get_swap_set() { hc.apply() }
+                    // ^^ stored sys cursors are still lower res, so we'd rather just reset cursors :
+                    if std::ptr::eq (cs, &cursors.sys) {
+                        Self::reset_system_cursors()
+                    } else {
+                        for hc in cs.get_swap_set() { hc.apply() }
+                    }
                 }
             }
         } );
     }
+    pub fn apply_sys  (&self) { Self::apply_fsc (|cs| Some(&cs.sys),  |cs| Some(&cs.flash)) }
+    pub fn apply_norm (&self) { Self::apply_fsc (|cs| Some(&cs.norm), |cs| Some(&cs.flash)) }
+    pub fn apply_sfsc (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.flash)) }
+    pub fn apply_lfsc (&self) { Self::apply_fsc (|cs| Some(&cs.lfsc), |cs| Some(&cs.flash)) }
 
-    pub fn apply_sys  (&self) { Self::apply_fsc (|cs| &cs.sys,  true) }
-    pub fn apply_norm (&self) { Self::apply_fsc (|cs| &cs.norm, true) }
-    pub fn apply_sfsc (&self) { Self::apply_fsc (|cs| &cs.sfsc, true) }
-    pub fn apply_lfsc (&self) { Self::apply_fsc (|cs| &cs.lfsc, true) }
+    pub fn apply_norm_no_flash (&self) { Self::apply_fsc (|cs| Some(&cs.norm), |_| None) }
 
-    pub fn apply_norm_no_flash (&self) { Self::apply_fsc (|cs| &cs.norm, false) }
+    pub fn apply_sfsc_w_lfsc_flash (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.lfsc)) }
+    pub fn apply_sfsc_w_norm_flash (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.norm)) }
 
     /// Resets any system cursor customizations and reloads them from OS configs. <br>
     /// (Instead of making this public, we'd rather encourage using apply_sys which flashes before reset)

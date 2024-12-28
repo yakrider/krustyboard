@@ -42,14 +42,11 @@ impl TryFrom <ModKey> for KbdKey {
     fn try_from (mk: ModKey) -> Result<Self, Self::Error> {
         use KbdKey::*;
         match mk {
-            caps => Ok(CapsLock),
-            alt  => Ok(LAlt),  win  => Ok(LWin),  ctrl  => Ok(LCtrl),  shift  => Ok(LShift),
-            lalt => Ok(LAlt),  lwin => Ok(LWin),  lctrl => Ok(LCtrl),  lshift => Ok(LShift),
-            ralt => Ok(RAlt),  rwin => Ok(RWin),  rctrl => Ok(RCtrl),  rshift => Ok(RShift),
-            caps_dbl => Ok(CapsLock),
-            lalt_dbl => Ok(LAlt),  lwin_dbl => Ok(LWin),  lctrl_dbl => Ok(LCtrl),  lshift_dbl => Ok(LShift),
-            ralt_dbl => Ok(RAlt),  rwin_dbl => Ok(RWin),  rctrl_dbl => Ok(RCtrl),  rshift_dbl => Ok(RShift),
-            _ => Err(())
+            alt => Ok(LAlt),  win => Ok(LWin),  ctrl => Ok(LCtrl),  shift => Ok(LShift),
+            lalt | lalt_dbl => Ok(LAlt),  lwin | lwin_dbl => Ok(LWin),  lctrl | lctrl_dbl => Ok(LCtrl),  lshift | lshift_dbl => Ok(LShift),
+            ralt | ralt_dbl => Ok(RAlt),  rwin | rwin_dbl => Ok(RWin),  rctrl | rctrl_dbl => Ok(RCtrl),  rshift | rshift_dbl => Ok(RShift),
+            caps | caps_dbl => Ok(CapsLock),
+            no_mk => Err(())
     } }
 }
 
@@ -61,8 +58,8 @@ impl TryFrom <ModKey> for KbdKey {
 # [ derive (Debug) ]
 pub struct CapsModKey {
     _private : (),
-    pub down    : Flag,         // physically down
-    pub dbl_tap : Flag,         // marker that two presses came within dbl-tab window
+    pub down     : Flag,    // physically down
+    pub dbl_tap  : Flag,    // marker that two presses came within dbl-tab window
 }
 
 
@@ -323,8 +320,8 @@ impl CapsModKey {
         INSTANCE .get_or_init ( ||
             CapsModKey {
                 _private : (),
-                down        : Flag::default(),
-                dbl_tap     : Flag::default(),
+                down     : Flag::default(),
+                dbl_tap  : Flag::default(),
             }
         )
     }
@@ -347,11 +344,6 @@ impl CapsModKey {
             self.down.set();
             if update_dbl_tap (ev, &self.dbl_tap) { blip_cursor(1) }
             ks.proc_notice__modkey_down(caps);
-
-            // caps w mouse lbtn down, should be managed ctrl down (via ensure_active()) .. (for ctrl-click, drag-drop etc)
-            if ks.mouse.lbtn.down.is_set() && !ks.mod_keys.lwin.down.is_set() {
-                afq_send (Box::new (move || ks.mod_keys.lctrl.ensure_active()));
-            }
         }
     }
 
@@ -359,7 +351,7 @@ impl CapsModKey {
         //println!("Caps UP : {:?}, inj: {:?}", _ev.key, _ev.injected);
         self.down.clear();
         self.dbl_tap.clear();
-        ks.proc_notice__modkey_up(caps);
+        ks.proc_notice__modkey_up(caps)
     }
 
 
@@ -371,7 +363,7 @@ impl CapsModKey {
         Self::clear_caps_lock_state();
 
         let ks = k.ks;
-        let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Disable);
+        let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Enable);
 
         let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps .handle_key_down (ks, &ev); ev_proc_ds } ) );
         k.iproc.input_bindings .bind_kbd_event (CapsLock, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );

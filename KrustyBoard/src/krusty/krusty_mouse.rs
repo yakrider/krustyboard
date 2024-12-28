@@ -20,11 +20,12 @@ pub const DEFAULT_MOUSE_WHEEL_DELTA: i32 = 120;
 
 # [ derive (Debug) ]
 pub struct MouseBtnState {
-    pub btn      : MouseButton,
-    pub down     : Flag,
-    pub active   : Flag,
-    pub consumed : Flag,
-    pub dbl_tap  : Flag,
+    pub btn      : MouseButton,   // btn enum
+    pub down     : Flag,          // physically down
+    pub active   : Flag,          // externally active (press has been sent out)
+    pub pending  : Flag,          // press-rel is set to be sent out upon release
+    pub consumed : Flag,          // if consumed, the release should be masked
+    pub dbl_tap  : Flag,          // dbl-tap
 }
 
 // since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
@@ -38,6 +39,7 @@ impl MouseBtnState {
             btn,
             down     : Flag::default(),
             active   : Flag::default(),
+            pending  : Flag::default(),
             consumed : Flag::default(),
             dbl_tap  : Flag::default(),
         }
@@ -129,7 +131,7 @@ impl Mouse {
 
     pub fn clear_flags (&self) {
         for mbtn in [ &self.lbtn, &self.rbtn, &self.mbtn, &self.x1btn, &self.x2btn ] {
-            mbtn.down.clear(); mbtn.dbl_tap.clear(); mbtn.active.clear(); mbtn.consumed.clear();
+            mbtn.down.clear(); mbtn.dbl_tap.clear(); mbtn.active.clear(); mbtn.consumed.clear(); mbtn.pending.clear();
         }
         self.vwheel.spin_invalidated.clear();
         self.hwheel.spin_invalidated.clear();
@@ -155,6 +157,8 @@ impl Mouse {
         //setup_standard_mbtn_release_handling (k.ks.mouse.rbtn, k);
         setup_mouse_right_btn_release_handling (k);
         // ^^ for the mouse right-btn, we have to make small special case for switche-injected events, so we do it separately
+        // ^^ but we're now driving from kr to avoid ctx menu popups .. so in theory we wouldnt have to
+        // .. but we're still keeping this in case sw is ran w mouse hook enabled (and so injects rbtn-rel)
 
 
         // for wheels, we set up uniform binding for all wheels/directions, and let combo mapping add specific behavior
@@ -198,15 +202,26 @@ impl Mouse {
             let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
             let _ = InputProcessor::instance().input_af_queue .send (action);
         }
+        else if ks.mouse.rbtn.down.is_set() && mk == caps {
+            // since we use rbtn-scrolls for switching etc, we want to disable rbtn-pending on any caps-activity while rbtn down
+            // (mostly to suppress stray ctx menu when we might half-heartedly start rbtn-scroll but dont actually scroll lol)
+            ks.mouse.rbtn.pending.clear();
+        }
     }
     pub fn proc_notice__modkey_up (&self, mk:ModKey, ks:KSR) {
         use ModKey::*;
         self.vwheel.spin_invalidated.set();
-        if mk == caps  && ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
-            // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
-            let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
-            let _ = InputProcessor::instance().input_af_queue .send (action);
-        }
+        if mk == caps {
+            if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
+                // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
+                let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
+                let _ = InputProcessor::instance().input_af_queue .send (action);
+            }
+            else if ks.mouse.rbtn.down.is_set() {
+                // we'll clear pending rbtns like upon press above
+                ks.mouse.rbtn.pending.clear();
+            }
+        } // nothing for non-caps modkeys
     }
 
 }

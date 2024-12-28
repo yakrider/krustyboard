@@ -38,9 +38,10 @@ pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync +
 
 /// ComboHash is a simple new-type containing the hash value of the combo
 #[derive (Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct ComboHash ( pub(self) u64 );
+pub struct ComboHash (u64);
 
 impl ComboHash {
+    pub fn wrapped (hash:u64) -> ComboHash { ComboHash(hash) }
     pub fn is_empty (&self) -> bool { self.0 == 0 }
 }
 
@@ -182,15 +183,22 @@ impl Combo {
                     cg = cg.msk_nc();
             } }
         }
-        // next, we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
-        if cg.dat.mks.contains(&ModKey::caps_dbl) && !cg.dat.mks.contains(&ModKey::caps) { cg.dat.mks.push(ModKey::caps) }
-        // .. and for the other modkeys
-        cg.ks.mod_keys.ordered_unif_modkeys() .into_iter() .for_each ( |umk| {
-            if cg.dat.mks.contains(&umk.mk_dbl) && !cg.dat.mks.contains(&umk.mk) { cg.dat.mks.push(umk.mk) }
+        // we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
+        // .. or if the modkey itself is the trigger key for the combo
+        cg.ks.mod_keys.ordered_unif_modkeys() .into_iter() .map (|umk| (umk.mk, umk.mk_dbl))
+            .chain ([(ModKey::caps, ModKey::caps_dbl)]) .for_each ( |(mk,mk_dbl)|
+        {
+            if !cg.dat.mks.contains(&mk) && (
+                cg.dat.mks.contains(&mk_dbl) || KbdKey::try_from(mk).ok() == KbdKey::try_from(cg.st.bmk).ok()
+            ) {
+                cg.dat.mks.push(mk)
+            }
         } );
-        // and for double-taps on mode-states too
+        // and similarly for double-taps on mode-states, we'll add the non-dbl mode as well
         cg.ks.mode_states.ordered_mode_states() .into_iter() .for_each ( |ms| {
-            if cg.dat.modes.contains(&ms.ms_dbl_t) && !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
+            if cg.dat.modes.contains(&ms.ms_dbl_t) && !cg.dat.modes.contains(&ms.ms_t) {
+                cg.dat.modes.push(ms.ms_t)
+            }
         } );
         cg
     }

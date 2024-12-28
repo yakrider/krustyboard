@@ -246,14 +246,14 @@ impl InputProcessor {
 
     /// This can be used to directly send internal-events to the input processor .. <br>
     /// which will lookup bindings for the event, and if has queued cb-types, those will get sent to af-queue for in-order processing
-    pub fn inject_internal_event (ev_t:InternalEvent_T) {
+    pub fn inject_internal_event (&self, ev_t:InternalEvent_T) {
         let event = Event {
             stamp: 0,
             injected: true,
             extra_info: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
             dat: ( EventDat::internal_event { ev_t } ),
         };
-        let _ = InputProcessor::instance().proc_input_event (event);
+        let _ = self.proc_input_event (event);
     }
 
 

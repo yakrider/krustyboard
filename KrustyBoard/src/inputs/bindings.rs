@@ -85,6 +85,14 @@ impl BindingsMapKey {
             internal_event { ev_t }             => internal_ev_t (ev_t),
     }  }
 }
+impl TryFrom <BindingsMapKey> for KbdKey {
+    type Error = ();
+    fn try_from (bmk: BindingsMapKey) -> Result <Self, Self::Error> {
+        if let key_ev_t (key,_) = bmk {
+            Ok(key)
+        } else { Err(()) }
+    }
+}
 impl std::fmt::Debug for BindingsMapKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use {KbdEv_MapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};

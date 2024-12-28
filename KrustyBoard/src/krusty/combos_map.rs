@@ -22,6 +22,16 @@ impl WcCombosMapKey {
     }
 }
 
+
+#[ derive (Default) ]
+/// hold the components of the result on evaluating combo-values
+struct ProcCVsResult {
+    cond_execd  : bool,
+    combo_execd : bool,
+}
+
+
+
 # [ derive () ]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct CombosMap {
@@ -255,11 +265,16 @@ impl CombosMap {
     /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
     fn gen_fallback_base_af (&self, ks:KSR, ev:&Event) -> Option<AF> {
         match ev.dat {
-            EventDat::key_event {key, ev_t, ..} => { match ev_t {
-                KbdEvent_T::KbdEvent_KeyDown | KbdEvent_T::KbdEvent_SysKeyDown => {
-                    Some ( Arc::new (move || key.press_release()) )
-                }
-                _ => None   // no default fallback for key-release types (w/ or w/o syskey)
+            EventDat::key_event {key, ev_t, ..} => {
+                use {KbdKey::*, KbdEvent_T::*};
+                match key {
+                    // we dont want fallback for modifier keys
+                    CapsLock | LAlt | RAlt | LCtrl | RCtrl | LShift | RShift | LWin | RWin  =>  None,
+                    // and for others, we want press-rel fallback on press (and nothing on release)
+                    _ => match ev_t {
+                        KbdEvent_KeyDown | KbdEvent_SysKeyDown => Some ( Arc::new (move || key.press_release()) ),
+                        _ => None   // no default fallback for key-release types (w/ or w/o syskey)
+                    }
             } }
             EventDat::btn_event {btn, ev_t, ..} => { match ev_t {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
@@ -342,37 +357,37 @@ impl CombosMap {
     //
     // Note that this is repeated for each category of first-stroke-combo (fsc) [sticky, latched, no-fsc], and with and w/o wildcards ..
     // However, if any fsc-stage executed either a direct-match or wildcard-match, then the rest of the fsc stages are ignored
+    // And similarly, within each fsc-stage itself, if any cond-combo execs, its wildcard search is also skipped
     //
-    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:KSR) -> bool {
-        let mut cond_matched = false;
-        let mut combo_execd = false;
+    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:KSR) -> ProcCVsResult {
+        let mut proc_res = ProcCVsResult::default();
         for cv in cvs {
             if let Some(cond) = cv.cond.as_ref() {
                 // all conditional combos that are satisfied can be run
                 if cond(ks,ev) {
                     // but we should only mark cond-matched if we did actually exec a cond matched cv
-                    cond_matched |= self.exec_combo_value (cv, ev);
-                    combo_execd |= cond_matched
+                    proc_res.cond_execd |= self.exec_combo_value (cv, ev);
+                    proc_res.combo_execd |= proc_res.cond_execd;
                 }
-            } else if !cond_matched {
+            } else if !proc_res.cond_execd {
                 // all non-conditional combos can also be run, but only if no conditional combos (which sort above them) were satisfied
-                combo_execd |= self.exec_combo_value (cv, ev);
+                proc_res.combo_execd |= self.exec_combo_value (cv, ev);
             }
         }
-        combo_execd
+        proc_res
     }
 
     // Exact Combo Matching : we try directly looking up a combo and executing it
-    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:KSR) -> bool {
+    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:KSR) -> ProcCVsResult {
         //let pcm = self.combos_map.borrow();
         // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
         // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
         let pcm  = unsafe { & *self.combos_map.as_ptr() };
-        let mut combo_execd = false;
+        let mut proc_res = ProcCVsResult::default();
         if let Some(cvs) = pcm.get(combo) {
-            combo_execd = self.process_combo_afs (cvs, ev, ks);
+            proc_res = self.process_combo_afs (cvs, ev, ks);
         }
-        combo_execd
+        proc_res
     }
 
     // Wild-Card Combo Matching :
@@ -384,35 +399,41 @@ impl CombosMap {
     // - so for wc proc, we check cur wc-map-key in wc-table, if found, we search through the wc combos under that wcmk for wc-match w cur combo
     // - then if we found a cur-combo matching wc-combo, we use its wc-stripped version to lookup the actual combos_map for the combo-values!
     //
-    fn try_proc_wildcard_combo_afs (&self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, ks:KSR) -> bool {
+    fn try_proc_wildcard_combo_afs (&self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, ks:KSR) -> ProcCVsResult {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
-        let mut combo_execd = false;
+        let mut proc_res = ProcCVsResult::default();
         if let Some(cs) = cwm.get(&wcmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
             cs .iter() .filter (|(c,_wcsc)| c.check_wildcard_eqv (combo)) .for_each (|(_c,wcsc)| {
                 // found a match in wc-combos table, now gotta lookup into actual combo table w its wc-stripped version as key
                 // (the wc-stripped-match != cur-combo below is because then we'd have already found/execd it earlier w/o wc-matching)
                 if *wcsc != *combo {
-                    combo_execd = self.try_proc_combo_afs (wcsc, ev, ks)
+                    let cur_proc_res = self.try_proc_combo_afs (wcsc, ev, ks);
+                    proc_res.cond_execd  |= cur_proc_res.cond_execd;
+                    proc_res.combo_execd |= cur_proc_res.combo_execd;
                 }
             } );
         }
-        combo_execd
+        proc_res
     }
 
     // Combo matching rules (w/ or w/o wilcards) :
     // - First we try to directly match the combo into the combos-map table
     // - Next we'll try to match wildcard combos (for the same fsc state .. i.e [sticky, latched, no-fsc])
-    // - (Note that under any fsc category, wildcard-combos can run even after direct-match combos have been matched and ran)
-    //
+    // - Note that under any fsc category, wildcard-combos can run even after direct-match combos have been matched and ran
+    // - However, if a conditional combo matched and was execd, then searching for wildcards is no longer performed!
     fn try_proc_fsc_combo (&self, combo:&Combo, ev:&Event, fsc:ComboHash, ks:KSR) -> bool {
 
         let combo = Combo::gen_fsc_combo (combo, fsc);
-        let combo_execd = self.try_proc_combo_afs (&combo, ev, ks);
+        let proc_res = self.try_proc_combo_afs (&combo, ev, ks);
 
+        // if we matched an executed a conditional combo, then we bail early
+        if proc_res.cond_execd { return true }
+
+        // otherwise, even if we did ran something non-conditional, we still let possible wildcard matches run
         let wcmk = WcCombosMapKey::new (combo.bmk, fsc);
-        let wc_combo_execd = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev, ks);
+        let wc_proc_res = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev, ks);
 
-        combo_execd || wc_combo_execd
+        proc_res.combo_execd || wc_proc_res.combo_execd
     }
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states

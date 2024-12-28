@@ -18,7 +18,7 @@ ComboGen API Type-State machinery notes:
 #[derive (Debug, Clone)] pub struct ComboGenSt_MouseBtn { mbtn : MouseButton, action : MouseBtnEv_T }
 #[derive (Debug, Clone)] pub struct ComboGenSt_Wheel    { whl  : MouseWheel,  action : MouseWheelEv_T }
 
-#[derive (Debug, Clone)] pub struct ComboGenSt_Inited   { bmk : BindingsMapKey }
+#[derive (Debug, Clone)] pub struct ComboGenSt_Inited   { pub bmk : BindingsMapKey }
 // ^^ The inited state holds the combo-maps-key .. the same structure as we would have as key in input bindings map
 // ^^ note above that the action field when default will make combo-gen that triggers on press, else a release trigger can be specified
 
@@ -107,7 +107,7 @@ pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
     pub dat : Box<_ComboGen>,
 
     /// internal state specific data .. either the combo-map-key, or the requisites to create one
-    st  : S,
+    pub st  : S,
 }
 
 

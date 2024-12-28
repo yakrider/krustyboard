@@ -278,49 +278,55 @@ impl KrustyState {
 
             if self.sticky_first_stroke.is_empty() {
                 Cursors::instance().apply_norm()
-            } else { Cursors::instance().apply_sfsc() }
+            } else {
+                Cursors::instance().apply_sfsc_w_norm_flash()
+            }
 
             Self::inject_event_latching_fsc_cleared (last_lfsc);
         }
     }
     /// this action is typically auto registered for combos that trigger sticky fscs
-    pub(crate) fn activate_sticky_fsc (&'static self, fsc:ComboHash) {
-        // we'll check some mk-down for safety, as any recorded fsc only clears on all-modkeys-released ..
-        // (fscs are required to have some mod-key in them and are active until all modkeys are released)
-        if self.mod_keys.some_mk_down() {
+    pub fn activate_sticky_fsc (&'static self, fsc:ComboHash) {
+        // sticky-fscs are typically required to have some mod-key in them and are active until all modkeys are released
+        // .. however, we no longer gate them by checking mk-down before activation to accommodate complex user-drive use-cases
+        let last_sfsc = self.sticky_first_stroke.get();
+        if fsc != last_sfsc {
             //println! ("activating sticky fsc: {:?}", fsc);
-            let last_sfsc = self.sticky_first_stroke.get();
-            if fsc != last_sfsc {
-                self.sticky_first_stroke.store(fsc);
-                Cursors::instance().apply_sfsc();
-                if !last_sfsc.is_empty() {
-                    // we'll inject (into the queue) the last fsc cleared event so any user registered action can run
-                    Self::inject_event_sticky_fsc_cleared (last_sfsc)
-                }
+            self.sticky_first_stroke.store(fsc);
+            Cursors::instance().apply_sfsc();
+            if !last_sfsc.is_empty() {
+                // we'll inject (into the queue) the last fsc cleared event so any user registered action can run
+                Self::inject_event_sticky_fsc_cleared (last_sfsc)
             }
         }
     }
     /// this action is typically auto registered for combos that trigger latching fscs
-    pub(crate) fn activate_latching_fsc (&'static self, fsc:ComboHash) {
+    pub fn activate_latching_fsc (&'static self, fsc:ComboHash) {
         //println! ("activating latching fsc: {:?}", fsc);
         let last_lfsc = self.latching_first_stroke.get();
         if !last_lfsc.is_empty() {
             Self::inject_event_latching_fsc_cleared (last_lfsc)
         }
         self.latching_first_stroke.store(fsc);
-        Cursors::instance().apply_lfsc();
+
+        // we'll provide visual feedback via cursor colors/flashing
+        if self.sticky_first_stroke.is_empty() {
+            Cursors::instance().apply_lfsc();
+        } else {
+            Cursors::instance().apply_sfsc_w_lfsc_flash();
+        }
     }
 
 
     pub fn inject_event_sticky_fsc_cleared (fsc:ComboHash) {
         //println! ("injecting sticky fsc cleared action for : {:?}", fsc);
-        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
+        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
         // ^^ this will immediately call input-processor with this event .. which will lookup bindings for it ..
         // .. and if it has queued cb type bindings (as intended), those cbs will get sent to af-queue for in-order processing
     }
     pub fn inject_event_latching_fsc_cleared (fsc:ComboHash) {
         //println! ("injecting latching fsc cleared action for : {:?}", fsc);
-        InputProcessor::inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
+        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
     }
 
 
