@@ -16,8 +16,10 @@ use crate::utils::Cursors;
 
 
 pub type Key = KbdKey ;
+// ^^ meh, just sugar
 
-
+pub use utils::Hwnd;
+// ^^ re-exporting this to everyone, as we dont typically import utils::*
 
 
 # [ derive (Debug, Default) ]
@@ -48,8 +50,6 @@ impl Flag {
 
     pub fn is_set   (&self) -> bool {  self.0 .load (Ordering::Acquire) }
     pub fn is_clear (&self) -> bool { !self.0 .load (Ordering::Acquire) }
-
-
 
 }
 
@@ -189,17 +189,23 @@ pub struct Krusty {
     // we'll have a _private guard to allow direct instantiation from outside
     _private : (),
 
-    // KrustyState holds all state flags
+    /// KrustyState holds all state flags
     pub ks : &'static KrustyState,
 
-    // we'll have a combos map to register all combos (key + modifiers + modes) to their mapped actions
+    /// The CombosMap holds all registered combos (key + modifiers + modes) to their mapped actions
     pub cm : &'static CombosMap,
 
-    // we have the InputProcessor itself, which will hold the kbd/mouse bindings, combo-processing-af, the side-thread-queues
+    /// The InputProcessor holds the kbd/mouse bindings, combo-processing-af, the side-thread-queues.<br><br>
+    /// This will need to be started separately after setting up all the combos
     pub iproc : &'static InputProcessor,
 
-    // we'll also (optionally) listen to window-events like fgnd-win or fgnd-win-title change (to have fngd-win details pre-fetched)
+    /// WinEventsListener runs a listener for window-events like fgnd-win or fgnd-win-title change (to have fngd-win details pre-fetched) <br><br>
+    /// This will need to be started separately after setting up all the combos
     pub wel : &'static WinEventsListener,
+
+    /// The QuickBar by default provides the ui framework for the quick-bar (but the actual action-grid there should be populated later) <br><br>
+    /// This will need to be started separately after setting up all the combos
+    pub qb : &'static QuickBar,
 
 }
 
@@ -417,12 +423,14 @@ impl Krusty {
 
     /// create a new Krusty object (holds the KrustyState, the combos-map, and a registry of keys to do default-bindings on)
     pub fn new() -> Krusty {
+        let ks = KrustyState::instance();
         Krusty {
             _private : (),
-            ks    : KrustyState::instance(),
+            ks,
             cm    : CombosMap::instance(),
             iproc : InputProcessor::instance(),
             wel   : WinEventsListener::instance(),
+            qb    : QuickBar::instance(),
         }
     }
 
@@ -500,7 +508,10 @@ pub mod key_utils {
         let af = Arc::new(f);
         Arc::new ( move || {
             let af = af.clone();
-            thread::spawn ( move || { thread::sleep(Duration::from_millis(tms)); af() } );
+            thread::spawn ( move || {
+                thread::sleep (Duration::from_millis(tms));
+                af()
+            } );
     } ) }
 }
 

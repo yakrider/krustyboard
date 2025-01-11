@@ -19,6 +19,7 @@
 
 // then our sub-modules with folders (but no main module file) with shadowed module file in the folders (where useful)
 
+
 /// inputs .. keyboard-keys, mouse-btns/wheel/pointer, and binding/processing them
 pub mod inputs {
     // shadowed module file that we'll re-export from here
@@ -56,6 +57,7 @@ pub mod krusty {
     pub mod win_groups;
     pub mod win_hooks;
     pub mod system_tray;
+    pub mod quick_bar;
 
     // and our (selective or wholesale) sub-module re-exports
     pub use self::mod_keys::*;
@@ -69,6 +71,7 @@ pub mod krusty {
     pub use self::win_groups::*;
     pub use self::win_hooks::*;
     pub use self::system_tray::*;
+    pub use self::quick_bar::*;
 
 }
 

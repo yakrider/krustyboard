@@ -1,4 +1,4 @@
-
+#![ allow (non_snake_case) ]
 
 use std::ffi::c_void;
 use std::mem;
@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use once_cell::sync::Lazy;
 
 use windows::core::{PSTR, HSTRING, PCWSTR};
-use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle, TRUE, FALSE};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
@@ -87,6 +87,15 @@ pub fn win_set_fgnd (hwnd:Hwnd) { unsafe {
     SetForegroundWindow (hwnd);
 } }
 
+/// Of note, GetWindows only returns z-top, z-next etc of windows of SAME CLASS.
+/// So, this cant be used to get regular z-next when querying with topmost hwnd etc
+pub fn win_get_class_hwnd__z_next (hwnd:Hwnd) -> Hwnd { unsafe {
+    GetWindow (hwnd, GW_HWNDNEXT) .into()
+} }
+pub fn win_get_class_hwnd__z_first (hwnd:Hwnd) -> Hwnd { unsafe {
+    GetWindow (hwnd, GW_HWNDFIRST) .into()
+} }
+
 pub fn get_pointer_loc () -> POINT { unsafe {
     let mut point = POINT::default();
     GetCursorPos (&mut point);
@@ -161,6 +170,10 @@ pub fn win_check_minimized (hwnd:Hwnd) -> bool { unsafe {
 } }
 pub fn win_minimize (hwnd:Hwnd) { unsafe {
     ShowWindowAsync (hwnd, SW_MINIMIZE);
+} }
+pub fn win_set_anim_disabled (hwnd:Hwnd, disabled:bool) { unsafe {
+    let disabled : BOOL = if disabled { TRUE } else { FALSE };
+    let _ = DwmSetWindowAttribute (hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disabled as *const BOOL as *const _, size_of::<BOOL>() as _);
 } }
 pub fn win_get_placement (hwnd:Hwnd) -> WINDOWPLACEMENT { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();
@@ -384,6 +397,12 @@ fn win_get_hwnds_w_filt (filt_fn: WinEnumCb) -> Vec<Hwnd> { unsafe {
     drop(lock);
     hwnds
 } }
+pub fn win_get_switcher_hwnd__z_first () -> Option<Hwnd> {
+    win_get_switcher_filt_hwnds().first().copied()
+}
+pub fn win_get_switcher_hwnd__z_second () -> Option<Hwnd> {
+    win_get_switcher_filt_hwnds().get(1).copied()
+}
 
 pub fn win_get_switcher_filt_hwnds () -> Vec<Hwnd> {
     win_get_hwnds_w_filt (win_enum_cb_switcher_filt)

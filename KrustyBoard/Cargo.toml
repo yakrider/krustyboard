@@ -19,6 +19,10 @@ name = "krustyboard"
 path = "src/bin/krustyboard/krustyboard.rs"
 
 
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+
 [build-dependencies]
 winres = "0.1"
 
@@ -46,6 +50,9 @@ tray-icon = "0.19"
 tao = "0.30"
 global-hotkey = "0.6"
 colored = "2"
+eframe = "0.30.0"
+egui = "0.30.0"
+winit = "0.30.8"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.44"

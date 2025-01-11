@@ -12,7 +12,6 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, EVENT_SYSTEM_FOR
 
 
 use crate::*;
-use crate::utils::Hwnd;
 
 
 #[derive(Debug, Default)]
@@ -117,6 +116,7 @@ impl WinEventsListener {
             pid   : utils::get_pid_by_hwnd (hwnd),
             exe   : utils::get_exe_by_pid (utils::get_pid_by_hwnd (hwnd)) .unwrap_or("".into()),
         };
+        //println! ("fgnd: {:?}, exe: {:?}", hwnd, &fi_new.exe);
         *self.fgnd_info.write().unwrap() = fi_new;
     }
 

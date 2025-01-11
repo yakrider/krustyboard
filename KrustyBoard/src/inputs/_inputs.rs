@@ -26,7 +26,8 @@ use crate::*;
 pub use super::kbd_codes::KbdKey;
 
 /// representation for hotstrings that can be sent as a sequence of keys
-pub struct KeySequence (pub &'static str);
+//pub struct KeySequence (pub &'static str);
+pub struct KeySequence <'a> (pub &'a str);
 
 
 
@@ -214,9 +215,12 @@ fn send_keybd_input (key_code: u16, up_not_down:bool, sc_not_vk:bool) {
 
 
 
-impl KeySequence {
+impl KeySequence<'_> {
 
-    pub fn send(&self) {
+    pub fn send (&self) {
+        self.lag_send(20)
+    }
+    pub fn lag_send (&self, lag_ms:u64) {
         static UPPER_SYMBOLS: [char; 21] = [
             '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '{', '}', '|',
             ':', '"', '<', '>', '?', '~',
@@ -226,7 +230,7 @@ impl KeySequence {
                 let uppercase = c.is_uppercase() || UPPER_SYMBOLS.contains(&c);
                 if uppercase { KbdKey::LShift.press(); }
                 keybd_key.press();
-                sleep(Duration::from_millis(20));
+                sleep(Duration::from_millis(lag_ms));
                 keybd_key.release();
                 if uppercase { KbdKey::LShift.release(); }
             };

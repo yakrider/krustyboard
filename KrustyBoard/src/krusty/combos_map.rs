@@ -99,17 +99,17 @@ impl CombosMap {
     /// Registers a combo as a possible 'sticky-first-stroke-combo' (sfsc), and returns its combo-hash. <br>
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
     /// Note that sfscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid sfsc
-    pub fn register_combo_sticky_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
+    pub fn register_gen_combo_sticky_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
         let fsc = Combo::gen_fsc_hash(&cg);
-        self.setup_af_sticky_first_stroke (cg, fsc);
+        self.setup_af_sticky_first_stroke (fsc, cg);
         fsc
     }
     /// Co-Registers a possible first-stroke combo as an alternate for another sticky first-stroke with the combo-hash supplied
-    pub fn co_register_combo_sticky_first_stroke (&self, cg: impl Into<CG>, fsc:ComboHash) {
-        self.setup_af_sticky_first_stroke (cg.into(), fsc);
+    pub fn register_combo_sticky_first_stroke (&self, fsc:ComboHash, cg: impl Into<CG>) {
+        self.setup_af_sticky_first_stroke (fsc, cg.into());
     }
-    fn setup_af_sticky_first_stroke (&self, cg:CG, fsc:ComboHash) {
+    fn setup_af_sticky_first_stroke (&self, fsc:ComboHash, cg:CG) {
         let ks = cg.ks;
         let af = Arc::new ( move || ks.activate_sticky_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
@@ -133,17 +133,17 @@ impl CombosMap {
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
     /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered <br>
     /// Note also that any AF desired on fsc activation, can ofc be separately added as another regular combo
-    pub fn register_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
+    pub fn register_gen_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
         let fsc = Combo::gen_fsc_hash(&cg);
-        self.setup_af_latching_first_stroke (cg,fsc);
+        self.setup_af_latching_first_stroke (fsc, cg);
         fsc
     }
     /// Co-Registers a possible first-stroke combo as an alternate for another latching first-stroke with the combo-hash supplied
-    pub fn co_register_combo_latching_first_stroke (&self, cg: impl Into<CG>, fsc:ComboHash) {
-        self.setup_af_latching_first_stroke (cg.into(), fsc);
+    pub fn register_combo_latching_first_stroke (&self, fsc:ComboHash, cg: impl Into<CG>) {
+        self.setup_af_latching_first_stroke (fsc, cg.into());
     }
-    fn setup_af_latching_first_stroke (&self, cg:CG, fsc:ComboHash) {
+    fn setup_af_latching_first_stroke (&self, fsc:ComboHash, cg:CG) {
         let ks = cg.ks;
         let af = Arc::new ( move || ks.activate_latching_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
