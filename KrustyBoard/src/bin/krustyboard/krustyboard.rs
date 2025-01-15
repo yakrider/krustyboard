@@ -1,7 +1,7 @@
 #![ allow (non_camel_case_types, non_snake_case, non_upper_case_globals, unused_doc_comments) ]
 
 
-mod qb_grid;
+mod qbar_grid;
 // ^^ The actual set-up of the action-grid for the quick-bar is separated into its own file
 
 use std::{time::Duration, thread, sync::{Arc}, sync::atomic::Ordering};
@@ -2595,14 +2595,21 @@ fn setup_quick_bar (k:&Krusty) {
 
 
     // and we'll set the same trigger to also bring up the quick-bar
-    let sw_snap_af = ag().k(F15).m(lalt).m(lshift).gen_af();
     let trigger_af = Arc::new ( move || {
         // since this rel will override the normal lbtn-rel, we'll do any mouse cleanup right here
-        if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
-        // we'll also send out a snapshot refresh req to switche (in case we do blind switching from quickbar)
-        sw_snap_af();
+        if ks.mouse.lbtn.active.is_set() {
+            ks.mouse.lbtn.active.clear();
+            LeftButton.release()
+        }
         // then just popup the bar itself .. (and open it w/o the persist flag)
-        qb.show(false);
+        if !qb.is_visible() {
+            qb.show(false);
+        }
+        else if qb.is_persistent() {
+            // if it was already visible and persisting, we'll re-open at the new location, but w/o persist flag
+            qb.hide(true);   // force hide
+            qb.show(false);  // re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
+        }
     } );
     //k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc),  ag().af (trigger_af) );
     k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc_pre),  ag().af (trigger_af) );
@@ -2645,7 +2652,6 @@ fn setup_quick_bar (k:&Krusty) {
     let persist_af = Arc::new ( move || {
         qb.show(true);              // the bool param is the persist flag
         ks.clear_cur_sticky_fsc();  // after that we can clear out fsc
-
     } );
     k.cm .add_combo ( cg().mbtn(X2Button) .fsc(fsc),  ag().af (persist_af) );
 
@@ -2656,9 +2662,17 @@ fn setup_quick_bar (k:&Krusty) {
     k.cm .add_combo ( cg().whl().bkwd().fsc(fsc),  ag().whl().bkwd().mkg_nw() );
     k.cm .add_combo ( cg().whl().frwd().fsc(fsc),  ag().whl().frwd().mkg_nw() );
 
-    // and now lets populate the qbar with our action-grid and bar dims (dpi-aware)
-    k.qb .set_dims ( QbarDims::xy (280, 120) );    // for 4x3 grid
-    k.qb .set_grid ( qb_grid::build_qbar_action_grid (k) );
+    // ugh, and to support our hacky way to drag qb (given doing drag while qb has focus is laggy) ..
+    // .. we'll have to manage drag-state ourselves upon lbtn release
+    let c_drag : ComboCond = Arc::new ( |_,_| qb.is_drag_active() );
+    let end_drag = Arc::new (move || {
+        qb.set_dragging(false);
+        if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
+    } );
+    k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(c_drag),  ag().af (end_drag) );
+
+    // and now lets populate the qbar with our action-grid
+    k.qb .set_grid_provider ( qbar_grid::build_grid_provider(k) );
 
 }
 

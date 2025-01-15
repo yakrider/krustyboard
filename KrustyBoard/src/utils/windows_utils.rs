@@ -215,7 +215,7 @@ pub fn win_fgnd_move_rel (dx:i32, dy:i32) { unsafe {
 } }
 pub fn win_fgnd_move_to (x:i32, y:i32, w:i32, h:i32) { win_move_to (win_get_fgnd(), x, y, w, h) }
 pub fn win_move_to (hwnd:Hwnd, x:i32, y:i32, width:i32, height:i32) { unsafe {
-    MoveWindow (hwnd, x, y, width, height, true);    // the bool param at end flags whether to repaint or not
+    MoveWindow (hwnd, x, y, width, height, false);    // the bool param at end flags whether to repaint or not
 } }
 
 pub fn win_find_by_win_class (cls:&str) -> Hwnd { unsafe {

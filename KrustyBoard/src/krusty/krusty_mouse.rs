@@ -360,15 +360,16 @@ fn check_wheel_spaced (whl:&MouseWheelState, ev:&Event) -> bool {
 
 pub fn setup_mouse_move_handling (k:&Krusty) {
     use crate::EventDat::*;
-    let ks = k.ks;
+    let (ks, qb) = (k.ks, k.qb);
     k.iproc.input_bindings .bind_pointer_event ( EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Continue, ComboProc_Disable),
         cb: EvCbFn_Queued ( Arc::new ( move |ev| {
-            if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
-                ks.mod_keys.lwin.consumed.set();
-                if let pointer_event { x_pos, y_pos, .. } = ev.dat {
-                    handle_lwin_mouse_drag (x_pos, y_pos, ks)
-            } }
+            if ks.mouse.lbtn.down.is_set() {
+                if ks.mod_keys.lwin.down.is_set() || qb.is_drag_active() {
+                    ks.mod_keys.lwin.consumed.set();
+                    if let pointer_event { x_pos, y_pos, .. } = ev.dat {
+                        handle_lwin_mouse_drag (x_pos, y_pos, ks)
+            } } }
         } ) ),
     } );
 }

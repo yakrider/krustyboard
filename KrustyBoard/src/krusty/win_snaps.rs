@@ -152,7 +152,7 @@ pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:KSR) {
         return
     }
     // pointer move events stream much faster than reasonable to repaint for smooth perf .. so we'll redraw only for a fraction
-    if rand::thread_rng() .gen_range (0..10) < 8 {
+    if rand::thread_rng() .gen_range (0..10) < 7 {
         handle_pointer_window_drag (x, y, ks)
     }
 }

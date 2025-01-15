@@ -1,8 +1,9 @@
 #![ allow (non_snake_case) ]
 
 
-use std::sync::RwLock;
 use std::thread::spawn;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicIsize, Ordering};
 use once_cell::sync::OnceCell;
 
 use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND};
@@ -26,6 +27,7 @@ pub struct FgndInfo {
 pub struct WinEventsListener {
     pub is_hooked : Flag,
     pub fgnd_info : RwLock <FgndInfo>,
+        self_hwnd : AtomicIsize,
 }
 
 
@@ -37,6 +39,7 @@ impl WinEventsListener {
             WinEventsListener {
                 is_hooked : Flag::default(),
                 fgnd_info : RwLock::new ( FgndInfo::default() ),
+                self_hwnd : AtomicIsize::default(),
             }
             // in theory, we could setup-hooks here before returning, but we'll instead let user-code do that, e.g. based on configs
         } )
@@ -91,7 +94,13 @@ impl WinEventsListener {
         }
     }
 
-    fn _stamp (&self) -> u128 { std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap().as_millis() }
+    fn _stamp (&self) -> u128 {
+        std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap().as_millis()
+    }
+
+    pub fn record_self_hwnd (&self, hwnd:Hwnd) {
+        self.self_hwnd.store (hwnd.0, Ordering::Relaxed)
+    }
 
     fn proc_win_report__title_changed (&'static self, hwnd:Hwnd) {
         //println! ("@{:?} title-changed: {:?}", self._stamp(), hwnd);
@@ -109,6 +118,10 @@ impl WinEventsListener {
         if fi.hwnd == hwnd { fi.title = utils::get_win_title(hwnd); }
     }
     fn update_fgnd_info (&'static self, hwnd:Hwnd) {
+        // we're going to filter out ourselves (if an hwnd has been stored for us)
+        if hwnd == Hwnd (self.self_hwnd.load(Ordering::Relaxed)) {
+            return
+        }
         let fi_new = FgndInfo {
             hwnd,
             title : utils::get_win_title (hwnd),

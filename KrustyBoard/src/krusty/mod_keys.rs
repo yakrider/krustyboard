@@ -420,22 +420,19 @@ impl KeyHandling for ModKey_Doubled {
 
     fn handling_type(&self) -> ModKey_Mgmt { ModKey_Mgmt::MK_Mgmt_Doubled }
 
-    fn handle_key_down (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
+    fn handle_key_down (&self, bmk:&'static UnifModKey, _:KSR) -> EvProc_Ds {
         if bmk.dbl_tap.is_set() {
-            bmk.active.set();
-            EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
-        } else {
-            EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
+            bmk.active.set(); bmk.consumed.clear();
+            bmk.mk.key().press();
         }
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
-    fn handle_key_up (&self, bmk:&UnifModKey, _:KSR) -> EvProc_Ds {
+    fn handle_key_up (&self, bmk:&'static UnifModKey, _:KSR) -> EvProc_Ds {
         if bmk.active.is_set() {
-            bmk.active.clear();
-            EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
-        } else {
-            EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
+            bmk.release_w_masking();
         }
+        EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
     }
 
 }
@@ -597,7 +594,8 @@ impl UnifModKey {
             self.active.set();
             return EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
         }
-        if self.down.is_set() {     // repeats are blocked w/o further processing
+        let repeat = if let EventDat::key_event {is_repeat, ..} = ev.dat { is_repeat } else { false };
+        if repeat || self.down.is_set() {     // repeats are blocked w/o further processing
             return EvProc_Ds::new (EvProp_Stop, ComboProc_Disable)
         }
         //println!("mod new DOWN : {:?}, inj: {:?}",ev.key, ev.injected);
