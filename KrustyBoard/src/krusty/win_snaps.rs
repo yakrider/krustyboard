@@ -64,7 +64,14 @@ impl Bounds {
 }
 
 
-fn handle_pointer_window_drag (x:i32, y:i32, ks:KSR) {
+fn handle_pointer_window_drag (xt:i32, yt:i32, ks:KSR) {
+
+    // we'll always try to drag/move to the cur pointer location .. (instead of when the pointer was when queued)
+    // .. this makes things snappier and avoids the drag lag when queues start getting longer
+    let POINT {x, y} = get_pointer_loc();
+    // and we'll short circuit if we're already there (esp at the end), but really it doesnt really matter either way
+    if xt == x && yt == y { return }
+
     // we'll have saved mouse loc on win-lclick, so we can reference that on where/how to move the window
     let wsd = ks.win_snap_dat.read().unwrap();    // we'll hold this read-lock until this fn exits .. should be ok
 
@@ -152,9 +159,9 @@ pub fn handle_pointer_window_drag_spaced (x:i32, y:i32, ks:KSR) {
         return
     }
     // pointer move events stream much faster than reasonable to repaint for smooth perf .. so we'll redraw only for a fraction
-    if rand::thread_rng() .gen_range (0..10) < 7 {
-        handle_pointer_window_drag (x, y, ks)
-    }
+    //if rand::thread_rng() .gen_range (0..10) < 7 { handle_pointer_window_drag (x, y, ks) }
+    // ^^ no longer necessary since we've started dragging to cur pointer loc regardless of what was queued!
+    handle_pointer_window_drag (x, y, ks);
 }
 
 

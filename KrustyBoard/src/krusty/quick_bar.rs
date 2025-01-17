@@ -8,14 +8,35 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use derive_deref::Deref;
 use once_cell::sync::{Lazy, OnceCell};
 use eframe::emath::{pos2, Rect, vec2};
-use eframe::epaint::Color32;
-use egui::{Align2, FontFamily, FontId, PointerButton, Pos2, ViewportBuilder};
+use eframe::epaint::{Color32, Vec2};
+use egui::{Align2, Context, FontFamily, FontId, PointerButton, Pos2, TextureHandle, ViewportBuilder};
 use tao::rwh_06::{HasWindowHandle, RawWindowHandle};
 
 use windows::Win32::Foundation::{POINT};
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_NOZORDER, SWP_NOMOVE, SWP_ASYNCWINDOWPOS, SW_SHOWNOACTIVATE};
 
 use crate::*;
+use crate::utils::{win_get_fgnd, win_redraw};
+
+
+
+
+#[derive (Clone)]
+pub struct Icon {
+    txh     : TextureHandle,
+    sz_hint : Vec2,
+}
+
+impl Icon {
+    pub fn load (ctx: &Context, name:&str, sz_hint:Vec2, incd_file: &include_dir::File) -> Option<Icon> {
+        if let Ok(img) = image::load_from_memory (incd_file.contents()) .map (|im| im.to_rgba8()) {
+            let (width, height) = img.dimensions();
+            let img = egui::ColorImage::from_rgba_unmultiplied ([width as usize, height as usize], &img);
+            let txh = ctx.load_texture (name, img, Default::default());
+            Some ( Icon { txh, sz_hint } )
+        } else { None }
+    }
+}
 
 
 
@@ -25,7 +46,8 @@ use crate::*;
 /// The order of reporting for clicks seems to be .. press -> release -> click <br>
 /// (Note ofc that there are many other egui reported interactions that we're not ignoring here)
 pub struct ActionCell {
-    pub label : String,
+    pub label         : String,
+    pub icon          : Option<Icon>,
     pub on_wheel_bkwd : AF,
     pub on_wheel_frwd : AF,
     pub on_hover      : AF,
@@ -36,7 +58,8 @@ pub struct ActionCell {
 }
 impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
-        label : "".to_string(),
+        label         : "".to_string(),
+        icon          : None,
         on_wheel_bkwd : Arc::new (|| {}),
         on_wheel_frwd : Arc::new (|| {}),
         on_hover      : Arc::new (|| {}),
@@ -87,7 +110,7 @@ impl ActionGrid {
 }
 
 
-#[derive (Copy, Clone)]
+#[derive (Copy, Clone, Eq, PartialEq)]
 pub struct CellDims { pub width: u32, pub height: u32 }
 
 impl Default for CellDims {
@@ -101,7 +124,7 @@ impl CellDims {
 }
 
 
-#[derive (Copy, Clone)]
+#[derive (Copy, Clone, Eq, PartialEq)]
 pub struct GridDims { pub rows: u8, pub cols: u8 }
 
 impl Default for GridDims {
@@ -116,7 +139,9 @@ impl GridDims {
 
 
 
-pub type GetGridFn = Arc <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
+pub type GetGridBuilderFn = Box <dyn Fn (&Context) -> GetGridFn + Send + Sync + 'static>;
+
+pub type GetGridFn = Box <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
 
 pub struct QuickBarDat {
 
@@ -124,15 +149,24 @@ pub struct QuickBarDat {
     persist  : Flag,
     dragging : Flag,
 
-    // dims and grid_provider to be populated by user at combos setup
-    get_grid : Arc <Mutex <GetGridFn>>,
-
     // we'll acquire ks ref at init
     ks : &'static KrustyState,
 
     // we'll grab hwnd and ctx when the bar comes up
-    ctx  : Arc <Mutex <Option <egui::Context>>>,
+    ctx  : Arc <Mutex <Option <Context>>>,
     hwnd : AtomicIsize,
+
+    // to get the grid-provider, we'll need to pass the egui context (upon egui start)
+    // (which can then be used to preload textures into the ctx etc)
+    // .. so we'll let users register a grid-provider-builder fn that we'll call then
+    get_grid_builder : Arc <Mutex <Option <GetGridBuilderFn>>>,
+
+    // and so thatd return a grid_provider which we'll store and use at rendering time
+    // (this is called at render-time .. we're gonna even forgo option wrapping here)
+    get_grid : Arc <Mutex <GetGridFn>>,
+
+    // and finally we'll keep a flag on when the update fn might need to refresh grid (coz fgnd change etc)
+    refresh_grid : Flag,
 
 }
 
@@ -144,23 +178,31 @@ pub struct QuickBar ( Arc <QuickBarDat> );
 impl QuickBar {
 
     pub fn instance () -> &'static QuickBar {
-        let ag_empty : Arc<ActionGrid> = Arc::default();
+
+        // we'll prep a default get-grid fn that returns an empty grid
+        // (instead of having the get-gird be option wrapped just for init purposes)
+        let gg_empty : Arc<ActionGrid> = Arc::default();
+
         static INSTANCE: OnceCell<QuickBar> = OnceCell::new();
         INSTANCE .get_or_init ( ||
             QuickBar ( Arc::new ( QuickBarDat {
                 visible  : Flag::default(),
                 persist  : Flag::default(),
                 dragging : Flag::default(),
-                get_grid : Arc::new ( Mutex::new ( Arc::new (move || ag_empty.clone()))),
+
                 ks       : KrustyState::instance(),
                 ctx      : Arc::new (Mutex::new (None)),
                 hwnd     : AtomicIsize::default(),
+
+                get_grid_builder : Arc::new ( Mutex::new ( None ) ),
+                get_grid         : Arc::new ( Mutex::new ( Box::new (move || gg_empty .clone()))),
+                refresh_grid     : Flag::default(),
             } ) )
         )
     }
 
-    pub fn set_grid_provider (&self, gpfn: GetGridFn) {
-        *self.get_grid.lock().unwrap() = gpfn;
+    pub fn set_grid_provider_builder (&self, gpbfn: GetGridBuilderFn) {
+        *self.get_grid_builder.lock().unwrap() = Some (gpbfn);
     }
 
     pub fn set_dragging (&self, state:bool) {
@@ -228,7 +270,7 @@ impl QuickBar {
         unsafe {
             ShowWindow (hwnd, SW_RESTORE);
             ShowWindow (hwnd, SW_SHOWNOACTIVATE);
-            self.defocus();
+            //self.defocus();
         }
 
         // and to move it to the right location .. (and this must come after un-minimize for the move to work)
@@ -251,8 +293,30 @@ impl QuickBar {
 
             // ugh, this thing has the same issue as tray-icon re the ui event loop not waking until next mouse-motion
             // so we'll just trigger one instead .. (no obvious way to do the event proxy soln here like for tray)
-            key_utils::delayed_action (30, || MousePointer::move_rel(1,0))();
+            //key_utils::delayed_action (30, || MousePointer::move_rel(1,0))();
+            // ^^ meh, we'd rather just directly request a redraw on the hwnd
+            //windows_utils::win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
+            // ^^ todo .. huh check if actually is needed .. forgot what exactly wasnt updating etc
         }
+    }
+
+    pub fn handle_fgnd_change (&self) {
+        self.refresh_grid.set();
+        //if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
+        //    ctx.request_repaint();
+        //}
+        // ^^ not adequate as wont actually wake up ui-event-loop
+
+        //if let Some(ev_proxy) = self.ev_proxy.lock().unwrap().as_ref() {
+        //    let _ = ev_proxy.send_event ( eframe::UserEvent::RequestRepaint {
+        //        viewport_id: ctx.viewport_id(), when: Instant::now(), cumulative_pass_nr: 0
+        //    } );
+        //}
+        // ^^ didnt do nothing, despite registering a set_request_repaint_callback as it wanted us to do ¯\_(ツ)_/¯
+
+        // we we're again gonna fall back to windows native to kick the window itself .. oh well
+        win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
+
     }
 
     fn resize (&self, grid: &ActionGrid) { unsafe {
@@ -292,11 +356,12 @@ impl QuickBar {
         // ^^ only the last one there works reasonably enough .. (due to overlays, topmost vs regular groups etc etc)
 
         let qb_hwnd = Hwnd ( self.hwnd.load(Ordering::Acquire) );
-        if let Some(zsec) = utils::win_get_switcher_hwnd__z_second() {
-            //dbg! ((qb_hwnd.0, fgnd.0, zsec.0));
-            if zsec != qb_hwnd { utils::win_set_fgnd(zsec) }
+        if win_get_fgnd() == qb_hwnd {
+            if let Some(zsec) = utils::win_get_switcher_hwnd__z_second() {
+                //dbg! ((qb_hwnd.0, win_get_fgnd().0, zsec.0));
+                if zsec != qb_hwnd { utils::win_set_fgnd(zsec) }
+            }
         }
-
     }
 
     fn kick_win_key_rehab (&self) {
@@ -355,27 +420,46 @@ impl QuickBar {
                     .with_position (pos2 (-1.0 * grid.grid_px_sz().width as f32, 0.0)),
                     // ^^ helps keep it offscreen (since setting visible false didnt keep it hidden at startup)
 
-                event_loop_builder: Some (Box::new(|builder| {
+                event_loop_builder: Some (Box::new (|builder| {
                     use winit::platform::windows::EventLoopBuilderExtWindows;
                     builder.with_any_thread(true);
                 })),
                 ..Default::default()
             };
 
+
             let app = || Box::new(self.clone());
             let _ = eframe::run_native (
                 "QuickBar",
                 options,
                 Box::new ( |cc| {
+
+                    // install image loaders for image support
+                    egui_extras::install_image_loaders(&cc.egui_ctx);
+
+                    // we also want to grab/store the ctx
+                    *self.ctx.lock().unwrap() = Some (cc.egui_ctx.clone());
+
+                    // and we can use the ctx to call the configured grid-provider builder ..
+                    // .. which will preload any icons, and generate the grid-provider for us
+                    if let Some(ggfn) = self.get_grid_builder.lock().unwrap().as_ref() {
+                        *self.get_grid.lock().unwrap() = ggfn (&cc.egui_ctx);
+                    }
+
+                    // and the grab/store the hwnd as well
                     let Ok(h) = cc.window_handle() else { return Ok(app()) };
                     let RawWindowHandle::Win32(hr) = h.as_raw() else { return Ok(app()) };
                     self.hwnd.store (hr.hwnd.into(), Ordering::Relaxed);
                     WinEventsListener::instance().record_self_hwnd(Hwnd(hr.hwnd.into()));
+
+                    // and tweak our quick-bar window a bit too
                     utils::win_set_anim_disabled (Hwnd(hr.hwnd.into()), true);
                     thread::spawn ( move || {
                         thread::sleep (Duration::from_millis(20));
                         self.hide(true);
                     } );
+
+                    // and finally we can let things start
                     Ok (app())
                 } )
             );
@@ -392,12 +476,11 @@ impl eframe::App for QuickBar {
 
     fn update (&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
-        if self.ctx.lock().ok() .is_some_and (|o| o.is_none()) {
-            *self.ctx.lock().unwrap() = Some (ctx.clone());
-        }
-        if self.visible.is_clear() {
-            return
-        }
+        //if self.visible.is_clear() {
+        //    // shouldnt be necessary, but was here when hiding alone was causing high cpu usage ..
+        //    // .. which was resolved by first minimizing then hiding (as they seem to check for minimized explicitly)
+        //    return
+        //}
 
         // we'll simulate 'mouse-leave' on a cell by tracking last-hovered cell and comparing with cur-hc
         // (and e.g. we'll use the hover-end on the ctrl-tab cell to release the ctrl)
@@ -412,18 +495,23 @@ impl eframe::App for QuickBar {
         // we also allow dynamically updating the grid based on fgnd context, so we'll want to cache a grid ref for cur painting ..
         // then if the grid changes, we'll pick up the change in the next repaint
         static mut grid_s : OnceCell <Arc <ActionGrid>> = OnceCell::new();
-        let grid = unsafe { grid_s .get_or_init (||  self.get_grid.lock().expect("grid isnt setup").as_ref()()) .clone() };
-
-        let update_grid_s = || unsafe {
+        let grid = unsafe {
+            grid_s .get_or_init (||  self.get_grid.lock().expect("grid isnt setup").as_ref()()) .clone()
+        };
+        // and if the refresh-grid flag is set (typically due to fgnd change), we'll requery and update to a new grid
+        if self.refresh_grid.is_set() { unsafe {
+            self.refresh_grid.clear();
             if let Some(grid) = grid_s.get_mut() {
                 let new_grid = self.get_grid.lock().unwrap().as_ref()();
                 if !Arc::ptr_eq (grid, &new_grid) {
-                    self.resize(&new_grid);
+                    if grid.grid_sz != new_grid.grid_sz || grid.cell_sz != new_grid.cell_sz {
+                        self.resize(&new_grid);
+                    }
                     *grid = new_grid;
                     ctx.request_repaint();
                 }
             }
-        };
+        } }
 
         egui::CentralPanel::default()
             .frame ( egui::Frame::none().outer_margin (egui::Margin::same(ActionGrid::OUTER_MARGIN as f32)) )
@@ -440,27 +528,33 @@ impl eframe::App for QuickBar {
                     let cur_hc = &grid.grid[row as usize][col as usize];
 
                     // allocate the cell
-
-                    let rect = Rect::from_min_size (
-                        pos2 ( ActionGrid::OUTER_MARGIN as f32 + col as f32 * grid.cell_sz.width as f32,
-                               ActionGrid::OUTER_MARGIN as f32 + row as f32 * grid.cell_sz.height as f32 ),
-                        vec2 ( grid.cell_sz.width as f32, grid.cell_sz.height as f32 ),
+                    let cpos = pos2 (
+                        ActionGrid::OUTER_MARGIN as f32 + col as f32 * grid.cell_sz.width as f32,
+                        ActionGrid::OUTER_MARGIN as f32 + row as f32 * grid.cell_sz.height as f32
                     );
+                    let csz = vec2 (grid.cell_sz.width as f32, grid.cell_sz.height as f32);
+                    let rect = Rect::from_min_size (cpos, csz);
 
-                    let cell = ui.allocate_rect(rect, egui::Sense::click());
+                    let cell = ui.allocate_rect (rect, egui::Sense::click());
 
                     ui.painter().rect_filled ( rect, 0.0,
                         if cell.hovered() { Color32::from_gray(60) } else { Color32::from_gray(20) },
                     );
 
-                    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_gray(120)) );
+                    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_gray(100)) );
                     // ^^ adds the border between cells that makeup the grid
 
-                    ui.painter() .text (
-                        rect.center(), Align2::CENTER_CENTER, cur_hc.label.clone(),
-                        FontId::new (12.0, FontFamily::Proportional),
-                        Color32::from_rgb (0, 255, 255),    // text in aqua
-                    );
+                    if let Some(ico) = cur_hc.icon.as_ref() {
+                        let ico_pos = pos2 ( cpos.x + (csz.x - ico.sz_hint.x)/2.0, cpos.y + (csz.y - ico.sz_hint.y)/2.0 );
+                        let im_rect = Rect::from_min_size (ico_pos, ico.sz_hint);
+                        egui::Image::from_texture (&ico.txh) .paint_at (ui, im_rect);
+                    } else {
+                        ui.painter() .text (
+                            rect.center(), Align2::CENTER_CENTER, cur_hc.label.clone(),
+                            FontId::new (12.0, FontFamily::Proportional),
+                            Color32::from_rgb (0, 255, 255),    // text in aqua
+                        );
+                    }
 
                     if cell.hovered() {
                         // we'll eval hover-end using last stashed hover-cell id
@@ -471,14 +565,11 @@ impl eframe::App for QuickBar {
                                 lhc.hover_end_fn();
                                 self.defocus();
                                 // ^^ we never want focus .. faster we get rid, the better
-                                update_grid_s();
-                                // ^^ want dyanmic grid, but every frame is too much, so we check on hover events
                             }
                         } else {
                             //println! ("hover-start .. cur: {:?}", &cur_hc.label);
                             cur_hc.hover_fn();
                             self.defocus();
-                            update_grid_s();
                         }
                         unsafe { hov_cell = Some (cur_hc.clone()) };
                     }

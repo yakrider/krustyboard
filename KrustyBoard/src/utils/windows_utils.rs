@@ -10,6 +10,7 @@ use once_cell::sync::Lazy;
 use windows::core::{PSTR, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle, TRUE, FALSE};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED};
+use windows::Win32::Graphics::Gdi::{HRGN, RDW_INTERNALPAINT, RedrawWindow};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
@@ -203,6 +204,9 @@ pub fn win_toggle_maximize (hwnd:Hwnd) { unsafe {
 
 } }
 
+pub fn win_redraw (hwnd:Hwnd) { unsafe {
+    let _ = RedrawWindow ( hwnd, None, HRGN::default(), RDW_INTERNALPAINT );
+} }
 
 
 pub fn set_cursor (cursor_style:PCWSTR) { unsafe {
@@ -313,12 +317,14 @@ pub fn win_fgnd_min () { unsafe {
     //ShowWindowAsync (hwnd, SW_MINIMIZE);
     win_minimize (Hwnd(hwnd.0));
 } }
-pub fn win_fgnd_min_and_back () { unsafe {
-    let hwnd = GetForegroundWindow();
+pub fn win_fgnd_min_and_back () {
+    win_min_and_back (win_get_fgnd())
+}
+pub fn win_min_and_back (hwnd:Hwnd) {
     //PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
-    win_minimize (Hwnd(hwnd.0));
-    win_send_to_back (Hwnd(hwnd.0));
-} }
+    win_minimize (hwnd);
+    win_send_to_back (hwnd);
+}
 
 
 

@@ -1,19 +1,101 @@
 use std::sync::Mutex;
 use std::time::Instant;
+
 use once_cell::sync::{Lazy, OnceCell};
+use egui::{Context, Vec2};
+use include_dir::{include_dir, Dir};
+
 use crate::*;
 
 
 
-pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
+// we'll include all the icons in our 'assets' dir
+static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
+
+
+struct Icons {
+    _private : (),
+    bright     : Option <Icon>,
+    volume     : Option <Icon>,
+    tracks     : Option <Icon>,
+    scrub      : Option <Icon>,
+    switche    : Option <Icon>,
+    sw_blind   : Option <Icon>,
+    tabs       : Option <Icon>,
+    tabs_blind : Option <Icon>,
+    refresh    : Option <Icon>,
+    min_back   : Option <Icon>,
+    arrows     : Option <Icon>,
+    diff       : Option <Icon>,
+    darken_pg  : Option <Icon>,
+    darken_im  : Option <Icon>,
+}
+
+
+fn load_icons (ctx: &Context) -> Icons {
+
+    let load = |id: &str, src: &str, width: u32, height: u32| {
+        let sz_hint = Vec2::new (width as f32, height as f32);
+        ASSETS.get_file (src) .and_then (|f| Icon::load (ctx, id, sz_hint, f))
+    };
+
+    Icons {
+        _private :  (),
+        bright     :  load ( "brightness",  "brightness-01.png",  24,  24 ),
+        volume     :  load ( "volume",      "volume-01.png",      18,  18 ),
+        tracks     :  load ( "play-pause",  "play-pause-01.png",  16,  16 ),
+        scrub      :  load ( "scrub-fwd",   "scrub-fwd-01.png",   18,  18 ),
+        switche    :  load ( "switche",     "switche-01.png",     18,  18 ),
+        sw_blind   :  load ( "sw-blind",    "sw-blind-01.png",    28,  16 ),
+        tabs       :  load ( "tabs",        "tabs-03.png",        26,  14 ),
+        tabs_blind :  load ( "tabs-blind",  "tabs-blind-03.png",  36,  16 ),
+        refresh    :  load ( "refresh",     "refresh-01.png",     16,  16 ),
+        min_back   :  load ( "min_back",    "min-back-03.png",    20,  20 ),
+        arrows     :  load ( "arrows",      "arrows-01.png",      20,  20 ),
+        diff       :  load ( "diff",        "diff-02-h40-2.png",  30,  20 ),
+        darken_pg  :  load ( "darken_pg",   "darken-pg-03-2.png", 36,  24 ),
+        darken_im  :  load ( "darken_im",   "darken-im-03.png",   36,  24 ),
+    }
+
+}
+
+
+/*
+    - notes on why the convoluted steps of registering/passing the GetGrid and GetGridBuilder Fns ..
+        - loading textures in egui requires ctx, which we only get on starting app .. by which time, we'd want to have the grid ready
+        - alt. could try to load just the image data, and try and load image from bytes on update fn .. but thats slower/sucky too
+        - or for the option of directly loading using their macros, requires that they get actual literal string for path-names .. ughh)
+    - sooo
+        - we'll want to call here to load icons right at egui startup callback ..
+        - and for that we'll want to register a icon-loader fn with qbar
+        - but also, we were already registering a grid-provider produced by a grid-prov-builder fn (that we called at setup time)
+        - but now, we want that to be built only AFTER icons have been loaded (to avoid having to mutex guard them if writing later)
+        - so then, we'd want to now have the grid-prov-builder have ctx be passed in ..
+            - that'd mean we register the grid-prov-b, then qbar would only call that when ctx available
+            - and in there, we'd use the ctx to load icons etc
+            - and then itd return the actual grid-provider, which would then be saved for actual render time usage
+    - (and ofc, this complication is mostly coz we wanted to keep the separation between core/lib and user-conf combo/grid/icons sections)
+ */
+
+//.. copied for ref :
+// pub type GetGridBuilderFn = Arc <dyn Fn (egui::Context) -> GetGridFn + Send + Sync + 'static>;
+// pub type GetGridFn = Arc <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
+
+
+
+pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     use { KbdKey::*, ModKey::*};
 
-    let (ks, wel, qb) = (k.ks, k.wel, k.qb);
+    let (ks, wel, qb) = (KrustyState::instance(), WinEventsListener::instance(), QuickBar::instance());
 
+    let icons = load_icons (ctx);
+
+    let cell_sz = CellDims::new (48,26);
 
     let cell = ActionCell {
         label : "Volume".into(),
+        icon  : icons.volume.clone(),
         on_wheel_bkwd : ag().k(VolumeDown).gen_af(),    // vol down
         on_wheel_frwd : ag().k(VolumeUp  ).gen_af(),    // vol up
         on_click      : ag().k(VolumeMute).gen_af(),    // mute
@@ -26,6 +108,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Tracks".to_string(),
+        icon  : icons.tracks.clone(),
         on_wheel_bkwd : media_next_action (ks, true),                  // next track
         on_wheel_frwd : media_next_action (ks, false),                 // prev track
         on_click      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
@@ -38,6 +121,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Scrub".to_string(),
+        icon  : icons.scrub.clone(),
         on_wheel_bkwd : media_skips_action (1, ks, true),              // skip fwd  on track-bar
         on_wheel_frwd : media_skips_action (1, ks, false),             // skip bkwd on track-bar
         on_click      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
@@ -103,6 +187,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Switche".to_string(),
+        icon  : icons.switche.clone(),
         on_wheel_bkwd : ag().af(sw_wh_af()).gen_af(),    // invoke switche
         on_wheel_frwd : ag().af(sw_wh_af()).gen_af(),    // invoke switche
         on_release    : ag().af(sw_release).gen_af(),    // activate switche selection
@@ -143,15 +228,16 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Switche Blind".to_string(),
+        icon  : icons.sw_blind.clone(),
         on_wheel_bkwd : init_af (true ),               // next window
         on_wheel_frwd : init_af (false),               // prev window
         on_hover_end  : hov_end,                       // clear refreshed flag
         on_click      : ag().k(F4).m(lalt).gen_af(),   // close tab
         ..Default::default()
     };
-    static _switche_blind : OnceCell < Arc < ActionCell>> = OnceCell::new();
-    let switche_blind = _switche_blind .get_or_init ( move || { Arc::new (cell) } );
-    let switche_blind = || switche_blind.clone();
+    static _switche_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    let switche_bl = _switche_bl .get_or_init ( move || { Arc::new (cell) } );
+    let switche_bl = || switche_bl.clone();
 
 
 
@@ -177,6 +263,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     };
     let cell = ActionCell {
         label : "Tabs".to_string(),
+        icon  : icons.tabs.clone(),
         on_wheel_bkwd : tabs_wh_af (ks, true ),          // ctrl-tab
         on_wheel_frwd : tabs_wh_af (ks, false),          // ctrl-shift-tab
         on_hover_end  : tabs_hover_end_af,               // ensure ctrl inactive
@@ -190,14 +277,15 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Tabs Blind".to_string(),
+        icon  : icons.tabs_blind.clone(),
         on_wheel_bkwd : ag().k(PageDown).m(ctrl).gen_af(),   // tab next
         on_wheel_frwd : ag().k(PageUp  ).m(ctrl).gen_af(),   // tab prev
         on_click      : ag().k(W).m(lctrl).gen_af(),         // close tab
         ..Default::default()
     };
-    static _tabs_blind : OnceCell < Arc < ActionCell>> = OnceCell::new();
-    let tabs_blind = _tabs_blind .get_or_init ( move || { Arc::new (cell) } );
-    let tabs_blind = || tabs_blind.clone();
+    static _tabs_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    let tabs_bl = _tabs_bl .get_or_init ( move || { Arc::new (cell) } );
+    let tabs_bl = || tabs_bl.clone();
 
 
 
@@ -248,6 +336,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Brightness".into(),
+        icon  : icons.bright.clone(),
         on_wheel_frwd : gen_incr_brightness ( 2),   // increase brightness
         on_wheel_bkwd : gen_incr_brightness (-2),   // decrease brightness
         on_press      : drag_af,                    // enable frame dragging
@@ -261,6 +350,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Arrows".to_string(),
+        icon  : icons.arrows.clone(),
         on_wheel_bkwd : ag().k(ExtDown).gen_af(),    // arrow down
         on_wheel_frwd : ag().k(ExtUp  ).gen_af(),    // arrow up
         ..Default::default()
@@ -272,6 +362,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
     let cell = ActionCell {
         label : "Refresh".to_string(),
+        icon  : icons.refresh.clone(),
         on_click      : ag().k(F5).gen_af(),                  // refresh
         on_wheel_bkwd : ag().k(ExtLeft ).m(lalt).gen_af(),    // pg-bkwd
         on_wheel_frwd : ag().k(ExtRight).m(lalt).gen_af(),    // pg-fwd
@@ -282,8 +373,27 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     let refresh = || refresh.clone();
 
 
+    let af_min_back = Arc::new (move || {
+        if let Ok(fgi) = wel.fgnd_info.read() {
+            win_min_and_back(fgi.hwnd)
+        }
+    } );
+    let cell = ActionCell {
+        label : "MinBack".to_string(),
+        icon  : icons.min_back.clone(),
+        on_click      : af_min_back.clone(),    // min-and-back
+        on_wheel_bkwd : af_min_back.clone(),    // min-and-back
+        on_wheel_frwd : af_min_back.clone(),    // min-and-back
+        ..Default::default()
+    };
+    static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    let min_back = _min_back .get_or_init ( move || { Arc::new (cell) } );
+    let min_back = || min_back.clone();
+
+
     let cell = ActionCell {
         label : "Diff".to_string(),
+        icon  : icons.diff.clone(),
         on_wheel_bkwd : ag().k(ExtDown).m(ctrl).m(alt).gen_af(),   // next diff
         on_wheel_frwd : ag().k(ExtUp  ).m(ctrl).m(alt).gen_af(),   // prev diff
         on_click      : ag().k(ExtRight).m(ctrl).m(alt).gen_af(),  // accept left -> right
@@ -301,6 +411,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     let lighten = ag().k(Backslash).m(ctrl).gen_af();
     let cell = ActionCell {
         label : "Page Dark".to_string(),
+        icon  : icons.darken_pg.clone(),
         on_wheel_bkwd : ag().af(darken ).gen_af(),
         on_wheel_frwd : ag().af(lighten).gen_af(),
         ..Default::default()
@@ -314,6 +425,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     let im_brighten = ag().k(RBracket).m(ctrl).gen_af();
     let cell = ActionCell {
         label : "Image Dark".to_string(),
+        icon  : icons.darken_im.clone(),
         on_wheel_bkwd : ag().af(im_darken  ).gen_af(),
         on_wheel_frwd : ag().af(im_brighten).gen_af(),
         ..Default::default()
@@ -332,18 +444,16 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
 
     // we can now start constructing the grid variants for various conditions
-    let cell_sz = CellDims::new (85,25);
 
     // general use
     static _base : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( arrows(),      empty(),          volume() ),
-        vec! ( switche(),     switche_blind(),  tracks() ),
-        vec! ( tabs_blind(),  tabs(),           scrub()  ),
-        vec! ( brightness(),  empty(),          empty()  ),
+        vec! ( switche(),     switche_bl(),  refresh(), arrows()   ),
+        vec! ( tabs_bl(),     tabs(),        empty(),   min_back() ),
+        vec! ( brightness(),  volume(),      tracks(),  scrub()    ),
     );
     let label = "base".into();
-    let grid_sz = GridDims::new (4,3);
+    let grid_sz = GridDims::new (3, 4);
     let base = _base.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
     } );
@@ -353,13 +463,12 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     // ide specific
     static _ide : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( arrows(),      diff(),          volume() ),
-        vec! ( switche(),     switche_blind(), tracks() ),
-        vec! ( tabs_blind(),  tabs(),          scrub()  ),
-        vec! ( brightness(),  empty(),         empty()  ),
+        vec! ( switche(),     switche_bl(),  refresh(),  arrows()   ),
+        vec! ( tabs_bl(),     tabs(),        diff(),     min_back() ),
+        vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
     );
     let label = "ide".into();
-    let grid_sz = GridDims::new (4,3);
+    let grid_sz = GridDims::new (3, 4);
     let ide = _ide.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
     } );
@@ -369,13 +478,12 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
     // browser specific
     static _web : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( arrows(),      refresh(),       volume()  ),
-        vec! ( switche(),     switche_blind(), tracks()  ),
-        vec! ( tabs_blind(),  empty(),         scrub()   ),
-        vec! ( brightness(),  pg_dark(),       im_dark() ),
+        vec! ( switche(),     switche_bl(),  refresh(),  arrows()   ),
+        vec! ( tabs_bl(),     pg_dark(),     im_dark(),  min_back() ),
+        vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
     );
     let label = "web".into();
-    let grid_sz = GridDims::new (4,3);
+    let grid_sz = GridDims::new (3, 4);
     let web = _web.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
     } );
@@ -384,7 +492,7 @@ pub fn build_grid_provider (k:&Krusty) -> GetGridFn  {
 
 
     // finally we can build the grid provider itself
-    Arc::new ( move || {
+    Box::new ( move || {
         if check_intellij_fgnd (wel) { ide() }
         else if check_browser_fgnd (wel) { web() }
         else { base() }

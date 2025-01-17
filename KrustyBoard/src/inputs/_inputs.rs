@@ -112,7 +112,9 @@ pub enum InternalEvent_T {
     Fsc_Latching_Activated { fsc:ComboHash },
     Fsc_Latching_Cleared   { fsc:ComboHash },
 
-    //Fgnd_Changed  { hwnd:Hwnd },
+    //Fgnd_Changed { hwnd:Hwnd },
+    Fgnd_Changed,
+    // ^^ we'd rather keep it generic to all fgnd changes, and have the subscriber check fgnd-info themselves
 }
 
 

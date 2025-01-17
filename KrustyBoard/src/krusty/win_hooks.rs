@@ -131,6 +131,9 @@ impl WinEventsListener {
         };
         //println! ("fgnd: {:?}, exe: {:?}", hwnd, &fi_new.exe);
         *self.fgnd_info.write().unwrap() = fi_new;
+
+        // and we'll push out an event on fgnd change for whoever wants to set bindings to it
+        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fgnd_Changed );
     }
 
 

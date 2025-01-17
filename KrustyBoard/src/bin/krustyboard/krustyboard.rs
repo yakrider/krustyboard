@@ -2617,7 +2617,8 @@ fn setup_quick_bar (k:&Krusty) {
 
     // and we'll setup kbd only combo to toggle quick-bar too .. leaves it persistent, mostly useful for testing
     // caps-caps-A --> bring up Action Grid
-    k.cm.add_combo ( cg().k(A).m(caps_dbl),  ag().af (Arc::new (move || qb.toggle())) );
+    k.cm.add_combo ( cg().k(A).m(caps_dbl),     ag().af (Arc::new (move || qb.toggle())) );
+    k.cm.add_combo ( cg().k(O).m(caps).s(msD),  ag().af (Arc::new (move || qb.toggle())) );
     // ^^ we could have tried to have this also enter the fsc state .. (with a bit of manual toggle management here)
     // However, we've decided NOT to do that, as not doing so means the quick-bar persists over [caps/mod]-rel etc clearing fscs
     // Further, since we only care about wheel actions in this fsc, and w/o alt/ctrl, they work decently from regular fallback
@@ -2672,7 +2673,15 @@ fn setup_quick_bar (k:&Krusty) {
     k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(c_drag),  ag().af (end_drag) );
 
     // and now lets populate the qbar with our action-grid
-    k.qb .set_grid_provider ( qbar_grid::build_grid_provider(k) );
+    k.qb .set_grid_provider_builder ( Box::new (qbar_grid::grid_provider_builder) );
+
+    // and finally, we'll also set-up an action to update qbar on fgnd change events (pushed by win-events listener)
+    // (note that combos dont make sense there, so just direct bindings .. meaning gotta be combined to one if need be))
+    let fgnd_af = Arc::new ( move || qb.handle_fgnd_change() );
+    InputProcessor::instance().input_bindings.bind_internal_event (InternalEvent_T::Fgnd_Changed, EvCbEntry {
+        ev_proc_ds: EvProc_Ds::new (EvProp_D::EvProp_Stop, ComboProc_D::ComboProc_Disable),
+        cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |_| fgnd_af() ) ),
+    } );
 
 }
 
