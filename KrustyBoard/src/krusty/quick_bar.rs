@@ -16,7 +16,7 @@ use windows::Win32::Foundation::{POINT};
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_NOZORDER, SWP_NOMOVE, SWP_ASYNCWINDOWPOS, SW_SHOWNOACTIVATE};
 
 use crate::*;
-use crate::utils::{win_get_fgnd, win_redraw};
+use crate::utils::{win_get_fgnd, win_set_fgnd, win_redraw};
 
 
 
@@ -267,56 +267,54 @@ impl QuickBar {
         let pos = Self::get_cursor_pos();
 
         // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
+        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
+        // but first, lets calc the qbar's new position around the cursor ..
+        //utils::win_set_thread_dpi_aware();
+        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
+        let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
+        let grid_sz = grid.grid_px_sz();
+
+        let x = pos.x as i32 - (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
+        let y = pos.y as i32 - (grid_sz.height as i32 as f32 * scaling / 2.0) as i32 - 4;
+        // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
+
+        let width  = (scaling * grid_sz.width  as f32) as i32;
+        let height = (scaling * grid_sz.height as f32) as i32;
+        // ^^ manually coz auto dpi-scaling didnt seem to happen for w/h .. (setting thread dpi-aware didnt help)
+
+        // now we can bring up the window and resize/reposition it to the proper location
         unsafe {
             ShowWindow (hwnd, SW_RESTORE);
             ShowWindow (hwnd, SW_SHOWNOACTIVATE);
-            //self.defocus();
-        }
-
-        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
-        unsafe {
-            //utils::win_set_thread_dpi_aware();
-            // lets calc the qbar's new position (around the cursor)
-            let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
-            let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
-            let grid_sz = grid.grid_px_sz();
-            let x = pos.x as i32 - (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
-            let y = pos.y as i32 - (grid_sz.height as i32 as f32 * scaling / 2.0) as i32 - 4;
-            // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
-
-            let width  = (scaling * grid_sz.width  as f32) as i32;
-            let height = (scaling * grid_sz.height as f32) as i32;
-            // ^^ manually coz auto dpi-scaling didnt seem to happen for w/h .. (setting thread dpi-aware didnt help)
-
+            // ^^ the SW_ flags arent combinable, so we'll just have to call twice
             SetWindowPos (hwnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-            // ^^ since we couldnt put it off-screen, we resized to 0, so have to restore size now too
-
-            // ugh, this thing has the same issue as tray-icon re the ui event loop not waking until next mouse-motion
-            // so we'll just trigger one instead .. (no obvious way to do the event proxy soln here like for tray)
-            //key_utils::delayed_action (30, || MousePointer::move_rel(1,0))();
-            // ^^ meh, we'd rather just directly request a redraw on the hwnd
-            //windows_utils::win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
-            // ^^ todo .. huh check if actually is needed .. forgot what exactly wasnt updating etc
+            // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
         }
+        self.defocus();
+
+        // ugh, this thing has the same issue as tray-icon re the ui event loop not waking until next mouse-motion
+        // so we'll just trigger one instead .. (no obvious way to do the event proxy soln here like for tray)
+        //windows_utils::win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
+        // ^^ todo .. huh check if actually is needed .. forgot what exactly wasnt updating etc, and lots has changed since
     }
 
     pub fn handle_fgnd_change (&self) {
+        // we get called here from fgnd-change event, and we'd like to make the qb grid update if it needs to
+        // .. for which, we'll mark a flag, and try to wake up the ui-event-loop
         self.refresh_grid.set();
+
         //if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
         //    ctx.request_repaint();
-        //}
-        // ^^ not adequate as wont actually wake up ui-event-loop
+        //} // ^^ not adequate as wont actually wake up ui-event-loop
 
         //if let Some(ev_proxy) = self.ev_proxy.lock().unwrap().as_ref() {
         //    let _ = ev_proxy.send_event ( eframe::UserEvent::RequestRepaint {
         //        viewport_id: ctx.viewport_id(), when: Instant::now(), cumulative_pass_nr: 0
         //    } );
-        //}
-        // ^^ didnt do nothing, despite registering a set_request_repaint_callback as it wanted us to do ¯\_(ツ)_/¯
+        //} // ^^ didnt do nothing, despite registering a set_request_repaint_callback as it wanted ¯\_(ツ)_/¯
 
-        // we we're again gonna fall back to windows native to kick the window itself .. oh well
+        // so we we're again gonna fall back to windows native to kick the window itself .. oh well
         win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
-
     }
 
     fn resize (&self, grid: &ActionGrid) { unsafe {
@@ -329,37 +327,22 @@ impl QuickBar {
     } }
 
     pub fn defocus (&self) {
-        // setting fgnd to desktop helps avoid us getting kbd input, coz then apparently even krusty cant hear it!
-        // (.. just doing SetFocus didnt seem to help) ..
-        // (nor surrendering focus at the grid cell action itself.. which just seem to give focus to some OS accesibility overlay )
+        // the idea here is that we want all kbd input going to underlying windows rather than the qbar .. so we never want it have focus
+        // .. so whenever it might be getting focus, we'd rather it quickly give it up (if it actually was fgnd)
+        // and since just surrendering focus doesnt get it back to where it was, we'd rather manate that directly ourselves
 
-        //SetForegroundWindow (GetDesktopWindow());
-        // ^^ this is barely better .. we'd want to have the focus go back to whatever top window we were sending kbd events to before
+        // now, we do have a fgnd-tracker that filters out for qb-hwnd, so we could in theory just send focus back to there ..
+        // but that has occasional issues, e.g. if we close the top hwnd (that it was tracking as fgnd), and if the OS sends fgnd to qb ..
+        // then for defocus we'd only have the now closed hwnd in the fgnd-tracker to send focus to .. which ofc wont do anything
 
-        //unsafe {
-        //    use utils::*;
-        //    let qb_hwnd = Hwnd ( self.hwnd.load(Ordering::Acquire) );
-        //    let fgnd_old = Hwnd ( self.fgnd.load(Ordering::Acquire) );
-        //    let fgnd = utils::win_get_fgnd();
-        //    // ^^ previously stashed fgnd hwnd at time of invocation
-        //    // (dbg note .. also uncomment the line in update_fgnd_info that prints fgnd exe names)
-        //    dbg! ((qb_hwnd.0, fgnd_old.0, fgnd.0));
-        //    dbg! (GetWindow (win_get_fgnd(), GW_HWNDNEXT));
-        //    dbg! (GetWindow (fgnd_old, GW_HWNDNEXT));
-        //    dbg! (win_get_class_hwnd__z_first (fgnd_old));
-        //    dbg! (win_get_class_hwnd__z_first (fgnd));
-        //    dbg! (win_get_class_hwnd__z_next (fgnd_old));
-        //    dbg! (win_get_class_hwnd__z_next (fgnd));
-        //    dbg! (win_get_switcher_hwnd__z_first());
-        //    dbg! (win_get_switcher_hwnd__z_second());
-        //}
-        // ^^ only the last one there works reasonably enough .. (due to overlays, topmost vs regular groups etc etc)
+        // so .. instead, we'll do a full win-enum req below if we are cur fgnd, and send focus to the topmost non-self hwnd (i.e second hwnd)
+        // .. and as benefit, we can do more filtering on that enum to limit to likely visible/top hwnds (which the fgnd tracker doesnt do)
 
-        let qb_hwnd = Hwnd ( self.hwnd.load(Ordering::Acquire) );
+        let qb_hwnd = Hwnd ( self.hwnd.load(Ordering::Relaxed) );
         if win_get_fgnd() == qb_hwnd {
             if let Some(zsec) = utils::win_get_switcher_hwnd__z_second() {
-                //dbg! ((qb_hwnd.0, win_get_fgnd().0, zsec.0));
-                if zsec != qb_hwnd { utils::win_set_fgnd(zsec) }
+               //dbg! ((qb_hwnd.0, win_get_fgnd().0, zsec.0));
+               if zsec != qb_hwnd { win_set_fgnd(zsec) }
             }
         }
     }
@@ -474,7 +457,7 @@ impl QuickBar {
 
 impl eframe::App for QuickBar {
 
-    fn update (&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update (&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
 
         //if self.visible.is_clear() {
         //    // shouldnt be necessary, but was here when hiding alone was causing high cpu usage ..
@@ -538,7 +521,7 @@ impl eframe::App for QuickBar {
                     let cell = ui.allocate_rect (rect, egui::Sense::click());
 
                     ui.painter().rect_filled ( rect, 0.0,
-                        if cell.hovered() { Color32::from_gray(60) } else { Color32::from_gray(20) },
+                        if cell.hovered() { Color32::from_gray(80) } else { Color32::from_gray(20) },
                     );
 
                     ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_gray(100)) );

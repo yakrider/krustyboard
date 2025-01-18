@@ -629,8 +629,17 @@ fn setup_l2 (k:&Krusty) {
 
 fn setup_mouse_left_btn (k:&Krusty) {
 
+    /// Regular lbtn clicks would mostly work via fallback .. but we still want to capture win-snap-dats
+    // (the early capture is mostly for robustness on moves where the pointer moves out of clicked hwnd before win-key pressed etc)
+    fn gen_af_base_lbtn (ks:KSR) -> AF { Arc::new ( move || {
+        ks.mouse.lbtn.active.set(); LeftButton.press();
+        let xy = ks.mouse.lbtn.down_xy.load();
+        let hwnd = win_get_hwnd_from_point(xy);
+        ks.capture_win_snap_dat (xy, hwnd, None);
+    } ) }
+    k.cm .add_combo ( cg().mbtn(LeftButton),  ag().af (gen_af_base_lbtn(k.ks)) );
+
     /// for caps-lbtn we'll enable **_ caps-as-ctrl _** (for drags etc) via mngd_ctrl_state .. (but not other caps-mod-combos as ctrl-mod-combos)
-    // (note that plain clicks will work ok via fallback, though mod-click fallback will only have mod-wrap arouund press not press-rel)
     fn gen_af_caps_mngd_lbtn (ks:KSR) -> AF { Arc::new ( move || {
         ks.mod_keys.lctrl.ensure_active();
         // ^^ this will leave ctrl active (managed), ctrl will clear when caps comes up
@@ -639,13 +648,11 @@ fn setup_mouse_left_btn (k:&Krusty) {
     } ) }
     k.cm .add_combo ( cg().mbtn(LeftButton).m(caps),  ag().af (gen_af_caps_mngd_lbtn(k.ks)) );
 
-    /// and to also handle caps press after drag-start, we'll put a combo directly on caps-down too!
-    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.lbtn.down.is_set());
+    /// and to also provide ctrl-drag on caps press after drag-start, we'll put a combo directly on caps-down too!
+    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.lbtn.down.is_set() && ks.mod_keys.lwin.down.is_clear());
+    // ^^ the lwin conditional is to exclude the window-move/resize w lwin-lbtn-drag
     let ks = k.ks;
-    let af = Arc::new (move || {
-        if ks.mod_keys.lwin.down.is_clear() { ks.mod_keys.lctrl.ensure_active() }
-        // ^^ the lwin conditional is to exclude the window-move/resize w lwin-lbtn-drag impld further below
-    } );
+    let af = Arc::new (move || ks.mod_keys.lctrl.ensure_active() );
     k.cm .add_combo ( cg().k(CapsLock) .c(cc),  ag().af(af) );
 
 
@@ -658,7 +665,9 @@ fn setup_mouse_left_btn (k:&Krusty) {
 
     /// for win-lbtn and win-caps-lbtn, we want to **_ capture win-snap-dat _** for window drag/resizing
     fn gen_af_win_snap_dat (ks:KSR, wgo:Option<WinGroups_E>) -> AF { Arc::new ( move || {
-        ks.capture_pointer_win_snap_dat(wgo);
+        let xy = ks.mouse.lbtn.down_xy.load();
+        let hwnd = win_get_hwnd_from_point (xy);
+        ks.capture_win_snap_dat (xy, hwnd, wgo);
         win_set_fgnd (ks.win_snap_dat.read().unwrap().hwnd);
     } ) }
     // win-drag does drag with snap .. caps-win does resize .. and adding shift disables snap for both

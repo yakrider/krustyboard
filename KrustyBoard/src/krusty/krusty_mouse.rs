@@ -18,7 +18,26 @@ pub const DEFAULT_MOUSE_WHEEL_DELTA: i32 = 120;
 
 
 
-# [ derive (Debug) ]
+# [ derive (Debug, Default) ]
+pub struct PointAtomic { x: AtomicI32, y: AtomicI32 }
+
+impl PointAtomic {
+    pub fn store (&self, pt: Point) {
+        self.x.store (pt.x, Ordering::Relaxed);
+        self.y.store (pt.y, Ordering::Relaxed);
+    }
+    pub fn load (&self) -> Point {
+        Point {
+            x : self.x.load(Ordering::Relaxed),
+            y : self.y.load(Ordering::Relaxed)
+        }
+    }
+}
+
+
+
+
+#[derive (Debug)]
 pub struct MouseBtnState {
     pub btn      : MouseButton,   // btn enum
     pub down     : Flag,          // physically down
@@ -26,6 +45,7 @@ pub struct MouseBtnState {
     pub pending  : Flag,          // press-rel is set to be sent out upon release
     pub consumed : Flag,          // if consumed, the release should be masked
     pub dbl_tap  : Flag,          // dbl-tap
+    pub down_xy  : PointAtomic,   // the xy point where this last press happened
 }
 
 // since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
@@ -42,6 +62,7 @@ impl MouseBtnState {
             pending  : Flag::default(),
             consumed : Flag::default(),
             dbl_tap  : Flag::default(),
+            down_xy  : PointAtomic::default(),
         }
     }
 
@@ -79,7 +100,7 @@ impl MouseWheelState {
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct Mouse {
     _private  : (),
     // btns
@@ -199,7 +220,22 @@ impl Mouse {
         self.vwheel.spin_invalidated.set();
         if ks.mouse.lbtn.down.is_set() && ( mk == caps ||  mk == lwin) {
             // we'll want to capture/refresh win-snap-dat on caps/win presses w lbtn down as they both modify drag/resize origin behavior
-            let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
+            // .. for lwin, we always want to capture the hwnd at lbtn clicked point ..
+            // .. but with caps ..ideally, we should allow adding caps to win-drag to modify the drag from whereever the pointer is at ..
+            // however, given how wildly the pointer can lead the window, we still want the hwnd to be clamped to the lbtn-pressed hwnd!
+            // .. so we'll use pointer from cur mouse, but keep the hwnd as was in the last win-snap-dat currently being used!
+            let action = Box::new ( move || {
+                let (cur_xy, lbtn_xy) = (MousePointer::pos(), ks.mouse.lbtn.down_xy.load());
+                let wsd_hwnd = ks.win_snap_dat.read() .map (|wsd| wsd.hwnd) .unwrap_or (win_get_hwnd_from_point(lbtn_xy));
+                let (xy, hwnd) = if mk == lwin {
+                    //(lbtn_xy, win_get_hwnd_from_point(lbtn_xy))
+                    (lbtn_xy, wsd_hwnd)
+                } else { // i.e. caps
+                    //let hwnd = ks.win_snap_dat.read() .map (|wsd| wsd.hwnd) .unwrap_or (win_get_hwnd_from_point(lbtn_xy));
+                    (cur_xy, wsd_hwnd)
+                };
+                ks.capture_win_snap_dat (xy, hwnd, None);
+            } );
             let _ = InputProcessor::instance().input_af_queue .send (action);
         }
         else if ks.mouse.rbtn.down.is_set() && mk == caps {
@@ -214,7 +250,9 @@ impl Mouse {
         if mk == caps {
             if ks.mod_keys.lwin.down.is_set() && ks.mouse.lbtn.down.is_set() {
                 // if we're exiting drag-resize into drag-move, so we should refresh our win-snap dat reference
-                let action = Box::new (move || ks.capture_pointer_win_snap_dat(None));
+                let (cur_xy, lbtn_xy) = (MousePointer::pos(), ks.mouse.lbtn.down_xy.load());
+                let wsd_hwnd = ks.win_snap_dat.read() .map (|wsd| wsd.hwnd) .unwrap_or (win_get_hwnd_from_point(lbtn_xy));
+                let action = Box::new (move || ks.capture_win_snap_dat (cur_xy, wsd_hwnd, None) );
                 let _ = InputProcessor::instance().input_af_queue .send (action);
             }
             else if ks.mouse.rbtn.down.is_set() {
@@ -237,6 +275,7 @@ pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:&Krust
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
             mbs.down.set(); mbs.consumed.clear();
+            if let EventDat::btn_event { xy, .. } = ev.dat {  mbs.down_xy.store (xy) }
             update_dbl_tap (&ev, &mbs.dbl_tap);
             // the rest of the behavior we'll let be defined via combo mapping
             EvProc_Ds::new (EvProp_Stop, ComboProc_Enable)
@@ -267,14 +306,15 @@ pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
         .. So instead, we check for that in the inline binding handler itself so we can let it through in that special case
     */
     use crate::{MouseButton::*, MouseBtnEv_T::*};
-    let ks = k.ks;
+    let ks = k.ks; let mbtn = k.ks.mouse.rbtn;
     k.iproc.input_bindings .bind_btn_event (RightButton, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         //cb : EvCbFn_Inline ( Arc::new ( move |ev| handle_mouse_right_btn_up (&ks, ev) ) )
         cb : EvCbFn_Inline ( Arc::new ( move |ev| {
-            ks.mouse.rbtn.down.clear(); ks.mouse.rbtn.dbl_tap.clear();
+            mbtn.down.clear(); mbtn.dbl_tap.clear();
             if ev.extra_info == SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO {
-                ks.in_right_btn_scroll_state.set(); ks.mouse.rbtn.active.clear();
+                mbtn.active.clear();
+                ks.in_right_btn_scroll_state.set();
                 // ^^ note that we let even down state be cleared above, even though its not phys rbtn-up, as switche might block the phys rbtn-up
                 // (mostly in case swi is before krusty in hook chain .. else we'd hear the phys rbtn-up before swi anyway)
                 EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
@@ -367,8 +407,8 @@ pub fn setup_mouse_move_handling (k:&Krusty) {
             if ks.mouse.lbtn.down.is_set() {
                 if ks.mod_keys.lwin.down.is_set() || qb.is_drag_active() {
                     ks.mod_keys.lwin.consumed.set();
-                    if let pointer_event { x_pos, y_pos, .. } = ev.dat {
-                        handle_lwin_mouse_drag (x_pos, y_pos, ks)
+                    if let pointer_event { xy } = ev.dat {
+                        handle_lwin_mouse_drag (xy.x, xy.y, ks)
             } } }
         } ) ),
     } );

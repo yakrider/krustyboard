@@ -78,11 +78,11 @@ pub enum BindingsMapKey {
 impl BindingsMapKey {
     pub fn from_event (event: &Event) -> BindingsMapKey {
         match event.dat {
-            key_event      { key,   ev_t, .. }  => key_ev_t   (key, ev_t.into()),
-            btn_event      { btn,   ev_t, .. }  => btn_ev_t   (btn, ev_t),
-            wheel_event    { wheel, delta    }  => wheel_ev_t (wheel, delta.into()),
-            pointer_event  { .. }               => pointer_ev_t,
-            internal_event { ev_t }             => internal_ev_t (ev_t),
+            key_event      { key,   ev_t,  .. }  => key_ev_t   (key, ev_t.into()),
+            btn_event      { btn,   ev_t,  .. }  => btn_ev_t   (btn, ev_t),
+            wheel_event    { wheel, delta, .. }  => wheel_ev_t (wheel, delta.into()),
+            pointer_event  { .. }                => pointer_ev_t,
+            internal_event { ev_t }              => internal_ev_t (ev_t),
     }  }
 }
 impl TryFrom <BindingsMapKey> for KbdKey {

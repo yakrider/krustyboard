@@ -451,7 +451,12 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let is_dbl_tap = if ev_t == BtnDown {
             iproc.cache_last_click_event (src_id, stamp)
         } else { false };
-        Some ( btn_event { btn, ev_t, is_dbl_tap } )
+        Some ( btn_event { btn, ev_t, is_dbl_tap, xy: mh_struct.pt.into() } )
+    };
+    let gen_wheel_ev = |wheel: MouseWheel| {
+        let delta = hi_word (mh_struct.mouseData) as i16 as i32;
+        let xy = mh_struct.pt.into();
+        Some ( wheel_event { wheel, delta, xy } )
     };
 
     use { MouseButton::*, MouseWheel::*, EventDat::*, MouseBtnEv_T::* };
@@ -474,10 +479,10 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
                 XBUTTON2 => gen_btn_ev ( X2Button, BtnUp ),
                 _ => None,
         } }
-        WM_MOUSEWHEEL  => Some ( wheel_event { wheel: DefaultWheel,    delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
-        WM_MOUSEHWHEEL => Some ( wheel_event { wheel: HorizontalWheel, delta: hi_word(mh_struct.mouseData) as i16 as i32 } ),
+        WM_MOUSEWHEEL  => gen_wheel_ev (DefaultWheel   ),
+        WM_MOUSEHWHEEL => gen_wheel_ev (HorizontalWheel),
 
-        WM_MOUSEMOVE => Some ( pointer_event { x_pos: mh_struct.pt.x, y_pos: mh_struct.pt.y } ),
+        WM_MOUSEMOVE => Some ( pointer_event { xy: mh_struct.pt.into() } ),
         _ => None,
     } {
         let event = Event { stamp, injected, extra_info, dat };

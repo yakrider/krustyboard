@@ -93,6 +93,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     let cell_sz = CellDims::new (48,26);
 
+
     let cell = ActionCell {
         label : "Volume".into(),
         icon  : icons.volume.clone(),
@@ -104,6 +105,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     static _volume : OnceCell < Arc < ActionCell>> = OnceCell::new();
     let volume = _volume .get_or_init ( move || { Arc::new (cell) } );
     let volume = || volume.clone();
+
 
 
     let cell = ActionCell {
@@ -119,6 +121,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let tracks = || tracks.clone();
 
 
+
     let cell = ActionCell {
         label : "Scrub".to_string(),
         icon  : icons.scrub.clone(),
@@ -130,6 +133,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     static _scrub : OnceCell < Arc < ActionCell>> = OnceCell::new();
     let scrub = _scrub .get_or_init ( move || { Arc::new (cell) } );
     let scrub = || scrub.clone();
+
 
 
     // for switche task-switching ..
@@ -199,6 +203,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+
     // blind switch is just sending prev/next, but we gotta refresh the snapshot before we start
     // the nav-keys should be .. refresh:F15,  next:F16,  prev:F17,  top:F18,  bottom:F19  (w/ alt-shift)
     let nav_ag = |nav_key:Key| ag().k(nav_key).m(alt).m(shift).gen_af();
@@ -241,6 +246,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+
+    // for ctrl-tab switching
     fn tabs_wh_af (ks: &'static KrustyState, dir_bkwd:bool) -> AF {
         Arc::new ( move || {
             ks.mod_keys.lctrl.ensure_active();
@@ -275,6 +282,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let tabs = || tabs.clone();
 
 
+
+    // direct tabs switching
     let cell = ActionCell {
         label : "Tabs Blind".to_string(),
         icon  : icons.tabs_blind.clone(),
@@ -289,6 +298,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+    // brightness, and overloaded qbar dragging
     fn gen_incr_brightness (incr:i32) -> AF {
         Arc::new ( move || { let _ = incr_brightness(incr); } )
     }
@@ -302,7 +312,10 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         //
         // we'll prep the drag setup .. (this version of drag is via krusty, not egui!!)
         if !qb.is_drag_active()  {
-            ks.capture_pointer_win_snap_dat(None);
+            // we'll want to capture win-snap dat for the drag to use
+            let xy = ks.mouse.lbtn.down_xy.load();
+            let hwnd = win_get_hwnd_from_point (xy);
+            ks.capture_win_snap_dat (xy, hwnd, None);
             // we'll do a (krusty-unseen) lbtn release so we dont have kbd-focus clamped on qbar
             // should be mostly harmless, as the actual lbtn release later will sync everything up anyway
             //dbg!(ks.mouse.lbtn);
@@ -348,6 +361,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let brightness = || brightness.clone();
 
 
+
+    // wheel to arrows
     let cell = ActionCell {
         label : "Arrows".to_string(),
         icon  : icons.arrows.clone(),
@@ -360,6 +375,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let arrows = || arrows.clone();
 
 
+
+    // refresh btn for browser etc
     let cell = ActionCell {
         label : "Refresh".to_string(),
         icon  : icons.refresh.clone(),
@@ -373,6 +390,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let refresh = || refresh.clone();
 
 
+
+    // minimize and send window to back
     let af_min_back = Arc::new (move || {
         if let Ok(fgi) = wel.fgnd_info.read() {
             win_min_and_back(fgi.hwnd)
@@ -391,6 +410,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let min_back = || min_back.clone();
 
 
+
+    // diff nav during IDE fgnd
     let cell = ActionCell {
         label : "Diff".to_string(),
         icon  : icons.diff.clone(),
@@ -404,6 +425,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let diff = || diff.clone();
 
 
+
+    // chrome bookmarklets trigger for darkening/brightening page (or and further down for just images)
     // note that to make these chrome shortcuts work .. first installed shortkeys extension ..
     // .. then there, set the hotkeys as below, and set them to exec javascript copied directly from bookmarklets
     // .. (directly trying to trigger the bookmarklets didnt work .. oh well)
@@ -421,6 +444,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let pg_dark = || pg_dark.clone();
 
 
+
+    // chrome image-only darkening bookmarklets trigger
     let im_darken   = ag().k(LBracket).m(ctrl).gen_af();
     let im_brighten = ag().k(RBracket).m(ctrl).gen_af();
     let cell = ActionCell {
@@ -436,6 +461,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+    // an empty action-cell for placeholder purposes etc
     static _empty : OnceCell < Arc < ActionCell>> = OnceCell::new();
     let empty = _empty .get_or_init ( move || { Arc::new (ActionCell::default()) } );
     let empty = || empty.clone();
@@ -460,6 +486,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let base = || base.clone();
 
 
+
     // ide specific
     static _ide : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
@@ -473,6 +500,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
     } );
     let ide = || ide.clone();
+
 
 
     // browser specific
@@ -497,6 +525,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         else if check_browser_fgnd (wel) { web() }
         else { base() }
     } )
+
 
 }
 

@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use rand::Rng;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SW_SHOWMAXIMIZED, WINDOWPLACEMENT};
 
 use crate::{ *, utils::*};
@@ -44,7 +44,7 @@ pub struct WinSnapDat {
     pub win_placement : WINDOWPLACEMENT,
     pub workarea      : RECT,
     pub snap_thresh   : u32,
-    pub pointer       : POINT,
+    pub pointer       : Point,
     pub edge_lists    : RectEdgeLists,
     pub win_grp       : Option<WinGroups_E>,
     pub grp_rects     : FxHashMap <Hwnd,RECT>,
@@ -68,7 +68,7 @@ fn handle_pointer_window_drag (xt:i32, yt:i32, ks:KSR) {
 
     // we'll always try to drag/move to the cur pointer location .. (instead of when the pointer was when queued)
     // .. this makes things snappier and avoids the drag lag when queues start getting longer
-    let POINT {x, y} = get_pointer_loc();
+    let Point {x, y} = get_pointer_loc();
     // and we'll short circuit if we're already there (esp at the end), but really it doesnt really matter either way
     if xt == x && yt == y { return }
 
@@ -148,7 +148,10 @@ fn ensure_maxed_windows_drag_ready (ks:KSR) -> bool {
     }
     // now if the hwnd had been wiped, we'll re-capture snap-dat
     if ks.win_snap_dat.read().unwrap().hwnd == Hwnd(0) {
-        ks.capture_pointer_win_snap_dat(None)
+        let xy = get_pointer_loc();
+        let hwnd = win_get_hwnd_from_point (xy);
+        ks.capture_win_snap_dat (xy, hwnd, None);
+
     }
     true
 }
@@ -222,7 +225,10 @@ pub fn snap_closest_edge_side (ks:KSR, side_t:RectEdgeSide) {
         } ) .copied() .collect::<Vec<Edge>>();
         snap_to_edgelist_nearest__delta (win_edge, pad_v, &edges, i32::MAX as u32)
     }
-    ks.capture_fgnd_win_snap_dat();
+    // now we'll recapture the updated win-snap-dat
+    let (xy, hwnd) = (MousePointer::pos(), win_get_fgnd());
+    ks.capture_win_snap_dat (xy, hwnd, None);
+
     let wsd = ks.win_snap_dat.read().unwrap();
     let wres = rect_to_edges(&wsd.rect);
     use RectEdgeSide::*;
@@ -254,7 +260,7 @@ pub fn jiggle_window (hwnd:Hwnd) {
 
 
 
-pub fn capture_win_snap_dat (ks:KSR, hwnd:Hwnd, win_grp:Option<WinGroups_E>) -> WinSnapDat {    //println!("{:?}",("pre-cache"));
+pub fn capture_win_snap_dat (ks:KSR, pointer:Point, hwnd:Hwnd, win_grp: Option<WinGroups_E>) -> WinSnapDat {
     // first set thread dpi-aware in case we're on some spawned thread not inited w that (unlike our event queues)
     win_set_thread_dpi_aware();
 
@@ -286,8 +292,6 @@ pub fn capture_win_snap_dat (ks:KSR, hwnd:Hwnd, win_grp:Option<WinGroups_E>) -> 
 
     // lets finally calculate our visible edges lists ..
     let edge_lists = rects_to_viz_edgelists (&mut rects, &workarea);
-
-    let pointer = MousePointer::pos();
 
     // and thats it, can store it all away so the actual pointer-move callbacks can be fast!
     WinSnapDat { hwnd, rect, padding, win_placement, workarea, snap_thresh, pointer, edge_lists, win_grp, grp_rects }

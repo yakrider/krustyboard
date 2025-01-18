@@ -17,8 +17,7 @@ use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
 
 
-// we'll define our own new-type of Hwnd mostly because HWND doesnt implement trait Hash to put into maps etc
-
+// we'll define our own new-type of Hwnd mostly coz HWND doesnt implement Debug, Hash etc
 # [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
 pub struct Hwnd (pub(crate) isize);
 
@@ -31,6 +30,26 @@ impl From<Hwnd> for isize {
 impl From<Hwnd> for HWND {
     fn from (hwnd:Hwnd) -> Self { HWND(hwnd.0) }
 }
+
+
+// we'll define our own type of Point too, again coz POINT doesnt impl Debug, Hash etc
+# [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
+pub struct Point {
+    pub x : i32,
+    pub y : i32,
+}
+impl From <POINT> for Point {
+    fn from (pt: POINT) -> Self {
+        Point { x: pt.x,  y: pt.y }
+    }
+}
+impl From <Point> for POINT {
+    fn from (pt:Point) -> Self {
+        POINT { x: pt.x, y: pt.y }
+    }
+}
+
+
 
 
 pub fn win_set_thread_dpi_aware() { unsafe {
@@ -97,14 +116,14 @@ pub fn win_get_class_hwnd__z_first (hwnd:Hwnd) -> Hwnd { unsafe {
     GetWindow (hwnd, GW_HWNDFIRST) .into()
 } }
 
-pub fn get_pointer_loc () -> POINT { unsafe {
+pub fn get_pointer_loc () -> Point { unsafe {
     let mut point = POINT::default();
     GetCursorPos (&mut point);
-    point
+    point.into()
 } }
 
-pub fn win_get_hwnd_from_point (point:POINT) -> Hwnd { unsafe {
-    let hwnd = WindowFromPoint (point);
+pub fn win_get_hwnd_from_point (point:Point) -> Hwnd { unsafe {
+    let hwnd = WindowFromPoint (point.into());
     let hwnd = GetAncestor (hwnd, GA_ROOT);
     hwnd.into()
 } }

@@ -1,6 +1,6 @@
 
 // allow non camel-case names for this entire file
-#![allow(non_camel_case_types)]
+#![allow (non_camel_case_types)]
 
 
 use std::{
@@ -11,8 +11,7 @@ use std::{
 };
 use strum_macros::EnumIter;
 
-use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
@@ -32,8 +31,8 @@ pub struct KeySequence <'a> (pub &'a str);
 
 
 /// The keyboard even type is the OS provided down/up or sys-down/up (which fires when Alt is held down etc)
-#[allow(non_camel_case_types)]
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[allow (non_camel_case_types)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum KbdEvent_T {
     KbdEvent_KeyDown,
     KbdEvent_SysKeyDown,
@@ -53,7 +52,7 @@ static KEY_SWAPS_MAP: Lazy<FxHashMap<KbdKey,u64>> = Lazy::new ( || {
 
 
 /// Representation for left/right/middle and X1/X2 mouse buttons .. others are not fully supported
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 pub enum MouseButton {
     LeftButton,
     MiddleButton,
@@ -66,7 +65,7 @@ pub enum MouseButton {
 }
 
 /// Representation for the normal (vertical) and horizontal scroll wheels
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 pub enum MouseWheel {
     DefaultWheel,
     HorizontalWheel,
@@ -77,23 +76,22 @@ pub enum MouseWheel {
 
 
 /// The mouse-pointer type (with no other property, siimply to differentiate from other mouse-event sources)
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct MousePointer;
 
 
 
 
 /// For the mouse-btn, event types can be btn-down, btn-up, or double-click
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MouseBtnEv_T {
     BtnDown,
     BtnUp,
-    //DblClick,
 }
 
 
 /// For the mouse-wheel, event types can be wheel-forwards or wheel-backwards
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MouseWheelEv_T {
     WheelForwards,
     WheelBackwards,
@@ -105,7 +103,7 @@ impl From<i32> for MouseWheelEv_T {
 }
 
 
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum InternalEvent_T {
     Fsc_Sticky_Activated   { fsc:ComboHash },
     Fsc_Sticky_Cleared     { fsc:ComboHash },
@@ -124,9 +122,9 @@ pub enum InternalEvent_T {
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EventDat {
     key_event      { key:KbdKey, ev_t:KbdEvent_T, is_repeat:bool, is_dbl_tap:bool, vk_code:u32, sc_code:u32 },
-    btn_event      { btn:MouseButton, ev_t:MouseBtnEv_T, is_dbl_tap:bool },
-    wheel_event    { wheel:MouseWheel, delta:i32 },
-    pointer_event  { x_pos:i32, y_pos:i32 },
+    btn_event      { btn:MouseButton, ev_t:MouseBtnEv_T, is_dbl_tap:bool, xy:Point },
+    wheel_event    { wheel:MouseWheel, delta:i32, xy:Point },
+    pointer_event  { xy:Point },
     internal_event { ev_t:InternalEvent_T },
 }
 
@@ -333,12 +331,8 @@ impl MouseWheel {
 
 impl MousePointer {
 
-    pub fn pos() -> POINT {
-        unsafe {
-            let mut point = POINT::default();
-            GetCursorPos (&mut point);
-            point
-        }
+    pub fn pos() -> Point {
+        utils::get_pointer_loc()
     }
 
     /// Moves the mouse relative to its current position by a given amount of pixels.

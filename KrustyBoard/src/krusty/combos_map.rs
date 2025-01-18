@@ -291,7 +291,7 @@ impl CombosMap {
                     } } ) )
                 }
             } }
-            EventDat::wheel_event {wheel, delta} => {
+            EventDat::wheel_event {wheel, delta, ..} => {
                 Some ( Arc::new (move || wheel.scroll(delta) ) )
             }
             EventDat::pointer_event {..} => None,

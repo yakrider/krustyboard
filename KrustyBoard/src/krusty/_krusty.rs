@@ -18,8 +18,8 @@ use crate::utils::Cursors;
 pub type Key = KbdKey ;
 // ^^ meh, just sugar
 
-pub use utils::Hwnd;
-// ^^ re-exporting this to everyone, as we dont typically import utils::*
+pub use utils::{Hwnd, Point};
+// ^^ re-exporting these to everyone, as we dont typically import utils::*
 
 
 # [ derive (Debug, Default) ]
@@ -142,8 +142,9 @@ pub fn blip_cursor (n:isize) {
 
 
 
-# [ derive (Debug) ]    // note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
 /// KrustyState holds all our direct state flags, or encapsulating state objects like mode-states or modifier-keys collections
+// note that we def dont want this clonable (we'd rather clone its Arc than all underlying!)
+#[derive (Debug)]
 pub struct KrustyState {
     // having this disallows direct instantiation
     _private: (),
@@ -336,16 +337,12 @@ impl KrustyState {
     }
 
 
-
-    pub fn capture_fgnd_win_snap_dat (&'static self) {
-        //thread::spawn ( move || {     // .. nuh uh
-        // ^^ spawning this not only is not necessary as metrics show its only couple ms max ..
-        // .. but also often right after calling this we're doing other related work that expects this to be filled out!
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_fgnd(), None);
-    }
-    pub fn capture_pointer_win_snap_dat (&'static self, wgo:Option<WinGroups_E>) {
-        // again, we'll not spawn this here, but those who can tolerate being spawned can call this on a spawned thread etc
-        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, utils::win_get_hwnd_from_pointer(), wgo);
+    /// We'll take the xy point and hwnd for the win-snap dat separately .. the idea is that we might want to
+    /// have the snap be taken of hwnd and/or point from in-progress drags even when pointer moves out of hwnd etc
+    pub fn capture_win_snap_dat (&'static self, xy:Point, hwnd:Hwnd, wgo:Option<WinGroups_E>) {
+        // Note that we also dont want to spawn out the capture, as we often call this right before acting on it
+        // (plus metrics show its a couple ms max .. we can live w that)
+        *self.win_snap_dat.write().unwrap() = capture_win_snap_dat (self, xy, hwnd, wgo);
     }
 
 
