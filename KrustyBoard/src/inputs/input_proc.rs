@@ -62,7 +62,11 @@ impl EvProc_Ds {
 
 
 
+/// The InputProcessor is a fully stand-alone instance with no dependencies on any other object instances.
+/// As such, it is safe to grab and hold a ref to this instance when others (e.g KrustyState) are instantiating
+/// This lets everyone use the iput-proc event-queue to push off tasks to (w/o having to call instance at runtime)
 pub struct InputProcessor {
+
     /// handle returned by OS to the lower level kbd hook that we set (needed to unhook later)
     kbd_hook : AtomicIsize,
     /// handle returned by OS to the lower level mouse hook that we set (needed to unhook later)

@@ -178,6 +178,7 @@ pub struct KrustyState {
 
 
 // since we'll be passing 'static refs everywhere, we'll just alias it for ease
+pub type KR  = &'static Krusty;
 pub type KSR = &'static KrustyState;
 
 
@@ -204,9 +205,13 @@ pub struct Krusty {
     /// This will need to be started separately after setting up all the combos
     pub wel : &'static WinEventsListener,
 
+    /// Cursors provide functionality to swap cursor-set colors to provide visual feedback
+    /// This will need to be separately enabled to be active
+    pub cursors : &'static Cursors,
+
     /// The QuickBar by default provides the ui framework for the quick-bar (but the actual action-grid there should be populated later) <br><br>
     /// This will need to be started separately after setting up all the combos
-    pub qb : &'static QuickBar,
+    pub qbar : &'static QuickBar,
 
 }
 
@@ -418,17 +423,27 @@ impl KrustyState {
 /// impl for Krusty data and state struct
 impl Krusty {
 
-    /// create a new Krusty object (holds the KrustyState, the combos-map, and a registry of keys to do default-bindings on)
-    pub fn new() -> Krusty {
-        let ks = KrustyState::instance();
-        Krusty {
-            _private : (),
-            ks,
-            cm    : CombosMap::instance(),
-            iproc : InputProcessor::instance(),
-            wel   : WinEventsListener::instance(),
-            qb    : QuickBar::instance(),
-        }
+    /// Get a 'static instance ref of the whole Krusty object (holds the input-processor, krusty-state, the combos-map, quickbar etc)
+    pub fn instance() -> &'static Krusty {
+        static INSTANCE : OnceCell <Krusty> = OnceCell::new();
+
+        // Note that the ordering of instantiation doesnt matter (no cyclical dependencies) .. but since we've started grabbing
+        // .. some instances at init time (mostly for ease, not from necessity), we're noting them below for reference :
+        // KrustyState, Cursors, and InputProcessor (iproc) dont grab any of the others (from Krusty) during init
+        // CombosMap and Qbar grab KrustyState
+        // WinEventsLister grabs an iproc ref (so it can push out fgnd events w/o having to call instance everytime)
+
+        INSTANCE .get_or_init ( ||
+            Krusty {
+                _private : (),
+                ks      : KrustyState::instance(),
+                cm      : CombosMap::instance(),
+                iproc   : InputProcessor::instance(),
+                wel     : WinEventsListener::instance(),
+                cursors : Cursors::instance(),
+                qbar    : QuickBar::instance(),
+            }
+        )
     }
 
 }

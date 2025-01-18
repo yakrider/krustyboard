@@ -139,7 +139,7 @@ impl Cursors {
     }
 
 
-    pub fn set_swaps_enabled (&self, enabled:bool) {
+    pub fn set_swaps_enabled (&'static self, enabled:bool) {
         // Note: because of how windows seems to refresh rendering etc ..
         // .. for the very first call, looks like swapping without delay right after the instantiation happened ..
         // .. will screw up the appearance of the cursors, (esp the ibeam middle is rendered black)
@@ -152,7 +152,7 @@ impl Cursors {
             //self.apply_norm();
             thread::spawn ( || {
                 thread::sleep (Duration::from_millis(100));
-                Cursors::instance().apply_norm()
+                self.apply_norm()
             } );
         }
         else if !enabled && self.enabled.is_set() {
@@ -211,22 +211,21 @@ impl Cursors {
 
 
     # [ allow (non_camel_case_types) ]
-    fn apply_fsc <SEL_1, SEL_2> (selector:SEL_1, flash_sel:SEL_2)
+    fn apply_fsc <SEL_1, SEL_2> (&'static self, selector:SEL_1, flash_sel:SEL_2)
         where SEL_1 : CursorSelector,
               SEL_2 : CursorSelector,
         // ^^ gotta specify the two selectors as separate types matching the trait, as every passed in closure type is unique
     {
         thread::spawn ( move || {
-            let cursors = Cursors::instance();
-            if cursors.enabled.is_set() {
-                if let Some(flash) = flash_sel(cursors) {
+            if self.enabled.is_set() {
+                if let Some(flash) = flash_sel(self) {
                     for hc in flash.get_swap_set() { hc.apply() }
                     thread::sleep (Duration::from_millis(150));
                 }
-                if let Some(cs) = selector(cursors) {
+                if let Some(cs) = selector(self) {
                     //for hc in selector(cursors).get_swap_set() { hc.apply() }
                     // ^^ stored sys cursors are still lower res, so we'd rather just reset cursors :
-                    if std::ptr::eq (cs, &cursors.sys) {
+                    if std::ptr::eq (cs, &self.sys) {
                         Self::reset_system_cursors()
                     } else {
                         for hc in cs.get_swap_set() { hc.apply() }
@@ -235,15 +234,15 @@ impl Cursors {
             }
         } );
     }
-    pub fn apply_sys  (&self) { Self::apply_fsc (|cs| Some(&cs.sys),  |cs| Some(&cs.flash)) }
-    pub fn apply_norm (&self) { Self::apply_fsc (|cs| Some(&cs.norm), |cs| Some(&cs.flash)) }
-    pub fn apply_sfsc (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.flash)) }
-    pub fn apply_lfsc (&self) { Self::apply_fsc (|cs| Some(&cs.lfsc), |cs| Some(&cs.flash)) }
+    pub fn apply_sys  (&'static self) { self.apply_fsc (|cs| Some(&cs.sys),  |cs| Some(&cs.flash)) }
+    pub fn apply_norm (&'static self) { self.apply_fsc (|cs| Some(&cs.norm), |cs| Some(&cs.flash)) }
+    pub fn apply_sfsc (&'static self) { self.apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.flash)) }
+    pub fn apply_lfsc (&'static self) { self.apply_fsc (|cs| Some(&cs.lfsc), |cs| Some(&cs.flash)) }
 
-    pub fn apply_norm_no_flash (&self) { Self::apply_fsc (|cs| Some(&cs.norm), |_| None) }
+    pub fn apply_norm_no_flash (&'static self) { self.apply_fsc (|cs| Some(&cs.norm), |_| None) }
 
-    pub fn apply_sfsc_w_lfsc_flash (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.lfsc)) }
-    pub fn apply_sfsc_w_norm_flash (&self) { Self::apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.norm)) }
+    pub fn apply_sfsc_w_lfsc_flash (&'static self) { self.apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.lfsc)) }
+    pub fn apply_sfsc_w_norm_flash (&'static self) { self.apply_fsc (|cs| Some(&cs.sfsc), |cs| Some(&cs.norm)) }
 
     /// Resets any system cursor customizations and reloads them from OS configs. <br>
     /// (Instead of making this public, we'd rather encourage using apply_sys which flashes before reset)

@@ -43,7 +43,7 @@ fn load_icons (ctx: &Context) -> Icons {
         _private :  (),
         bright     :  load ( "brightness",  "brightness-01.png",  24,  24 ),
         volume     :  load ( "volume",      "volume-01.png",      18,  18 ),
-        tracks     :  load ( "play-pause",  "play-pause-01.png",  16,  16 ),
+        tracks     :  load ( "play-pause",  "play-pause-01.png",  14,  14 ),
         scrub      :  load ( "scrub-fwd",   "scrub-fwd-01.png",   18,  18 ),
         switche    :  load ( "switche",     "switche-01.png",     18,  18 ),
         sw_blind   :  load ( "sw-blind",    "sw-blind-01.png",    28,  16 ),
@@ -248,7 +248,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // for ctrl-tab switching
-    fn tabs_wh_af (ks: &'static KrustyState, dir_bkwd:bool) -> AF {
+    fn tabs_wh_af (ks:KSR, dir_bkwd:bool) -> AF {
         Arc::new ( move || {
             ks.mod_keys.lctrl.ensure_active();
             if dir_bkwd { Tab.press_release() }
@@ -474,7 +474,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // general use
     static _base : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  refresh(), arrows()   ),
+        vec! ( switche(),     switche_bl(),  arrows(),  refresh()  ),
         vec! ( tabs_bl(),     tabs(),        empty(),   min_back() ),
         vec! ( brightness(),  volume(),      tracks(),  scrub()    ),
     );
@@ -490,7 +490,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // ide specific
     static _ide : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  refresh(),  arrows()   ),
+        vec! ( switche(),     switche_bl(),  arrows(),   refresh()  ),
         vec! ( tabs_bl(),     tabs(),        diff(),     min_back() ),
         vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
     );
@@ -506,7 +506,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // browser specific
     static _web : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  refresh(),  arrows()   ),
+        vec! ( switche(),     switche_bl(),  arrows(),   refresh()  ),
         vec! ( tabs_bl(),     pg_dark(),     im_dark(),  min_back() ),
         vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
     );

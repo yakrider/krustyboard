@@ -158,7 +158,7 @@ impl Mouse {
         self.hwheel.spin_invalidated.clear();
     }
 
-    pub fn setup_mouse (&self, k:&Krusty) {
+    pub fn setup_mouse (&self, k:KR) {
 
         // for most mouse btn actions, we can setup standard skeleton bindings, and let actual 'business-logic' be setup via combo bindings
 
@@ -269,7 +269,7 @@ impl Mouse {
 
 
 /// setup standard mouse btn PRESS handling expecting the actual 'business-logic' to be setup via combo mappings
-pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:&Krusty) {
+pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:KR) {
     use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnDown, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -284,7 +284,7 @@ pub fn setup_standard_mbtn_press_handling (mbs: &'static MouseBtnState, k:&Krust
 }
 
 /// setup standard mouse btn RELEASE handling expecting the actual 'business-logic' to be setup via combo mappings
-pub fn setup_standard_mbtn_release_handling (mbs: &'static MouseBtnState, k:&Krusty) {
+pub fn setup_standard_mbtn_release_handling (mbs: &'static MouseBtnState, k:KR) {
     use crate::MouseBtnEv_T::*;
     k.iproc.input_bindings .bind_btn_event (mbs.btn, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -299,14 +299,14 @@ pub fn setup_standard_mbtn_release_handling (mbs: &'static MouseBtnState, k:&Kru
 
 
 /// sets up mouse right btn RELEASE with special case for to handle switche injected rbtn-ups during rbtn-held-scroll
-pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
+pub fn setup_mouse_right_btn_release_handling (k:KR) {
     /* NOTE: this has a bit of special consideration, as mostly we'd just use queued callbacks or light inline wrapper then combo-proc ..
         .. but rbtn up has the peculiar situation where to support switche, when swi injects an rbtn-up to start rbtn-scroll mode,
         .. we cant just reinject the rbtn-up in combo handling, as switche would reprocess it in a feedback loop (for lack of have switche extra-info)
         .. So instead, we check for that in the inline binding handler itself so we can let it through in that special case
     */
     use crate::{MouseButton::*, MouseBtnEv_T::*};
-    let ks = k.ks; let mbtn = k.ks.mouse.rbtn;
+    let mbtn = k.ks.mouse.rbtn;
     k.iproc.input_bindings .bind_btn_event (RightButton, BtnUp, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
         //cb : EvCbFn_Inline ( Arc::new ( move |ev| handle_mouse_right_btn_up (&ks, ev) ) )
@@ -314,7 +314,7 @@ pub fn setup_mouse_right_btn_release_handling (k:&Krusty) {
             mbtn.down.clear(); mbtn.dbl_tap.clear();
             if ev.extra_info == SWITCHE_INJECTED_IDENTIFIER_EXTRA_INFO {
                 mbtn.active.clear();
-                ks.in_right_btn_scroll_state.set();
+                k.ks.in_right_btn_scroll_state.set();
                 // ^^ note that we let even down state be cleared above, even though its not phys rbtn-up, as switche might block the phys rbtn-up
                 // (mostly in case swi is before krusty in hook chain .. else we'd hear the phys rbtn-up before swi anyway)
                 EvProc_Ds::new (EvProp_Continue, ComboProc_Disable)
@@ -359,7 +359,7 @@ pub fn mouse_action_masked (af:AF) {
 
 
 /// sets up mouse wheel (vert-wheel or horiz-wheel as specified in params)
-pub fn setup_mouse_wheel_handling (k:&Krusty, whl: &'static MouseWheelState, ev_t:MouseWheelEv_T) {
+pub fn setup_mouse_wheel_handling (k:KR, whl: &'static MouseWheelState, ev_t:MouseWheelEv_T) {
     // we'll define a common binding AF for wheel types and direction, and let combo mapping add specific behavior
     k.iproc.input_bindings .bind_wheel_event (whl.wheel, ev_t, EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Undet),
@@ -398,17 +398,16 @@ fn check_wheel_spaced (whl:&MouseWheelState, ev:&Event) -> bool {
 
 
 
-pub fn setup_mouse_move_handling (k:&Krusty) {
+pub fn setup_mouse_move_handling (k:KR) {
     use crate::EventDat::*;
-    let (ks, qb) = (k.ks, k.qb);
     k.iproc.input_bindings .bind_pointer_event ( EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_Continue, ComboProc_Disable),
         cb: EvCbFn_Queued ( Arc::new ( move |ev| {
-            if ks.mouse.lbtn.down.is_set() {
-                if ks.mod_keys.lwin.down.is_set() || qb.is_drag_active() {
-                    ks.mod_keys.lwin.consumed.set();
+            if k.ks.mouse.lbtn.down.is_set() {
+                if k.ks.mod_keys.lwin.down.is_set() || k.qbar.is_drag_active() {
+                    k.ks.mod_keys.lwin.consumed.set();
                     if let pointer_event { xy } = ev.dat {
-                        handle_lwin_mouse_drag (xy.x, xy.y, ks)
+                        handle_lwin_mouse_drag (xy.x, xy.y, k.ks)
             } } }
         } ) ),
     } );

@@ -135,6 +135,7 @@ pub fn start_system_tray_monitor() {
 
 
     let events_handler = move |event:KrustyTauriEvent| {
+        let ks = KrustyState::instance();
         //println!("krusty-tauri-event: {event:?}");
 
         match event {
@@ -150,7 +151,7 @@ pub fn start_system_tray_monitor() {
 
             KrustyTauriEvent::HotKeyEvent (event) => {
                 if event.id == unsuspend_hotkey.id  &&  event.state == HotKeyState::Released {
-                    KrustyState::instance().un_suspend_krusty();
+                    ks.un_suspend_krusty();
                     // ^^ will circle back to us as SuspendEvent, which will update tray-menu checkboxes
                 }
             }
@@ -158,15 +159,13 @@ pub fn start_system_tray_monitor() {
             KrustyTauriEvent::MenuEvent(event) => {
                 // note below that suspend/un-suspend calls will circle back to us via krusty injected SuspendEvent
                 // .. which will then update the tray-menu checkboxes etc .. (same as when suspended by some krusty combo)
-
                 if event.id == quit.id() {
                     std::process::exit(0);
                 }
                 else if event.id == reload.id() {
-                    KrustyState::instance().un_suspend_krusty();
+                    ks.un_suspend_krusty();
                 }
                 else if event.id == suspend.id() {
-                    let ks = KrustyState::instance();
                     if ks.check_krusty_suspended() {
                         ks.un_suspend_krusty();
                     } else {

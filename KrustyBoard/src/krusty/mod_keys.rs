@@ -299,7 +299,7 @@ impl ModKeys {
         self.ordered_unif_modkeys() .iter() .for_each (|umk| umk.proc_notice__caps_up(ks));
     }
 
-    pub fn setup_tracking (&'static self, k:&Krusty) {
+    pub fn setup_tracking (&'static self, k:KR) {
         self.caps.setup_tracking (k);
         self.ordered_unif_modkeys() .iter() .for_each (|umk| umk.setup_tracking(k));
     }
@@ -355,20 +355,19 @@ impl CapsModKey {
     }
 
 
-    pub fn setup_tracking (&self, k:&Krusty) {
+    pub fn setup_tracking (&self, k:KR) {
         // note that for caps, we completely block it from ever being sent up, and just manage internally
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*, KbdKey::CapsLock};
 
         // toggle off first if necessary (to clear key light)
         Self::clear_caps_lock_state();
 
-        let ks = k.ks;
         let ev_proc_ds = EvProc_Ds::new (EvProp_Stop, ComboProc_Enable);
 
-        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps .handle_key_down (ks, &ev); ev_proc_ds } ) );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { k.ks.mod_keys.caps .handle_key_down (k.ks, &ev); ev_proc_ds } ) );
         k.iproc.input_bindings .bind_kbd_event (CapsLock, KeyEventCb_KeyDown, EvCbEntry { ev_proc_ds, cb } );
 
-        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { ks.mod_keys.caps .handle_key_up (ks, &ev); ev_proc_ds } ) );
+        let cb = EvCbFn_Inline ( Arc::new ( move |ev| { k.ks.mod_keys.caps .handle_key_up (k.ks, &ev); ev_proc_ds } ) );
         k.iproc.input_bindings .bind_kbd_event (CapsLock, KeyEventCb_KeyUp, EvCbEntry { ev_proc_ds, cb } );
     }
 
@@ -625,22 +624,21 @@ impl UnifModKey {
     }
 
 
-    pub fn setup_tracking (&'static self, k:&Krusty) {
+    pub fn setup_tracking (&'static self, k:KR) {
         // the setup for these is mostly just tracking their state flags ..
         // however, we will also disable repeats, not least to ease looking at keystreams
         use crate::{KbdEv_MapKey_T::*, EvCbFn_T::*};
-        let ks = k.ks;
 
         k.iproc.input_bindings .bind_kbd_event (
             self.mk.key(), KeyEventCb_KeyDown, EvCbEntry {
                 ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
-                cb: EvCbFn_Inline ( Arc::new (move |ev| { self.handle_key_down (ev, ks) } ) )
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { self.handle_key_down (ev, k.ks) } ) )
         } );
 
         k.iproc.input_bindings .bind_kbd_event (
             self.mk.key(), KeyEventCb_KeyUp, EvCbEntry {
                 ev_proc_ds: EvProc_Ds::new (EvProp_Undet, ComboProc_Disable),
-                cb: EvCbFn_Inline ( Arc::new (move |ev| { self.handle_key_up (ev, ks) } ) )
+                cb: EvCbFn_Inline ( Arc::new (move |ev| { self.handle_key_up (ev, k.ks) } ) )
         } );
     }
 

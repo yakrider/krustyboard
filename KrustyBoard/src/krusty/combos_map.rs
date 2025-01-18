@@ -39,6 +39,9 @@ pub struct CombosMap {
     //   we start running it, so there should never be a write attempted while some other thread is trying to read these
     _private : (),
 
+    // since we'll need access to KrustyState everytime we handle input, we'd rather grab a ref at init time itself
+    ks : &'static KrustyState,
+
     /// maps key+mod-key+mode-state combos to actions
     combos_map : AtomicRefCell <FxHashMap <Combo, Vec<ComboValue>>>,
 
@@ -61,9 +64,10 @@ impl CombosMap {
         INSTANCE .get_or_init ( ||
             CombosMap {
                 _private : (),
-                combos_map        : AtomicRefCell::new ( FxHashMap::default() ),
-                wildcard_combos   : AtomicRefCell::new ( FxHashMap::default() ),
-                handled_keys_set  : AtomicRefCell::new ( FxHashSet::default() ),
+                ks               : KrustyState::instance(),
+                combos_map       : AtomicRefCell::new ( FxHashMap::default() ),
+                wildcard_combos  : AtomicRefCell::new ( FxHashMap::default() ),
+                handled_keys_set : AtomicRefCell::new ( FxHashSet::default() ),
             }
         )
     }
@@ -89,7 +93,7 @@ impl CombosMap {
         self._add_combo (cg, ag, false)
     }
     fn _add_combo (&self, cg: impl Into<CG>, ag: impl Into<AG>, is_fsc:bool) {
-        for (c, cv) in Combo::gen_combo_entries (cg.into(), ag.into(), is_fsc) {
+        for (c, cv) in Combo::gen_combo_entries (cg.into(), ag.into(), is_fsc, self.ks) {
             self.add_to_combos_map (c, cv);
         }
     }
@@ -99,19 +103,18 @@ impl CombosMap {
     /// Registers a combo as a possible 'sticky-first-stroke-combo' (sfsc), and returns its combo-hash. <br>
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
     /// Note that sfscs are active only while some-modkey is held, and therefore only a combo with some modkey can be a valid sfsc
-    pub fn register_gen_combo_sticky_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
+    pub fn register_gen_combo_sticky_first_stroke (&'static self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
-        let fsc = Combo::gen_fsc_hash(&cg);
+        let fsc = Combo::gen_fsc_hash (&cg, self.ks);
         self.setup_af_sticky_first_stroke (fsc, cg);
         fsc
     }
     /// Co-Registers a possible first-stroke combo as an alternate for another sticky first-stroke with the combo-hash supplied
-    pub fn register_combo_sticky_first_stroke (&self, fsc:ComboHash, cg: impl Into<CG>) {
+    pub fn register_combo_sticky_first_stroke (&'static self, fsc:ComboHash, cg: impl Into<CG>) {
         self.setup_af_sticky_first_stroke (fsc, cg.into());
     }
-    fn setup_af_sticky_first_stroke (&self, fsc:ComboHash, cg:CG) {
-        let ks = cg.ks;
-        let af = Arc::new ( move || ks.activate_sticky_fsc(fsc) );
+    fn setup_af_sticky_first_stroke (&'static self, fsc:ComboHash, cg:CG) {
+        let af = Arc::new ( move || self.ks.activate_sticky_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
     }
 
@@ -133,19 +136,18 @@ impl CombosMap {
     /// The combo-hash returned by this fn must be provided as the first-stroke when defining two-stroke-combos. <br>
     /// Note that lfscs remain active upon triggering until clear-latching-first-stroke is triggered <br>
     /// Note also that any AF desired on fsc activation, can ofc be separately added as another regular combo
-    pub fn register_gen_combo_latching_first_stroke (&self, cg: impl Into<CG>) -> ComboHash {
+    pub fn register_gen_combo_latching_first_stroke (&'static self, cg: impl Into<CG>) -> ComboHash {
         let cg = cg.into();
-        let fsc = Combo::gen_fsc_hash(&cg);
+        let fsc = Combo::gen_fsc_hash (&cg, self.ks);
         self.setup_af_latching_first_stroke (fsc, cg);
         fsc
     }
     /// Co-Registers a possible first-stroke combo as an alternate for another latching first-stroke with the combo-hash supplied
-    pub fn register_combo_latching_first_stroke (&self, fsc:ComboHash, cg: impl Into<CG>) {
+    pub fn register_combo_latching_first_stroke (&'static self, fsc:ComboHash, cg: impl Into<CG>) {
         self.setup_af_latching_first_stroke (fsc, cg.into());
     }
-    fn setup_af_latching_first_stroke (&self, fsc:ComboHash, cg:CG) {
-        let ks = cg.ks;
-        let af = Arc::new ( move || ks.activate_latching_fsc(fsc) );
+    fn setup_af_latching_first_stroke (&'static self, fsc:ComboHash, cg:CG) {
+        let af = Arc::new ( move || self.ks.activate_latching_fsc(fsc) );
         self._add_combo (cg, ag().af(af), true);
     }
 
@@ -158,10 +160,9 @@ impl CombosMap {
 
 
     /// Registers a combo to CLEAR any active latching-first-stroke-combo
-    pub fn register_combo_clear_latching_first_stroke (&self, cg: impl Into<CG>) {
+    pub fn register_combo_clear_latching_first_stroke (&'static self, cg: impl Into<CG>) {
         let cg = cg.into();
-        let ks = cg.ks;
-        let af = Arc::new ( move || { ks.clear_cur_latching_fsc() } );
+        let af = Arc::new ( move || { self.ks.clear_cur_latching_fsc() } );
         self._add_combo (cg, ag().af(af), true);
     }
 
@@ -263,7 +264,7 @@ impl CombosMap {
     /// generates appropriate fallback actions for a given input-event type (if no matching entry was found in combo maps)
     /// (note that since non-mod keys are not tracked, and press -> up/dn while rel -> ignored, they can have simple fallbacks)
     /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
-    fn gen_fallback_base_af (&self, ks:KSR, ev:&Event) -> Option<AF> {
+    fn gen_fallback_base_af (&'static self, ev:&Event) -> Option<AF> {
         match ev.dat {
             EventDat::key_event {key, ev_t, ..} => {
                 use {KbdKey::*, KbdEvent_T::*};
@@ -280,13 +281,13 @@ impl CombosMap {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
                 MouseBtnEv_T::BtnDown => {
                     Some ( Arc::new ( move || {
-                        if let Some(bs) = ks.mouse.get_btn_state(btn) {
+                        if let Some(bs) = self.ks.mouse.get_btn_state(btn) {
                             bs.active.set(); bs.btn.press();
                     } } ) )
                 }
                 MouseBtnEv_T::BtnUp   => {
                     Some ( Arc::new ( move || {
-                        if let Some(bs) = ks.mouse.get_btn_state(btn) {
+                        if let Some(bs) = self.ks.mouse.get_btn_state(btn) {
                             if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
                     } } ) )
                 }
@@ -304,18 +305,18 @@ impl CombosMap {
 
 
 
-    fn handle_caps_combo_fallback (&self, fbaf:AF, _e:&Event, ks:KSR) {
+    fn handle_caps_combo_fallback (&'static self, fbaf:AF, _e:&Event) {
         // if no combo found while caps down, we want to support most multi-mod combos treating caps as ctrl..
         // (however, we have caps-dn suppress all mod-keys, so we'll have to wrap mod-key up/dn here as necessary)
         // Note that caps combo with mode-state active (incl modekeys themselves) have no fallbacks, they wont even get here
         // further, we'll assume all l2k keys are configured through combo, and we need no fallbacks for them here
 
         // we'll progressively wrap the actions with the appropriate mod-key actions ..
-        let mut af = ks.mod_keys.lctrl.active_action(fbaf);
-        if ks.mod_keys.lalt.down.is_set() { af = ks.mod_keys.lalt.active_action(af) }
-        if ks.mod_keys.some_win_down()    { af = ks.mod_keys.lwin.active_action(af) }
-        if ks.mod_keys.some_shift_down() || ks.mod_keys.ralt.down.is_set() {
-            af = ks.mod_keys.lshift.active_action(af)
+        let mut af = self.ks.mod_keys.lctrl.active_action(fbaf);
+        if self.ks.mod_keys.lalt.down.is_set() { af = self.ks.mod_keys.lalt.active_action(af) }
+        if self.ks.mod_keys.some_win_down()    { af = self.ks.mod_keys.lwin.active_action(af) }
+        if self.ks.mod_keys.some_shift_down() || self.ks.mod_keys.ralt.down.is_set() {
+            af = self.ks.mod_keys.lshift.active_action(af)
         }
         // and finally we just exec the layered action
         af();
@@ -359,12 +360,12 @@ impl CombosMap {
     // However, if any fsc-stage executed either a direct-match or wildcard-match, then the rest of the fsc stages are ignored
     // And similarly, within each fsc-stage itself, if any cond-combo execs, its wildcard search is also skipped
     //
-    fn process_combo_afs (&self, cvs:&Vec<ComboValue>, ev:&Event, ks:KSR) -> ProcCVsResult {
+    fn process_combo_afs (&'static self, cvs:&Vec<ComboValue>, ev:&Event) -> ProcCVsResult {
         let mut proc_res = ProcCVsResult::default();
         for cv in cvs {
             if let Some(cond) = cv.cond.as_ref() {
                 // all conditional combos that are satisfied can be run
-                if cond(ks,ev) {
+                if cond (self.ks, ev) {
                     // but we should only mark cond-matched if we did actually exec a cond matched cv
                     proc_res.cond_execd |= self.exec_combo_value (cv, ev);
                     proc_res.combo_execd |= proc_res.cond_execd;
@@ -378,14 +379,14 @@ impl CombosMap {
     }
 
     // Exact Combo Matching : we try directly looking up a combo and executing it
-    fn try_proc_combo_afs (&self, combo:&Combo, ev:&Event, ks:KSR) -> ProcCVsResult {
+    fn try_proc_combo_afs (&'static self, combo:&Combo, ev:&Event) -> ProcCVsResult {
         //let pcm = self.combos_map.borrow();
         // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
         // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
         let pcm  = unsafe { & *self.combos_map.as_ptr() };
         let mut proc_res = ProcCVsResult::default();
         if let Some(cvs) = pcm.get(combo) {
-            proc_res = self.process_combo_afs (cvs, ev, ks);
+            proc_res = self.process_combo_afs (cvs, ev);
         }
         proc_res
     }
@@ -399,7 +400,7 @@ impl CombosMap {
     // - so for wc proc, we check cur wc-map-key in wc-table, if found, we search through the wc combos under that wcmk for wc-match w cur combo
     // - then if we found a cur-combo matching wc-combo, we use its wc-stripped version to lookup the actual combos_map for the combo-values!
     //
-    fn try_proc_wildcard_combo_afs (&self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, ks:KSR) -> ProcCVsResult {
+    fn try_proc_wildcard_combo_afs (&'static self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event) -> ProcCVsResult {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
         let mut proc_res = ProcCVsResult::default();
         if let Some(cs) = cwm.get(&wcmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
@@ -407,7 +408,7 @@ impl CombosMap {
                 // found a match in wc-combos table, now gotta lookup into actual combo table w its wc-stripped version as key
                 // (the wc-stripped-match != cur-combo below is because then we'd have already found/execd it earlier w/o wc-matching)
                 if *wcsc != *combo {
-                    let cur_proc_res = self.try_proc_combo_afs (wcsc, ev, ks);
+                    let cur_proc_res = self.try_proc_combo_afs (wcsc, ev);
                     proc_res.cond_execd  |= cur_proc_res.cond_execd;
                     proc_res.combo_execd |= cur_proc_res.combo_execd;
                 }
@@ -421,30 +422,29 @@ impl CombosMap {
     // - Next we'll try to match wildcard combos (for the same fsc state .. i.e [sticky, latched, no-fsc])
     // - Note that under any fsc category, wildcard-combos can run even after direct-match combos have been matched and ran
     // - However, if a conditional combo matched and was execd, then searching for wildcards is no longer performed!
-    fn try_proc_fsc_combo (&self, combo:&Combo, ev:&Event, fsc:ComboHash, ks:KSR) -> bool {
+    fn try_proc_fsc_combo (&'static self, combo:&Combo, ev:&Event, fsc:ComboHash) -> bool {
 
         let combo = Combo::gen_fsc_combo (combo, fsc);
-        let proc_res = self.try_proc_combo_afs (&combo, ev, ks);
+        let proc_res = self.try_proc_combo_afs (&combo, ev);
 
         // if we matched an executed a conditional combo, then we bail early
         if proc_res.cond_execd { return true }
 
         // otherwise, even if we did ran something non-conditional, we still let possible wildcard matches run
         let wcmk = WcCombosMapKey::new (combo.bmk, fsc);
-        let wc_proc_res = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev, ks);
+        let wc_proc_res = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev);
 
         proc_res.combo_execd || wc_proc_res.combo_execd
     }
 
     /// combos (and fallback) action handler for current key-event, based on current modes/mod-key states
-    pub fn combo_maps_handle_input (&self, bmk:BindingsMapKey, ev:&Event) {
+    pub fn combo_maps_handle_input (&'static self, bmk:BindingsMapKey, ev:&Event) {
         //println! ("combo-map-key: {:?}", bmk);
         //println! ("event: {:?}", ev);
         // we'll assume that by the time we're here, callbacks for modifier-keys and mode-keys have already updated their flags
         // note also, that from binding setup, we shouldnt get modifier keys or caps sent here for processing
 
-        let ks = KrustyState::instance();
-        let combo = Combo::gen_cur_combo (bmk, ks);
+        let combo = Combo::gen_cur_combo (bmk, self.ks);
 
         //println! ("{:?}   {:?}",combo, ks.sticky_first_stroke.get());
 
@@ -455,39 +455,39 @@ impl CombosMap {
         // (Note that this order means that sfsc combos override lfsc combos, and there can be no layering of sfsc on lfsc etc)
         // (At each of these stages, if we already found and executed a combo, we return as we dont want to fallback to lower categories)
 
-        if !ks.sticky_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, ks.sticky_first_stroke.get(), ks) { return }
+        if !self.ks.sticky_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, self.ks.sticky_first_stroke.get()) { return }
 
-        if !ks.latching_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, ks.latching_first_stroke.get(), ks) { return }
+        if !self.ks.latching_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, self.ks.latching_first_stroke.get()) { return }
 
-        if self.try_proc_fsc_combo (&combo, ev, ComboHash::default(), ks) { return }
+        if self.try_proc_fsc_combo (&combo, ev, ComboHash::default()) { return }
 
 
         // - finally if no lookups (w/ and w/o wildcards) found anything to run, we'll try fallback action gen and processing
         // but first, lets also filter out any automatic fallbacks for ..
         // .. caps-dbl, ralt-dbl combos in all cases .. and some mode-state (and mode-state-dbl) when with caps down
         // .. (reminder that [EDFRQ1234]_dbl, potentially w shift/ralt etc can trigger during normal typing and must be allowed)
-        if ks.mod_keys.caps.dbl_tap.is_set()
-            || ks.mod_keys.ralt.dbl_tap.is_set()
-            || ( ks.mode_states.some_mode_state_active.is_set() && ks.mod_keys.caps.down.is_set() )
+        if self.ks.mod_keys.caps.dbl_tap.is_set()
+            || self.ks.mod_keys.ralt.dbl_tap.is_set()
+            || ( self.ks.mode_states.some_mode_state_active.is_set() && self.ks.mod_keys.caps.down.is_set() )
         { return }
 
-        let fbaf = self.gen_fallback_base_af (ks, ev);
+        let fbaf = self.gen_fallback_base_af(ev);
         if fbaf.is_none() { return }
         // ^^ if we explicitly didnt want to do anything, no point trying to wrap mods below etc
         let fbaf = fbaf.unwrap();
 
-        if ks.mod_keys.caps.down.is_set() {
+        if self.ks.mod_keys.caps.down.is_set() {
             // unregistered caps-combos have extensive fallback setups
-            self.handle_caps_combo_fallback (fbaf, ev, ks);
-        } else if ks.mod_keys.ralt.down.is_set() {
+            self.handle_caps_combo_fallback (fbaf, ev);
+        } else if self.ks.mod_keys.ralt.down.is_set() {
             // unmapped ralt w/o caps is set to shift (other mods pass through)
-            ks.mod_keys.lshift.active_action(fbaf)()
-        } else if ks.mod_keys.some_win_dbl() {
+            self.ks.mod_keys.lshift.active_action(fbaf)()
+        } else if self.ks.mod_keys.some_win_dbl() {
             // we want to check this first before just win-down, but we'll let this work naturally via passthrough (as win will be active)
             fbaf()
-        } else if ks.mod_keys.some_win_down() { // note that win is set to only be active upon dbl-tap
+        } else if self.ks.mod_keys.some_win_down() { // note that win is set to only be active upon dbl-tap
             // so .. for non-dbl win-combo, we could leave it empty or fallback to actual win-combo if its not too annoying
-            ks.mod_keys.lwin.active_action(fbaf)()       // <-- temp hopefully until we get used to double-tap ??
+            self.ks.mod_keys.lwin.active_action(fbaf)()       // <-- temp hopefully until we get used to double-tap ??
         } else {    //println!("passthrough: {:?}",key);
             // others, incl single/double ctrl/shift/lalt/no-mod presses should all work naturally via passthrough
             fbaf()

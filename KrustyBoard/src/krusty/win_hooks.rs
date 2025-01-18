@@ -25,9 +25,15 @@ pub struct FgndInfo {
 }
 
 pub struct WinEventsListener {
+
     pub is_hooked : Flag,
     pub fgnd_info : RwLock <FgndInfo>,
-        self_hwnd : AtomicIsize,
+
+    // we'll hold a hwnd ref for q-bar window to discount during fgnd tracking
+    self_hwnd : AtomicIsize,
+
+    // and we'll grab an InputProcessor ref during init (to pump fgnd events through)
+    iproc : &'static InputProcessor,
 }
 
 
@@ -40,6 +46,7 @@ impl WinEventsListener {
                 is_hooked : Flag::default(),
                 fgnd_info : RwLock::new ( FgndInfo::default() ),
                 self_hwnd : AtomicIsize::default(),
+                iproc     : InputProcessor::instance(),
             }
             // in theory, we could setup-hooks here before returning, but we'll instead let user-code do that, e.g. based on configs
         } )
@@ -133,7 +140,7 @@ impl WinEventsListener {
         *self.fgnd_info.write().unwrap() = fi_new;
 
         // and we'll push out an event on fgnd change for whoever wants to set bindings to it
-        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fgnd_Changed );
+        self.iproc .inject_internal_event ( InternalEvent_T::Fgnd_Changed );
     }
 
 

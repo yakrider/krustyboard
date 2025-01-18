@@ -359,7 +359,8 @@ impl QuickBar {
         let armed = &_armed;
         if armed.is_clear() {
             armed.set();
-            let ks = self.ks ;
+            let ks = self.ks;
+            // ^^ coz since this fn is called by egui 'update' we cant make this fn take 'static self
             thread::spawn (move || { loop {
                 thread::sleep (Duration::from_millis(100));
                 if ks.mouse.lbtn.down.is_clear() {
@@ -648,11 +649,10 @@ impl eframe::App for QuickBar {
             //^^^ Nope, no registraion of win-key at all .. (in their struct with alt, ctrl, shift, cmd)
 
             // So instead, we'll have to try and directly query the OS
-            //let ks = KrustyState::instance();
-            //if ks.mod_keys.lwin.down.is_set() {
+            //if k.ks.mod_keys.lwin.down.is_set() {
             //    if unsafe { dbg!(GetAsyncKeyState (VK_LWIN.0 as i32)) } >= 0 { dbg!("got it");
-            //        ks.mod_keys.lwin.down.clear();
-            //        ks.mod_keys.lwin.dbl_tap.clear();
+            //        k.ks.mod_keys.lwin.down.clear();
+            //        k.ks.mod_keys.lwin.dbl_tap.clear();
             //    }
             //}
             //  ^^^^ even this doesnt work coz apparently neither GetKeyState nor GetAsyncKeyState can be relied upon to ..

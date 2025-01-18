@@ -117,13 +117,12 @@ impl ModeState {
 
 
     /// Binds mode-key-down event on registered mod-key to flag update action (and disables key-repeats if the mode-key-dn is 'consumed')
-    fn bind_mode_key_down (&'static self, k:&Krusty) {
+    fn bind_mode_key_down (&'static self, k:KR) {
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // first we'll prep any supplemental actions specific to different types of mode-state keys
-        let ks = k.ks;
         let mss_cba : AF = {
-            if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.some_l2_mode_active.set() ) }
-            else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.some_qks_mode_active.set() ) }
+            if      self.ms_t.is_l2()  { Arc::new ( move || k.ks.mode_states.some_l2_mode_active.set() ) }
+            else if self.ms_t.is_qks() { Arc::new ( move || k.ks.mode_states.some_qks_mode_active.set() ) }
             else { Arc::new ( || { } ) }
         };
         // now we can build the actual binding actions
@@ -132,11 +131,11 @@ impl ModeState {
             if self.down.is_clear() {
                 // i.e. not a repeat
                 if update_dbl_tap (&ev, &self.dbl_tap) {
-                    ks.mode_states.some_mode_dbl_active.set();
+                    k.ks.mode_states.some_mode_dbl_active.set();
                     blip_cursor(1);
                 }
-                self.down.set(); ks.mode_states.some_mode_state_active.set(); mss_cba();
-                ks.mouse.vwheel.spin_invalidated.set();
+                self.down.set(); k.ks.mode_states.some_mode_state_active.set(); mss_cba();
+                k.ks.mouse.vwheel.spin_invalidated.set();
 
                 // we'll set modkey behavior to disable repeat by default (if caps is held) ..
                 // .. and for other cases, can set that selectively at combo declaration time
@@ -161,13 +160,12 @@ impl ModeState {
     }
 
     /// Binds mode-key-up event on registered mod-key to flag update action
-    fn bind_mode_key_up (&'static self, k:&Krusty) {
+    fn bind_mode_key_up (&'static self, k:KR) {
         use crate::{EvProp_D::*, KbdEv_MapKey_T::*, ComboProc_D::*, EvCbFn_T::*};
         // again, first we'll prep any supplemental actions specific to different types of mode-state keys
-        let ks = k.ks;
         let mss_cba : AF = {
-            if      self.ms_t.is_l2()  { Arc::new ( move || ks.mode_states.refresh_l2_mode_active_flag() ) }
-            else if self.ms_t.is_qks() { Arc::new ( move || ks.mode_states.refresh_qks_mode_active_flag() ) }
+            if      self.ms_t.is_l2()  { Arc::new ( move || k.ks.mode_states.refresh_l2_mode_active_flag() ) }
+            else if self.ms_t.is_qks() { Arc::new ( move || k.ks.mode_states.refresh_qks_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         // then build the actual binding actions
@@ -176,9 +174,9 @@ impl ModeState {
             self.down.clear(); self.consumed.clear(); mss_cba();
             if self.dbl_tap.is_set() {
                 // we wanna call _dbl refresh-check only if it was set .. but must first clear it before we attempt the refresh
-                self.dbl_tap.clear(); ks.mode_states.refresh_mode_dbl_active_flag()
+                self.dbl_tap.clear(); k.ks.mode_states.refresh_mode_dbl_active_flag()
             }
-            ks.mouse.vwheel.spin_invalidated.set();
+            k.ks.mouse.vwheel.spin_invalidated.set();
             ev_proc_ds
         } ) );
         // and finally we can actually bind the action
@@ -191,7 +189,7 @@ impl ModeState {
     /// For mode-key btns (in addition to any combo maps action) we'll want individual binding callbacks that update flags.
     /// Note that after these binding callbacks process, they will still go through bulk processing for their default/combo actions.
     /// (This is as opposed to default-keys/combos that are handled in bulk w/o individual callback bindings)
-    pub fn bind_mode_key_action (&'static self, k:&Krusty) {
+    pub fn bind_mode_key_action (&'static self, k:KR) {
         self.bind_mode_key_down(k);
         self.bind_mode_key_up(k);
     }
@@ -296,7 +294,7 @@ impl ModeStates {
         self.some_mode_dbl_active.clear();
     }
 
-    pub fn bind_mode_keys_actions (&'static self, k:&Krusty) {
+    pub fn bind_mode_keys_actions (&'static self, k:KR) {
         for ms in self.ordered_mode_states() {
             ms.bind_mode_key_action(k)
         }

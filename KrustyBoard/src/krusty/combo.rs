@@ -171,12 +171,12 @@ impl Combo {
         mvs
     }
 
-    fn finalize_combo_gen (mut cg:CG) -> CG {
+    fn finalize_combo_gen (mut cg:CG, ks:KSR) -> CG {
         // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step ..
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
         if let BindingsMapKey::key_ev_t (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
-            for ms in cg.ks.mode_states.ordered_mode_states() {
+            for ms in ks.mode_states.ordered_mode_states() {
                 if ms.key() == Some(key) {
                     if !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }
                     if cg.dat.dbl_tap && !cg.dat.modes.contains(&ms.ms_dbl_t) { cg.dat.modes.push(ms.ms_dbl_t) }
@@ -185,7 +185,7 @@ impl Combo {
         }
         // we'll also add mod-keys to their double-tap combos (as our dbl-tap combos fire while the second tap is still held down)
         // .. or if the modkey itself is the trigger key for the combo
-        cg.ks.mod_keys.ordered_unif_modkeys() .into_iter() .map (|umk| (umk.mk, umk.mk_dbl))
+        ks.mod_keys.ordered_unif_modkeys() .into_iter() .map (|umk| (umk.mk, umk.mk_dbl))
             .chain ([(ModKey::caps, ModKey::caps_dbl)]) .for_each ( |(mk,mk_dbl)|
         {
             if !cg.dat.mks.contains(&mk) && (
@@ -195,7 +195,7 @@ impl Combo {
             }
         } );
         // and similarly for double-taps on mode-states, we'll add the non-dbl mode as well
-        cg.ks.mode_states.ordered_mode_states() .into_iter() .for_each ( |ms| {
+        ks.mode_states.ordered_mode_states() .into_iter() .for_each ( |ms| {
             if cg.dat.modes.contains(&ms.ms_dbl_t) && !cg.dat.modes.contains(&ms.ms_t) {
                 cg.dat.modes.push(ms.ms_t)
             }
@@ -205,7 +205,7 @@ impl Combo {
 
 
     /// Generate one or more combos from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub(crate) fn gen_combos (mut cg:CG) -> Vec<Combo> {
+    pub(crate) fn gen_combos (mut cg:CG, ks:KSR) -> Vec<Combo> {
         // we'll set up helper functions to get the bits for the states bitmap, and the wildcards mask
         fn get_modkey_bit_and_wc (cg:&CG, emks:&[ModKey], mk:ModKey) -> (bool, bool) {
             let mut wc = false;
@@ -223,16 +223,16 @@ impl Combo {
         }
 
         // and a helper fn to generate a combo given a set of lrmk expanded modkeys
-        fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey]) -> Combo {
+        fn gen_exp_mks_combo (cg:&CG, emks:&[ModKey], ks:KSR) -> Combo {
             let (wc_bits, states_bits) = {
                 // first the key-down states for caps, mod-keys, and mode-state-keys
                 [ get_modkey_bit_and_wc (cg, emks, ModKey::caps) ] .into_iter()
-                .chain ( cg.ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk)) )
-                .chain ( cg.ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_t)) )
+                .chain ( ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk)) )
+                .chain ( ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_t)) )
                 // next, their dbl_tap states
                 .chain ( [ get_modkey_bit_and_wc (cg, emks, ModKey::caps_dbl) ] )
-                .chain ( cg.ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk_dbl)) )
-                .chain ( cg.ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_dbl_t)) )
+                .chain ( ks.mod_keys.ordered_unif_modkeys()    .map (|mk| get_modkey_bit_and_wc (cg, emks, mk.mk_dbl)) )
+                .chain ( ks.mode_states.ordered_mode_states()  .map (|ms| get_mode_bit_and_wc (cg, ms.ms_dbl_t)) )
                 // we'll progressively shift the bits and pack into u64 for the states-bits and wildcard mask-bits
                 .enumerate() .fold ( (0,0) , |(aw,ab), (ei, (w,b))| {
                     let acc_w = aw | ((w as u64) << (ei as u8));  // accumulate the mask bits
@@ -256,7 +256,7 @@ impl Combo {
         }
         //cg.dat.wc_mks = cg.dat.wc_mks .map(Self::exp_wildcard_lrmks);
         // finally, we can expand on specified L/R agnostic mod-keys if any, and collect the generated combos
-        Combo::fan_lr (cg.dat.mks.clone()) .iter() .map (|emks| gen_exp_mks_combo(&cg,emks)) .collect::<Vec<Combo>>()
+        Combo::fan_lr (cg.dat.mks.clone()) .iter() .map (|emks| gen_exp_mks_combo(&cg,emks, ks)) .collect::<Vec<Combo>>()
     }
 
 
@@ -265,7 +265,7 @@ impl Combo {
     /// modkeys specified (or not-specified) in the ActionGen builder. <br>
     /// Further, if a combo-gen is provided, will appropriately wrap modkey or mode-key consumption wrappers around the action
     /// (the consumption wrapper marks the keys as consumed, which typically suppresses their key-repeat and/or release events)
-    pub(crate) fn gen_af (ag:&AG, cgo:Option<&CG>) -> AF {
+    pub(crate) fn gen_af (ag:&AG, cgo:Option<&CG>, ks:KSR) -> AF {
         // note-1: there's inefficiency below (gets by using static lists rather than a map), but it's just for ahead-of-time AF gen
         // note-2: this will only wrap actions using L-mod-keys .. hence there's still utility in wrapping consuming AF after this
         // note-3: this left-mk wrapping would be amiss if we had a left-blocked but right-managed mk pair (which we dont intend to have)
@@ -278,7 +278,7 @@ impl Combo {
         }
         let mut af = ag.get_af();
         ModKeys::static_lr_mods_triplets() .iter() .for_each ( |(lrmk,lmk,rmk)| { // for each triplet
-            ag.ks.mod_keys.ordered_unif_modkeys() .iter() .filter (|umk| umk.mk == *lmk) .for_each (|umk| { // for the left-matching umk
+            ks.mod_keys.ordered_unif_modkeys() .iter() .filter (|umk| umk.mk == *lmk) .for_each (|umk| { // for the left-matching umk
                 // ^^ we filtered for the modkey match on the triplet as the 'left' key (so we'll only ever wrap left mks)
                 if ag_triplet_contains (ag, lrmk, lmk, rmk) {
                     // so we're on a triplet where one among its lr/l/r is in the modkeys set of this combo ..
@@ -310,12 +310,12 @@ impl Combo {
         // else, if we did have a combo-gen, we'll try to wrap it with any specified mod-key/mode-key consume actions
         let cg = cgo.unwrap();
         if !cg.dat.mod_key_no_consume {
-            ag.ks.mod_keys.ordered_unif_modkeys() .iter() .for_each ( |umk| {
+            ks.mod_keys.ordered_unif_modkeys() .iter() .for_each ( |umk| {
                 if umk.handling.is_managed() && cg.dat.mks.contains(&umk.mk) { af = umk.keydn_consuming_action (af.clone()) }
             });
         }
         if !cg.dat.mode_kdn_no_consume {
-            ag.ks.mode_states.ordered_mode_states() .iter() .for_each ( |ms| {
+            ks.mode_states.ordered_mode_states() .iter() .for_each ( |ms| {
                 if cg.dat.modes.contains(&ms.ms_t) { af = ms.mode_key_consuming_action (af.clone()); }
             } );
         }
@@ -323,9 +323,9 @@ impl Combo {
     }
 
 
-    pub(crate) fn gen_fsc_hash (cg:&CG) -> ComboHash {
+    pub(crate) fn gen_fsc_hash (cg:&CG, ks:KSR) -> ComboHash {
         // gen combos will generate a bunch of l/r expanded combos, but for matching up a first-stroke, we just need one shared truth
-        let hash = Self::gen_combos (Self::finalize_combo_gen(cg.clone())) .first() .map (|c| {
+        let hash = Self::gen_combos (Self::finalize_combo_gen (cg.clone(), ks), ks) .first() .map (|c| {
             use std::hash::*;
             let mut hasher = DefaultHasher::new();
             c.hash (&mut hasher);
@@ -335,14 +335,14 @@ impl Combo {
     }
 
     /// Generate one or more combos/combo-value entries from this ComboGen (w/ key-dwn consuming behavior as specified during construction)
-    pub(crate) fn gen_combo_entries (cg:CG, ag:AG, is_fsc:bool) -> Vec<(Combo, ComboValue)> {
-        let cg = Self::finalize_combo_gen(cg);
-        let af = Self::gen_af (&ag, Some(&cg));
+    pub(crate) fn gen_combo_entries (cg:CG, ag:AG, is_fsc:bool, ks:KSR) -> Vec<(Combo, ComboValue)> {
+        let cg = Self::finalize_combo_gen (cg, ks);
+        let af = Self::gen_af (&ag, Some(&cg), ks);
         let cond = cg.dat.cond.clone();
         let dbl_tap = cg.dat.dbl_tap;
         let no_rpt = cg.dat.repeat_suppressed;
 
-        Self::gen_combos(cg) .into_iter() .map ( |c|
+        Self::gen_combos (cg, ks) .into_iter() .map ( |c|
             (c, ComboValue::new (af.clone(), cond.clone(), dbl_tap, no_rpt, is_fsc))
         ) .collect()
     }
