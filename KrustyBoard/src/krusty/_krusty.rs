@@ -332,13 +332,13 @@ impl KrustyState {
 
     pub fn inject_event_sticky_fsc_cleared (fsc:ComboHash) {
         //println! ("injecting sticky fsc cleared action for : {:?}", fsc);
-        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fsc_Sticky_Cleared { fsc } )
+        InputProcessor::instance() .inject_fsc_event ( fsc,  FscEvent_T::Fsc_Sticky_Cleared )
         // ^^ this will immediately call input-processor with this event .. which will lookup bindings for it ..
         // .. and if it has queued cb type bindings (as intended), those cbs will get sent to af-queue for in-order processing
     }
     pub fn inject_event_latching_fsc_cleared (fsc:ComboHash) {
         //println! ("injecting latching fsc cleared action for : {:?}", fsc);
-        InputProcessor::instance() .inject_internal_event ( InternalEvent_T::Fsc_Latching_Cleared { fsc } )
+        InputProcessor::instance() .inject_fsc_event ( fsc, FscEvent_T::Fsc_Latching_Cleared )
     }
 
 

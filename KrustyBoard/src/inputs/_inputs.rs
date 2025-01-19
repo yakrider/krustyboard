@@ -103,29 +103,27 @@ impl From<i32> for MouseWheelEv_T {
 }
 
 
+
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub enum InternalEvent_T {
-    Fsc_Sticky_Activated   { fsc:ComboHash },
-    Fsc_Sticky_Cleared     { fsc:ComboHash },
-    Fsc_Latching_Activated { fsc:ComboHash },
-    Fsc_Latching_Cleared   { fsc:ComboHash },
-
-    //Fgnd_Changed { hwnd:Hwnd },
-    Fgnd_Changed,
-    // ^^ we'd rather keep it generic to all fgnd changes, and have the subscriber check fgnd-info themselves
+pub enum FscEvent_T {
+    Fsc_Sticky_Activated,
+    Fsc_Sticky_Cleared,
+    Fsc_Latching_Activated,
+    Fsc_Latching_Cleared,
 }
-
 
 
 
 /// Input event can be a kbd-key-event, mouse-btn-event, mouse-wheel-event, or mouse-pointer-move (with their associated data)
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum EventDat {
-    key_event      { key:KbdKey, ev_t:KbdEvent_T, is_repeat:bool, is_dbl_tap:bool, vk_code:u32, sc_code:u32 },
-    btn_event      { btn:MouseButton, ev_t:MouseBtnEv_T, is_dbl_tap:bool, xy:Point },
+    key_event      { key:KbdKey, key_ev_t:KbdEvent_T, is_repeat:bool, is_dbl_tap:bool, vk_code:u32, sc_code:u32 },
+    btn_event      { btn:MouseButton, btn_ev_t:MouseBtnEv_T, is_dbl_tap:bool, xy:Point },
     wheel_event    { wheel:MouseWheel, delta:i32, xy:Point },
+    fsc_event      { fsc:ComboHash, fsc_ev_t: FscEvent_T },
+    fgnd_event     { fgnd_hwnd:Hwnd },
     pointer_event  { xy:Point },
-    internal_event { ev_t:InternalEvent_T },
+
 }
 
 #[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]

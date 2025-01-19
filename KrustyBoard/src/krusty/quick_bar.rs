@@ -9,15 +9,12 @@ use derive_deref::Deref;
 use once_cell::sync::{Lazy, OnceCell};
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
-use egui::{Align2, Context, FontFamily, FontId, PointerButton, Pos2, TextureHandle, ViewportBuilder};
+use egui::{Align2, Context, FontFamily, FontId, PointerButton, TextureHandle, ViewportBuilder};
 use tao::rwh_06::{HasWindowHandle, RawWindowHandle};
 
-use windows::Win32::Foundation::{POINT};
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_NOZORDER, SWP_NOMOVE, SWP_ASYNCWINDOWPOS, SW_SHOWNOACTIVATE};
+use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, HWND_TOPMOST, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_NOZORDER, SWP_NOMOVE, SWP_ASYNCWINDOWPOS, HWND_BOTTOM};
 
 use crate::*;
-use crate::utils::{win_get_fgnd, win_set_fgnd, win_redraw};
-
 
 
 
@@ -45,58 +42,75 @@ impl Icon {
 /// .. (incl wheel-fwd/bkwd, hover/hover-end, press/release, click) <br>
 /// The order of reporting for clicks seems to be .. press -> release -> click <br>
 /// (Note ofc that there are many other egui reported interactions that we're not ignoring here)
+///
 pub struct ActionCell {
-    pub label         : String,
-    pub icon          : Option<Icon>,
+
+    pub label : String,
+    pub icon  : Option<Icon>,
+
     pub on_wheel_bkwd : AF,
     pub on_wheel_frwd : AF,
-    pub on_hover      : AF,
-    pub on_hover_end  : AF,
-    pub on_press      : AF,
-    pub on_release    : AF,
-    pub on_click      : AF,
+
+    pub on_hover_start : AF,
+    pub on_hover_end   : AF,
+
+    pub on_press   : AF,
+    pub on_release : AF,
+    pub on_click   : AF,
+
+    pub on_rbtn_press   : AF,
+    pub on_rbtn_release : AF,
+    pub on_rbtn_click   : AF,
+
 }
 impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
-        label         : "".to_string(),
-        icon          : None,
-        on_wheel_bkwd : Arc::new (|| {}),
-        on_wheel_frwd : Arc::new (|| {}),
-        on_hover      : Arc::new (|| {}),
-        on_hover_end  : Arc::new (|| {}),
-        on_press      : Arc::new (|| {}),
-        on_release    : Arc::new (|| {}),
-        on_click      : Arc::new (|| {}),
-
+        label           : "".to_string(),
+        icon            : None,
+        on_wheel_bkwd   : Arc::new (|| {}),
+        on_wheel_frwd   : Arc::new (|| {}),
+        on_hover_start  : Arc::new (|| {}),
+        on_hover_end    : Arc::new (|| {}),
+        on_press        : Arc::new (|| {}),
+        on_release      : Arc::new (|| {}),
+        on_click        : Arc::new (|| {}),
+        on_rbtn_press   : Arc::new (|| {}),
+        on_rbtn_release : Arc::new (|| {}),
+        on_rbtn_click   : Arc::new (|| {}),
     } }
 }
 impl ActionCell {
     // we'll just add some syntactic sugar for easy calling
-    pub fn wheel_bkwd_fn (&self) { (self.on_wheel_bkwd)() }
-    pub fn wheel_frwd_fn (&self) { (self.on_wheel_frwd)() }
-    pub fn hover_fn      (&self) { (self.on_hover     )() }
-    pub fn hover_end_fn  (&self) { (self.on_hover_end )() }
-    pub fn press_fn      (&self) { (self.on_press     )() }
-    pub fn release_fn    (&self) { (self.on_release   )() }
-    pub fn click_fn      (&self) { (self.on_click     )() }
+    pub fn wheel_bkwd_fn   (&self)  { (self.on_wheel_bkwd   )() }
+    pub fn wheel_frwd_fn   (&self)  { (self.on_wheel_frwd   )() }
+    pub fn hover_start_fn  (&self)  { (self.on_hover_start  )() }
+    pub fn hover_end_fn    (&self)  { (self.on_hover_end    )() }
+    pub fn press_fn        (&self)  { (self.on_press        )() }
+    pub fn release_fn      (&self)  { (self.on_release      )() }
+    pub fn click_fn        (&self)  { (self.on_click        )() }
+    pub fn rbtn_press_fn   (&self)  { (self.on_rbtn_press   )() }
+    pub fn rbtn_release_fn (&self)  { (self.on_rbtn_release )() }
+    pub fn rbtn_click_fn   (&self)  { (self.on_rbtn_click   )() }
 }
 
 
 
 /// full grid of ActionCells that will be rendered by egui
 pub struct ActionGrid {
-    pub label   : String,
-    pub cell_sz : CellDims,
-    pub grid_sz : GridDims,
-    pub grid    : Vec <Vec <Arc <ActionCell>>>,
+    pub label     : String,
+    pub cell_sz   : CellDims,
+    pub grid_sz   : GridDims,
+    pub grid      : Vec <Vec <Arc <ActionCell>>>,
+    pub start_pos : Option <Point>,
 }
 impl Default for ActionGrid {
     fn default() -> ActionGrid {
         ActionGrid {
-            label   : String::new(),
-            cell_sz : CellDims::default(),
-            grid_sz : GridDims::default(),
-            grid    : vec![vec![]]
+            label     : String::new(),
+            cell_sz   : CellDims::default(),
+            grid_sz   : GridDims::default(),
+            grid      : vec![vec![]],
+            start_pos : None,
         }
     }
 }
@@ -145,9 +159,12 @@ pub type GetGridFn = Box <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
 
 pub struct QuickBarDat {
 
-    visible  : Flag,
-    persist  : Flag,
-    dragging : Flag,
+    visible : Flag,
+    persist : Flag,
+
+    drag_active : Flag,
+
+    cur_pos : PointAtomic,
 
     // we'll acquire ks ref at init
     ks : &'static KrustyState,
@@ -188,11 +205,14 @@ impl QuickBar {
             QuickBar ( Arc::new ( QuickBarDat {
                 visible  : Flag::default(),
                 persist  : Flag::default(),
-                dragging : Flag::default(),
 
-                ks       : KrustyState::instance(),
-                ctx      : Arc::new (Mutex::new (None)),
-                hwnd     : AtomicIsize::default(),
+                drag_active : Flag::default(),
+
+                cur_pos : PointAtomic::default(),
+
+                ks   : KrustyState::instance(),
+                ctx  : Arc::new (Mutex::new (None)),
+                hwnd : AtomicIsize::default(),
 
                 get_grid_builder : Arc::new ( Mutex::new ( None ) ),
                 get_grid         : Arc::new ( Mutex::new ( Box::new (move || gg_empty .clone()))),
@@ -206,18 +226,10 @@ impl QuickBar {
     }
 
     pub fn set_dragging (&self, state:bool) {
-        self.dragging.store (state);
+        self.drag_active.store (state);
     }
     pub fn is_drag_active (&self) -> bool {
-        self.dragging.is_set()
-    }
-
-    fn get_cursor_pos() -> Pos2 {
-        unsafe {
-            let mut pos = POINT::default();
-            let _ = GetCursorPos (&mut pos);
-            pos2 (pos.x as f32, pos.y as f32)
-        }
+        self.drag_active.is_set()
     }
 
     pub fn is_visible    (&self) -> bool { self.visible.is_set() }
@@ -225,16 +237,14 @@ impl QuickBar {
 
     pub fn toggle (&self) {
         // toggling will open/close it with persistence (unlike for mouse invocations with fsc)
-        if self.visible.is_set() {
-            self.hide(true)
+        if self.visible.is_clear() {
+            self.show (true, false)  // bools : persist, and open at stored loc
         } else {
-            self.show(true)
+            self.hide (true)         // bool : hide w force flag (if was persistent)
         }
     }
 
     pub fn hide (&self, force:bool) {
-
-        if self.visible.is_clear() { return };
 
         if !force && self.persist.is_set() { return };
         // ^^ if we were shown w persist flag, only a force close should hide it
@@ -242,19 +252,27 @@ impl QuickBar {
         self.visible.clear();
         self.persist.clear();
 
-        // want to hide and minimze .. (coz egui bug, minimized windows stop event-loop but hidden windows dont!)
-        // .. but then when we bring it back, it will have to be shown/restored before locating it, which causes flashing
-        // .. so we'd rather move this off-screen first before we minimize and hide it
+        // lets save the qbar window position in case it has moved around
         let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
+        let rect = utils::win_get_window_rect(hwnd);
+        self.cur_pos.store ( Point { x: rect.left, y: rect.top } );
+
+        // want to hide and minimze .. (coz due to egui bug, minimized windows stop event-loop but hidden windows dont!)
+        // .. but then when we bring it back, it will have to be shown/restored before locating it, which causes flashing
+        // .. so we'd rather move this off-screen first before we minimize it ..
+        // .. but OS doesnt let us move it off-screen via SetWindowPos, so instead we'll set it to zero-sized at zero co-ords
         unsafe {
             //SetWindowPos (hwnd, HWND_BOTTOM, -200, 0, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             // ^^ off-screen co-ords seem to get adjusted, so we'll instead make it to zero-sized square at zero co-ords
-            SetWindowPos (hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE);
-            ShowWindow (hwnd, SW_MINIMIZE | SW_HIDE);
+            SetWindowPos (hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOACTIVATE);
+
+            //ShowWindow (hwnd, SW_HIDE);
+            // ^^ cant do that, will make one core busy wait!
+            ShowWindow (hwnd, SW_MINIMIZE);
         }
     }
 
-    pub fn show (&self, persist:bool) {
+    pub fn show (&self, persist:bool, at_cursor:bool) {
 
         self.persist.store(persist);
         // ^^ we'll update this even if we were already open
@@ -262,59 +280,58 @@ impl QuickBar {
         if self.visible.is_set() { return }
 
         self.visible.set();
-        // we're going to hide/unhide manually, as sending Viewport cmd to unset visible appears irreversible (egui bug)
-        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
-        let pos = Self::get_cursor_pos();
 
-        // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
-        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
-        // but first, lets calc the qbar's new position around the cursor ..
-        //utils::win_set_thread_dpi_aware();
-        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
+        // we're going to hide/unhide manually, as sending Viewport cmd to unset visible appears irreversible (egui bug)
+        // .. and on top, hidden egui windows seem to not stop event-loop and therefore consume cpu .. so we'll have to minimze instead
+        // .. but if we're just doing minimize, we'd rather also set window size to zero etc to avoid them showing up user actions etc
+        // and in general, sending egui viewport cmds to reposition etc seem unreliable, partly due to how they deal w seqeuening ..
+        // e.g. windows reposition requires un-minimize to have happened first (not at same time) .. and egui queues up cmds and so on
+        // so instead, we'll do most of that w win-api cmds directly which seem more robust and reliable
+
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
+
         let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
         let grid_sz = grid.grid_px_sz();
 
-        let x = pos.x as i32 - (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
-        let y = pos.y as i32 - (grid_sz.height as i32 as f32 * scaling / 2.0) as i32 - 4;
-        // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
+        // we'll need scaling to calc the qbar's new position/size
+        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
+
+        let pos = if !at_cursor {
+            self.cur_pos.load()
+        } else {
+            let mut pos = utils::get_pointer_loc();
+            pos.x -= (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
+            pos.y -= (grid_sz.height as i32 as f32 * scaling / 2.0) as i32 - 4;
+            // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
+            pos
+        };
 
         let width  = (scaling * grid_sz.width  as f32) as i32;
         let height = (scaling * grid_sz.height as f32) as i32;
         // ^^ manually coz auto dpi-scaling didnt seem to happen for w/h .. (setting thread dpi-aware didnt help)
 
-        // now we can bring up the window and resize/reposition it to the proper location
+        // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
+        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
         unsafe {
             ShowWindow (hwnd, SW_RESTORE);
-            ShowWindow (hwnd, SW_SHOWNOACTIVATE);
-            // ^^ the SW_ flags arent combinable, so we'll just have to call twice
-            SetWindowPos (hwnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            SetWindowPos (hwnd, HWND_TOPMOST, pos.x, pos.y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
         }
         self.defocus();
-
-        // ugh, this thing has the same issue as tray-icon re the ui event loop not waking until next mouse-motion
-        // so we'll just trigger one instead .. (no obvious way to do the event proxy soln here like for tray)
-        //windows_utils::win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
-        // ^^ todo .. huh check if actually is needed .. forgot what exactly wasnt updating etc, and lots has changed since
     }
 
-    pub fn handle_fgnd_change (&self) {
-        // we get called here from fgnd-change event, and we'd like to make the qb grid update if it needs to
-        // .. for which, we'll mark a flag, and try to wake up the ui-event-loop
-        self.refresh_grid.set();
-
-        //if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
-        //    ctx.request_repaint();
-        //} // ^^ not adequate as wont actually wake up ui-event-loop
-
-        //if let Some(ev_proxy) = self.ev_proxy.lock().unwrap().as_ref() {
-        //    let _ = ev_proxy.send_event ( eframe::UserEvent::RequestRepaint {
-        //        viewport_id: ctx.viewport_id(), when: Instant::now(), cumulative_pass_nr: 0
-        //    } );
-        //} // ^^ didnt do nothing, despite registering a set_request_repaint_callback as it wanted ¯\_(ツ)_/¯
-
-        // so we we're again gonna fall back to windows native to kick the window itself .. oh well
-        win_redraw ( Hwnd ( self.hwnd.load(Ordering::Relaxed) ) );
+    pub fn handle_fgnd_change (&self, fgnd_hwnd:Hwnd) {
+        if self.visible.is_clear() { return }
+        // we'd like the qb grid to check for updates, so we'll mark a flag, and wake up the ui-event-loop
+        if fgnd_hwnd != Hwnd (self.hwnd.load (Ordering::Relaxed)) {
+            if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
+                self.refresh_grid.set();
+                ctx.request_repaint();
+            }
+        } else {
+            // but if it was qbar itself coming to fgnd, we should just give the focus back up
+            self.defocus()
+        }
     }
 
     fn resize (&self, grid: &ActionGrid) { unsafe {
@@ -339,10 +356,9 @@ impl QuickBar {
         // .. and as benefit, we can do more filtering on that enum to limit to likely visible/top hwnds (which the fgnd tracker doesnt do)
 
         let qb_hwnd = Hwnd ( self.hwnd.load(Ordering::Relaxed) );
-        if win_get_fgnd() == qb_hwnd {
+        if utils::win_get_fgnd() == qb_hwnd {
             if let Some(zsec) = utils::win_get_switcher_hwnd__z_second() {
-               //dbg! ((qb_hwnd.0, win_get_fgnd().0, zsec.0));
-               if zsec != qb_hwnd { win_set_fgnd(zsec) }
+               if zsec != qb_hwnd { utils::win_set_fgnd(zsec) }
             }
         }
     }
@@ -388,60 +404,68 @@ impl QuickBar {
 
         thread::spawn ( move || {
 
-            let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
+            // now, ideally we'd startup with the right size, positioning etc ..
+            // but our grid init requires ctx to load up icons, so we cant query grid-sizes etc right away
+            // .. so instead, we'll just let the window come up then resize/reposition/unhide in the startup hook below
 
             let options = eframe::NativeOptions {
-                //centered : true,
+
                 viewport : ViewportBuilder::default()
-                    .with_visible(false)      // set hidden .. doesnt seem to work
-                    .with_active(false)       // dont grab focus
-                    .with_decorations(false)  // no titlebar etc
-                    .with_taskbar(false)      // dont show up in taskbar
-                    .with_resizable(false)    // no manual resizing, just from code
-                    .with_always_on_top()     // always on top
-                    .with_inner_size (vec2 (grid.grid_px_sz().width as f32, grid.grid_px_sz().height as f32))
-                    // ^^ without this theres extra space around the painted area
-                    .with_position (pos2 (-1.0 * grid.grid_px_sz().width as f32, 0.0)),
-                    // ^^ helps keep it offscreen (since setting visible false didnt keep it hidden at startup)
+                    .with_active(false)      // dont grab focus
+                    .with_decorations(false) // no titlebar etc
+                    .with_taskbar(false)     // dont show up in taskbar
+                    .with_resizable(false)   // no manual resizing, just from code
+                    .with_always_on_top()    // always on top
+                    .with_visible(false)     // set hidden .. but doesnt seem to do anything
+                    // and for pos and size, we'll set to zeros for now !!
+                    .with_position   ( pos2 (0.0, 0.0) )
+                    .with_inner_size ( vec2 (0.0, 0.0) ),
 
                 event_loop_builder: Some (Box::new (|builder| {
                     use winit::platform::windows::EventLoopBuilderExtWindows;
                     builder.with_any_thread(true);
                 })),
+
                 ..Default::default()
             };
-
 
             let app = || Box::new(self.clone());
             let _ = eframe::run_native (
                 "QuickBar",
                 options,
                 Box::new ( |cc| {
-
                     // install image loaders for image support
                     egui_extras::install_image_loaders(&cc.egui_ctx);
 
                     // we also want to grab/store the ctx
                     *self.ctx.lock().unwrap() = Some (cc.egui_ctx.clone());
 
-                    // and we can use the ctx to call the configured grid-provider builder ..
-                    // .. which will preload any icons, and generate the grid-provider for us
-                    if let Some(ggfn) = self.get_grid_builder.lock().unwrap().as_ref() {
-                        *self.get_grid.lock().unwrap() = ggfn (&cc.egui_ctx);
-                    }
-
-                    // and the grab/store the hwnd as well
+                    // we'll grab/store the hwnd as well
                     let Ok(h) = cc.window_handle() else { return Ok(app()) };
                     let RawWindowHandle::Win32(hr) = h.as_raw() else { return Ok(app()) };
                     self.hwnd.store (hr.hwnd.into(), Ordering::Relaxed);
                     WinEventsListener::instance().record_self_hwnd(Hwnd(hr.hwnd.into()));
-
-                    // and tweak our quick-bar window a bit too
+                    // and tweak our quick-bar window a bit
                     utils::win_set_anim_disabled (Hwnd(hr.hwnd.into()), true);
-                    thread::spawn ( move || {
-                        thread::sleep (Duration::from_millis(20));
-                        self.hide(true);
-                    } );
+
+                    // and we can use the ctx to call the configured grid-provider builder ..
+                    // .. which will preload any icons, and generate the grid-provider for us
+                    // .. then we'll use that to further setup the startup state for the qbar window
+                    if let Some(ggbfn) = self.get_grid_builder.lock().unwrap().as_ref() {
+                        let get_grid_fn = ggbfn (&cc.egui_ctx);
+                        let cur_grid = get_grid_fn.as_ref()();
+                        thread::spawn ( move || {
+                            thread::sleep (Duration::from_millis(20));
+                            if cur_grid.start_pos.is_some() {
+                                self.cur_pos.store (cur_grid.start_pos.unwrap());
+                                self.show (true, false);    // persist, but not at cursor
+                            } else {
+                                self.hide(true);
+                            }
+                        } );
+                        // and finally we can store the grid-provider fn itself
+                        *self.get_grid.lock().unwrap() = get_grid_fn;
+                    }
 
                     // and finally we can let things start
                     Ok (app())
@@ -459,12 +483,6 @@ impl QuickBar {
 impl eframe::App for QuickBar {
 
     fn update (&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-
-        //if self.visible.is_clear() {
-        //    // shouldnt be necessary, but was here when hiding alone was causing high cpu usage ..
-        //    // .. which was resolved by first minimizing then hiding (as they seem to check for minimized explicitly)
-        //    return
-        //}
 
         // we'll simulate 'mouse-leave' on a cell by tracking last-hovered cell and comparing with cur-hc
         // (and e.g. we'll use the hover-end on the ctrl-tab cell to release the ctrl)
@@ -492,7 +510,9 @@ impl eframe::App for QuickBar {
                         self.resize(&new_grid);
                     }
                     *grid = new_grid;
+                    // now we'll come back again to pick up this updated mut static
                     ctx.request_repaint();
+                    return
                 }
             }
         } }
@@ -552,15 +572,17 @@ impl eframe::App for QuickBar {
                             }
                         } else {
                             //println! ("hover-start .. cur: {:?}", &cur_hc.label);
-                            cur_hc.hover_fn();
+                            cur_hc.hover_start_fn();
                             self.defocus();
                         }
                         unsafe { hov_cell = Some (cur_hc.clone()) };
                     }
+
                     if cell.clicked() {
-                        //println!("Clicked @ {:?}", &cur_hc.label);
-                        cur_hc.click_fn();
                         // (note that we expect focus to be already away as both press/rel do defocus calls)
+                        cur_hc.click_fn();
+                    } else if cell.secondary_clicked() {
+                        cur_hc.rbtn_click_fn();
                     }
                 }
             }
@@ -583,7 +605,10 @@ impl eframe::App for QuickBar {
             }
             // second part of the egui win-key issue hack ..
             // ( we're checking not just in hover-out, but every repaint as its just a few atomic ops)
-            self.win_key_dirty_check();
+            // (but only if we had pointer in egui, as doing that limits some of the disruption)
+            if ui.input (|inp| inp.pointer.has_pointer()) {
+                self.win_key_dirty_check();
+            }
 
             // ^^ ughh .. now this means when dragging, if it goes out qbar, we'll rel/clear win, but since lwin spams, it will
             // soon get set down again, upon which, we'll start a drag of whatever is under the pointer .. gaaaah
@@ -592,32 +617,25 @@ impl eframe::App for QuickBar {
             // seems ok for a temp solution untill egui adds in win-key to their modifiers list
 
 
-            // for any press, we want to immediately give focus back, and send up any applicable event
-            if ui.input ( |inp| inp.pointer.button_pressed(PointerButton::Primary) ) {
+            // for any btn action, we want to immediately give focus back, and send up any applicable event
+            if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Primary)) {
                 self.defocus();
-                if let Some (chc) = cur_hc {
-                    // and if it belonged to a cell, pass up the event
-                    //println! ("lbtn-pressed .. cur: {:?}", &chc.label);
-                    chc.press_fn();
-                }
+                if let Some(ac) = cur_hc { ac.press_fn() }
             }
-            // same for release as well
-            if ui.input ( |inp| inp.pointer.button_released(PointerButton::Primary) ) {
+            if ui.input (|inp| inp.pointer.button_released (PointerButton::Primary)) {
                 self.defocus();
-                // ^^ useful if its press-held coz while being held, even the defocus (on press) wont work
-                if let Some (chc) = cur_hc {
-                    //println! ("lbtn-released .. cur: {:?}", &chc.label);
-                    chc.release_fn();
-                }
+                if let Some(ac) = cur_hc { ac.release_fn() }
+            }
+            if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Secondary)) {
+                self.defocus();
+                if let Some(ac) = cur_hc { ac.rbtn_press_fn() }
+            }
+            if ui.input (|inp| inp.pointer.button_released (PointerButton::Secondary)) {
+                self.defocus();
+                if let Some(ac) = cur_hc { ac.rbtn_release_fn() }
             }
 
-            // right-click anywhere in the window should get us out of mode (upon release)
-            if ui.input ( |inp| inp.pointer.button_released(PointerButton::Secondary)) {
-                //println! ("rbtn-released .. cur: {:?}", cur_hc);
-                self.hide(true);    // the force flag ensure it exits despite persist flag setting
-            }
-
-            // if we were in a cell, we'll check for wheel
+            // if we were in a cell, we'll also check for wheel
             let Some (chc) = cur_hc else { return };
 
             if ui.input ( |inp| inp.raw_scroll_delta.y.abs() > 0.1 ) {

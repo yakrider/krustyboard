@@ -137,10 +137,12 @@ impl WinEventsListener {
             exe   : utils::get_exe_by_pid (utils::get_pid_by_hwnd (hwnd)) .unwrap_or("".into()),
         };
         //println! ("fgnd: {:?}, exe: {:?}", hwnd, &fi_new.exe);
-        *self.fgnd_info.write().unwrap() = fi_new;
 
-        // and we'll push out an event on fgnd change for whoever wants to set bindings to it
-        self.iproc .inject_internal_event ( InternalEvent_T::Fgnd_Changed );
+        // we'll then push out an event on fgnd change for whoever wants to set bindings to it
+        self.iproc .inject_fgnd_event (fi_new.hwnd);
+
+        // and update our fgnd-info cache
+        *self.fgnd_info.write().unwrap() = fi_new;
     }
 
 

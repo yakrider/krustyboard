@@ -121,11 +121,10 @@ impl CombosMap {
     /// Registers an action to be performed when this particular fsc is cleared. <br>
     /// Note that by the time the registered AF gets called, the fsc will already have been cleared
     pub fn register_af_sticky_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
-        let ev_t = InternalEvent_T::Fsc_Sticky_Cleared { fsc };
-        self.setup_af_fsc_cleared (ev_t, af);
+        self.setup_af_fsc_cleared (fsc, FscEvent_T::Fsc_Sticky_Cleared, af);
     }
-    fn setup_af_fsc_cleared (&self, ev_t:InternalEvent_T, af:AF) {
-        InputProcessor::instance().input_bindings.bind_internal_event (ev_t, EvCbEntry {
+    fn setup_af_fsc_cleared (&self, fsc:ComboHash, fsc_ev_t: FscEvent_T, af:AF) {
+        InputProcessor::instance().input_bindings.bind_fsc_event (fsc, fsc_ev_t, EvCbEntry {
             ev_proc_ds: EvProc_Ds::new (EvProp_D::EvProp_Stop, ComboProc_D::ComboProc_Disable),
             cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |_| af() ) ),
         } );
@@ -154,8 +153,7 @@ impl CombosMap {
     /// Registers an action to be performed when this particular fsc is cleared. <br>
     /// Note that by the time the registered AF gets called, the fsc will already have been cleared
     pub fn register_af_latching_first_stroke_cleared (&self, fsc:ComboHash, af:AF) {
-        let ev_t = InternalEvent_T::Fsc_Latching_Cleared { fsc };
-        self.setup_af_fsc_cleared (ev_t, af);
+        self.setup_af_fsc_cleared (fsc, FscEvent_T::Fsc_Latching_Cleared, af);
     }
 
 
@@ -188,7 +186,7 @@ impl CombosMap {
             c = c.strip_wildcards();
         }
         // we'll also add the KbdKey of this combo (if any) to our handled keys cache
-        if let BindingsMapKey::key_ev_t (key, ..) = c.bmk {
+        if let BindingsMapKey::key_ev_bmkt (key, ..) = c.bmk {
             self.add_to_handled_keys_set (key);
         }
         // and finally, we can add the combo to our combos map
@@ -266,18 +264,18 @@ impl CombosMap {
     /// (.. however mouse-btns have tracked states, and separated out press/rel .. so fallback AFs are more involved)
     fn gen_fallback_base_af (&'static self, ev:&Event) -> Option<AF> {
         match ev.dat {
-            EventDat::key_event {key, ev_t, ..} => {
+            EventDat::key_event {key, key_ev_t, ..} => {
                 use {KbdKey::*, KbdEvent_T::*};
                 match key {
                     // we dont want fallback for modifier keys
                     CapsLock | LAlt | RAlt | LCtrl | RCtrl | LShift | RShift | LWin | RWin  =>  None,
                     // and for others, we want press-rel fallback on press (and nothing on release)
-                    _ => match ev_t {
+                    _ => match key_ev_t {
                         KbdEvent_KeyDown | KbdEvent_SysKeyDown => Some ( Arc::new (move || key.press_release()) ),
                         _ => None   // no default fallback for key-release types (w/ or w/o syskey)
                     }
             } }
-            EventDat::btn_event {btn, ev_t, ..} => { match ev_t {
+            EventDat::btn_event {btn, btn_ev_t, ..} => { match btn_ev_t {
                 // (note below that physical params like btn.{down, dbl_tap, stamp) are typically updated in binding itself)
                 MouseBtnEv_T::BtnDown => {
                     Some ( Arc::new ( move || {
@@ -298,8 +296,11 @@ impl CombosMap {
             EventDat::pointer_event {..} => None,
             // ^^ pointer events wont even get here, but eitherway we'd do nothing
 
-            EventDat::internal_event {..} => None,
-            // ^^ internal actions should typically be taken care of at bindings level, we do nothing here
+            EventDat::fsc_event {..} => None,
+            // ^^ Fsc actions should typically be taken care of at bindings level, we do nothing here
+
+            EventDat::fgnd_event {..} => None,
+            // ^^ Fgnd actions should typically be taken care of at bindings level, we do nothing here
         }
     }
 

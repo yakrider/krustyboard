@@ -250,12 +250,21 @@ impl InputProcessor {
 
     /// This can be used to directly send internal-events to the input processor .. <br>
     /// which will lookup bindings for the event, and if has queued cb-types, those will get sent to af-queue for in-order processing
-    pub fn inject_internal_event (&self, ev_t:InternalEvent_T) {
+    pub fn inject_fsc_event (&self, fsc:ComboHash, fsc_ev_t: FscEvent_T) {
         let event = Event {
             stamp: 0,
             injected: true,
             extra_info: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
-            dat: ( EventDat::internal_event { ev_t } ),
+            dat: ( EventDat::fsc_event { fsc, fsc_ev_t } ),
+        };
+        let _ = self.proc_input_event (event);
+    }
+    pub fn inject_fgnd_event (&self, fgnd_hwnd: Hwnd) {
+        let event = Event {
+            stamp: 0,
+            injected: true,
+            extra_info: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
+            dat: ( EventDat::fgnd_event { fgnd_hwnd } ),
         };
         let _ = self.proc_input_event (event);
     }
@@ -368,7 +377,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     //_print_kbd_event (&w_param, &kb_struct);
 
     use KbdEvent_T::*;
-    if let Some(ev_t) = match w_param.0 as u32 {
+    if let Some(key_ev_t) = match w_param.0 as u32 {
         WM_KEYDOWN      => Some (KbdEvent_KeyDown),
         WM_SYSKEYDOWN   => Some (KbdEvent_SysKeyDown),
         WM_KEYUP        => Some (KbdEvent_KeyUp),
@@ -380,16 +389,16 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         let injected = kb_struct.flags & LLKHF_INJECTED == LLKHF_INJECTED;
         let extra_info = kb_struct.dwExtraInfo;
 
-        let ev_src_id = ((ev_t as u64) << 32) | (kb_struct.vkCode as u64) | SRC_ID_MASK_KBD;
+        let ev_src_id = ((key_ev_t as u64) << 32) | (kb_struct.vkCode as u64) | SRC_ID_MASK_KBD;
         let is_repeat = iproc.cache_kbd_event (ev_src_id);
         // ^^ note that currently we're allowing injected events to affect key-repeat flag
 
-        let is_dbl_tap = if ev_t == KbdEvent_KeyDown || ev_t == KbdEvent_SysKeyDown {
+        let is_dbl_tap = if key_ev_t == KbdEvent_KeyDown || key_ev_t == KbdEvent_SysKeyDown {
             let is_dbl_tap = iproc.cache_last_press_event (ev_src_id, kb_struct.time);
             !is_repeat && is_dbl_tap
         } else { false };
 
-        let dat = EventDat::key_event { key, ev_t, is_repeat, is_dbl_tap, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
+        let dat = EventDat::key_event { key, key_ev_t, is_repeat, is_dbl_tap, vk_code: kb_struct.vkCode, sc_code: kb_struct.scanCode };
 
         let event = Event { stamp, injected, extra_info, dat };
 
@@ -450,12 +459,12 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
     //println!("{:#?}", mh_struct);
 
-    let gen_btn_ev = |btn:MouseButton, ev_t:MouseBtnEv_T| {
-        let src_id = ((ev_t as u64) << 32) | u32::from(btn) as u64 | SRC_ID_MASK_MOUSE;
-        let is_dbl_tap = if ev_t == BtnDown {
+    let gen_btn_ev = |btn:MouseButton, btn_ev_t:MouseBtnEv_T| {
+        let src_id = ((btn_ev_t as u64) << 32) | u32::from(btn) as u64 | SRC_ID_MASK_MOUSE;
+        let is_dbl_tap = if btn_ev_t == BtnDown {
             iproc.cache_last_click_event (src_id, stamp)
         } else { false };
-        Some ( btn_event { btn, ev_t, is_dbl_tap, xy: mh_struct.pt.into() } )
+        Some ( btn_event { btn, btn_ev_t, is_dbl_tap, xy: mh_struct.pt.into() } )
     };
     let gen_wheel_ev = |wheel: MouseWheel| {
         let delta = hi_word (mh_struct.mouseData) as i16 as i32;

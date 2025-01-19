@@ -20,6 +20,7 @@ pub const DEFAULT_MOUSE_WHEEL_DELTA: i32 = 120;
 
 # [ derive (Debug, Default) ]
 pub struct PointAtomic { x: AtomicI32, y: AtomicI32 }
+// ^^ todo should make this AtomicI64 w x/y conflated to make actually atomic
 
 impl PointAtomic {
     pub fn store (&self, pt: Point) {

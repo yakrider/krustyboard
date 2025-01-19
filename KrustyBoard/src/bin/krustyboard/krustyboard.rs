@@ -2283,12 +2283,8 @@ fn setup_IDE_combos (k:KR) {
     k.cm .add_combo ( cg().k(Equal).m(caps).s(msE),  expand_selection );
     k.cm .add_combo ( cg().k(Minus).m(caps).s(msE),  shrink_selection );
 
-    k.cm .add_combo ( cg().k(N).m(caps).s(qks3),        duplicate_line.clone() );
     k.cm .add_combo ( cg().k(N).m(caps).s(msE),         duplicate_line.clone() );
     k.cm .add_combo ( cg().k(N).m(caps).s(msE).s(msR),  duplicate_line.clone() );
-
-    k.cm .add_combo ( cg().k(I    ).m(caps).s(qks3),  move_line_up.clone() );
-    k.cm .add_combo ( cg().k(Comma).m(caps).s(qks3),  move_line_dn.clone() );
 
     k.cm .add_combo ( cg().k(I    ).m(caps).s(msE).s(msR),  move_line_up );
     k.cm .add_combo ( cg().k(Comma).m(caps).s(msE).s(msR),  move_line_dn );
@@ -2592,12 +2588,12 @@ fn setup_quick_bar (k:KR) {
         }
         // then just popup the bar itself .. (and open it w/o the persist flag)
         if !k.qbar.is_visible() {
-            k.qbar.show(false);
+            k.qbar.show (false, true);   // no persist, open at cursor loc
         }
         else if k.qbar.is_persistent() {
             // if it was already visible and persisting, we'll re-open at the new location, but w/o persist flag
-            k.qbar.hide(true);   // force hide
-            k.qbar.show(false);  // re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
+            k.qbar.hide (true);   // force hide
+            k.qbar.show (false, true);  // re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
         }
     } );
     //k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc),  ag().af (trigger_af) );
@@ -2640,8 +2636,8 @@ fn setup_quick_bar (k:KR) {
     // if there's a x2 click during this mode, we'll make it persistent .. i.e can release rbtn without qb closing
     // (the next rbtn-rel whether inside/outside will close it .. so will any caps/mod-rel etc that clears the fsc)
     let persist_af = Arc::new ( move || {
-        k.qbar.show(true);              // the bool param is the persist flag
-        k.ks.clear_cur_sticky_fsc();  // after that we can clear out fsc
+        k.qbar.show(true, true);       // the bools are whether to persist, and to open at cursor
+        k.ks.clear_cur_sticky_fsc();    // after that we can clear out fsc
     } );
     k.cm .add_combo ( cg().mbtn(X2Button) .fsc(fsc),  ag().af (persist_af) );
 
@@ -2666,10 +2662,13 @@ fn setup_quick_bar (k:KR) {
 
     // and finally, we'll also set-up an action to update qbar on fgnd change events (pushed by win-events listener)
     // (note that combos dont make sense there, so just direct bindings .. meaning gotta be combined to one if need be))
-    let fgnd_af = Arc::new ( move || k.qbar.handle_fgnd_change() );
-    InputProcessor::instance().input_bindings.bind_internal_event (InternalEvent_T::Fgnd_Changed, EvCbEntry {
+    InputProcessor::instance().input_bindings.bind_fgnd_event ( EvCbEntry {
         ev_proc_ds: EvProc_Ds::new (EvProp_D::EvProp_Stop, ComboProc_D::ComboProc_Disable),
-        cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |_| fgnd_af() ) ),
+        cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |ev| {
+            if let EventDat::fgnd_event { fgnd_hwnd } = ev.dat {
+                k.qbar.handle_fgnd_change (fgnd_hwnd);
+            }
+        } ) ),
     } );
 
 }

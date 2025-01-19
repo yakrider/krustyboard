@@ -41,20 +41,20 @@ fn load_icons (ctx: &Context) -> Icons {
 
     Icons {
         _private :  (),
-        bright     :  load ( "brightness",  "brightness-01.png",  24,  24 ),
-        volume     :  load ( "volume",      "volume-01.png",      18,  18 ),
-        tracks     :  load ( "play-pause",  "play-pause-01.png",  14,  14 ),
-        scrub      :  load ( "scrub-fwd",   "scrub-fwd-01.png",   18,  18 ),
-        switche    :  load ( "switche",     "switche-01.png",     18,  18 ),
-        sw_blind   :  load ( "sw-blind",    "sw-blind-01.png",    28,  16 ),
-        tabs       :  load ( "tabs",        "tabs-03.png",        26,  14 ),
-        tabs_blind :  load ( "tabs-blind",  "tabs-blind-03.png",  36,  16 ),
-        refresh    :  load ( "refresh",     "refresh-01.png",     16,  16 ),
-        min_back   :  load ( "min_back",    "min-back-03.png",    20,  20 ),
-        arrows     :  load ( "arrows",      "arrows-01.png",      20,  20 ),
-        diff       :  load ( "diff",        "diff-02-h40-2.png",  30,  20 ),
-        darken_pg  :  load ( "darken_pg",   "darken-pg-03-2.png", 36,  24 ),
-        darken_im  :  load ( "darken_im",   "darken-im-03.png",   36,  24 ),
+        bright     :  load ( "brightness",  "brightness-01-2.png",  24,  24 ),
+        volume     :  load ( "volume",      "volume-01-2.png",      18,  18 ),
+        tracks     :  load ( "play-pause",  "play-pause-01-2.png",  14,  14 ),
+        scrub      :  load ( "scrub-fwd",   "scrub-fwd-01-2.png",   18,  18 ),
+        switche    :  load ( "switche",     "switche-01-2.png",     18,  18 ),
+        sw_blind   :  load ( "sw-blind",    "sw-blind-01-2.png",    28,  16 ),
+        tabs       :  load ( "tabs",        "tabs-03-2.png",        26,  14 ),
+        tabs_blind :  load ( "tabs-blind",  "tabs-blind-03-2.png",  36,  16 ),
+        refresh    :  load ( "refresh",     "refresh-01-2.png",     16,  16 ),
+        min_back   :  load ( "min_back",    "min-back-03-2.png",    20,  20 ),
+        arrows     :  load ( "arrows",      "arrows-01-2.png",      20,  20 ),
+        diff       :  load ( "diff",        "diff-02-h40-2.png",    30,  20 ),
+        darken_pg  :  load ( "darken_pg",   "darken-pg-03-3.png",   36,  24 ),
+        darken_im  :  load ( "darken_im",   "darken-im-03-2.png",   36,  24 ),
     }
 
 }
@@ -91,15 +91,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     let icons = load_icons (ctx);
 
-    let cell_sz = CellDims::new (48,26);
 
-
+    /// __** Volume, Mute **__
     let cell = ActionCell {
         label : "Volume".into(),
         icon  : icons.volume.clone(),
         on_wheel_bkwd : ag().k(VolumeDown).gen_af(),    // vol down
         on_wheel_frwd : ag().k(VolumeUp  ).gen_af(),    // vol up
-        on_click      : ag().k(VolumeMute).gen_af(),    // mute
+        on_press      : ag().k(VolumeMute).gen_af(),    // mute
         ..Default::default()
     };
     static _volume : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -108,12 +107,13 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+    /// __** Media : Tracks Play, Pause, Next, Prev **__
     let cell = ActionCell {
         label : "Tracks".to_string(),
         icon  : icons.tracks.clone(),
         on_wheel_bkwd : media_next_action (ks, true),                  // next track
         on_wheel_frwd : media_next_action (ks, false),                 // prev track
-        on_click      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
+        on_press      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
         ..Default::default()
     };
     static _tracks : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -122,12 +122,13 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+    /// __** Media : Scrub track-bar .. skip fwd/bkwd **__
     let cell = ActionCell {
         label : "Scrub".to_string(),
         icon  : icons.scrub.clone(),
         on_wheel_bkwd : media_skips_action (1, ks, true),              // skip fwd  on track-bar
         on_wheel_frwd : media_skips_action (1, ks, false),             // skip bkwd on track-bar
-        on_click      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
+        on_press      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
         ..Default::default()
     };
     static _scrub : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -136,7 +137,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // for switche task-switching ..
+
+    /// __** Switche Task Switching **__
     let sw_wh_af = Arc::new ( move || {
         // this is a lil funky, because we want to get into alt-tab and clear out fsc (which will hide qbar) ..
         // then upon rbtn release, alt will be ensured-inactive, and that will activate sw selection like it should!
@@ -204,15 +206,27 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+    /// _** Direct Task Switching (switche-blind) **__
     // blind switch is just sending prev/next, but we gotta refresh the snapshot before we start
     // the nav-keys should be .. refresh:F15,  next:F16,  prev:F17,  top:F18,  bottom:F19  (w/ alt-shift)
     let nav_ag = |nav_key:Key| ag().k(nav_key).m(alt).m(shift).gen_af();
 
     // we're going to track whether we've refreshed, and have it clear whenever cursor leaves the cell
-    static FLAG : Lazy<Flag> = Lazy::new (Flag::default);
-    let refreshed = &FLAG;   // &'static that can be moved to threads without cloning
+    // .. but the switching can trigger grid layout change, which can end/restart hover
+    // .. so instead we'll only clear refresh flag if we're hovered out for a bit
+    static _refreshed : Lazy<Flag> = Lazy::new (Flag::default);
+    let refreshed = &_refreshed;   // &'static that can be moved to threads without cloning
+    static _refr_armed : Lazy<Flag> = Lazy::new (Flag::default);
+    let refr_armed = &_refr_armed;
 
-    let hov_end = Arc::new ( move || refreshed.clear() );
+    let hov_start = Arc::new ( move || { refr_armed.clear(); } );
+    let hov_end = Arc::new ( move || {
+        refr_armed.set();
+        thread::spawn ( move || {
+            thread::sleep (Duration::from_millis(100));
+            if refr_armed.is_set() { refr_armed.clear(); refreshed.clear(); }
+        } );
+    } );
 
     // now the actual nav-fn-gen
     let init_af = move |is_bkwd| {
@@ -234,10 +248,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : "Switche Blind".to_string(),
         icon  : icons.sw_blind.clone(),
-        on_wheel_bkwd : init_af (true ),               // next window
-        on_wheel_frwd : init_af (false),               // prev window
-        on_hover_end  : hov_end,                       // clear refreshed flag
-        on_click      : ag().k(F4).m(lalt).gen_af(),   // close tab
+        on_wheel_bkwd  : init_af (true ),               // next window
+        on_wheel_frwd  : init_af (false),               // prev window
+        on_hover_start : hov_start,                     // clear snap refresh flag
+        on_hover_end   : hov_end,                       // clear snap refresh flag if done
+        on_rbtn_press  : ag().k(F4).m(lalt).gen_af(),   // close window
         ..Default::default()
     };
     static _switche_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -247,7 +262,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // for ctrl-tab switching
+
+    /// _** Ctrl-Tab switching **__
     fn tabs_wh_af (ks:KSR, dir_bkwd:bool) -> AF {
         Arc::new ( move || {
             ks.mod_keys.lctrl.ensure_active();
@@ -283,13 +299,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // direct tabs switching
+
+    /// _** Direct Tabs Switching **__
     let cell = ActionCell {
         label : "Tabs Blind".to_string(),
         icon  : icons.tabs_blind.clone(),
         on_wheel_bkwd : ag().k(PageDown).m(ctrl).gen_af(),   // tab next
         on_wheel_frwd : ag().k(PageUp  ).m(ctrl).gen_af(),   // tab prev
-        on_click      : ag().k(W).m(lctrl).gen_af(),         // close tab
+        on_press      : ag().k(W).m(lctrl).gen_af(),         // close tab
         ..Default::default()
     };
     static _tabs_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -298,7 +315,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // brightness, and overloaded qbar dragging
+
+    /// _** Brightness .. plus ..  Lbtn Qbar Dragging ..  Rbtn Qbar Close **__
     fn gen_incr_brightness (incr:i32) -> AF {
         Arc::new ( move || { let _ = incr_brightness(incr); } )
     }
@@ -332,7 +350,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             // ^^ then send out actual lbtn release so OS doesnt clamp down kbd focus on egui (due to held btn)
         }
         // now, we'll also use the click on drag loc to make qb persistent
-        qb.show(true);               // updates persist flag and exits since its already visible
+        qb.show(true, true);         // updates persist flag and exits since its already visible
         ks.clear_cur_sticky_fsc();   // gives viz feedback of change .. (wont close qb coz we set persist flag)
     } );
     let skip_inj = skip_inj_lbtn_rel.clone();
@@ -347,13 +365,16 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
     } );
 
+    let qbar_close_af = Arc::new ( move ||  qb.hide(true) );
+
     let cell = ActionCell {
         label : "Brightness".into(),
         icon  : icons.bright.clone(),
         on_wheel_frwd : gen_incr_brightness ( 2),   // increase brightness
         on_wheel_bkwd : gen_incr_brightness (-2),   // decrease brightness
-        on_press      : drag_af,                    // enable frame dragging
+        on_press      : drag_af,                    // enable qbar dragging
         on_release    : drag_rel_af,                // sync btn flags if need be
+        on_rbtn_click : qbar_close_af,              // close-qbar
         ..Default::default()
     };
     static _brightness : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -362,7 +383,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // wheel to arrows
+
+    /// _** Wheel to Arrows **__
     let cell = ActionCell {
         label : "Arrows".to_string(),
         icon  : icons.arrows.clone(),
@@ -376,13 +398,13 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // refresh btn for browser etc
+    /// _** Refresh for browser etc **__
     let cell = ActionCell {
         label : "Refresh".to_string(),
         icon  : icons.refresh.clone(),
-        on_click      : ag().k(F5).gen_af(),                  // refresh
         on_wheel_bkwd : ag().k(ExtLeft ).m(lalt).gen_af(),    // pg-bkwd
         on_wheel_frwd : ag().k(ExtRight).m(lalt).gen_af(),    // pg-fwd
+        on_press      : ag().k(F5).gen_af(),                  // refresh
         ..Default::default()
     };
     static _refresh : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -391,7 +413,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // minimize and send window to back
+
+    /// _** Minimize and window Send-to-Back **__
     let af_min_back = Arc::new (move || {
         if let Ok(fgi) = wel.fgnd_info.read() {
             win_min_and_back(fgi.hwnd)
@@ -400,9 +423,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : "MinBack".to_string(),
         icon  : icons.min_back.clone(),
-        on_click      : af_min_back.clone(),    // min-and-back
         on_wheel_bkwd : af_min_back.clone(),    // min-and-back
         on_wheel_frwd : af_min_back.clone(),    // min-and-back
+        on_press      : af_min_back.clone(),    // min-and-back
         ..Default::default()
     };
     static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -411,13 +434,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // diff nav during IDE fgnd
+
+    /// _** Diff Nav (while IDE fgnd) **__
     let cell = ActionCell {
         label : "Diff".to_string(),
         icon  : icons.diff.clone(),
         on_wheel_bkwd : ag().k(ExtDown).m(ctrl).m(alt).gen_af(),   // next diff
         on_wheel_frwd : ag().k(ExtUp  ).m(ctrl).m(alt).gen_af(),   // prev diff
-        on_click      : ag().k(ExtRight).m(ctrl).m(alt).gen_af(),  // accept left -> right
+        on_press      : ag().k(ExtRight).m(ctrl).m(alt).gen_af(),  // accept left -> right
         ..Default::default()
     };
     static _diff : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -426,7 +450,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // chrome bookmarklets trigger for darkening/brightening page (or and further down for just images)
+
+    /// _** Chrome bookmarklets trigger for darkening or brightening of page/image **__
     // note that to make these chrome shortcuts work .. first installed shortkeys extension ..
     // .. then there, set the hotkeys as below, and set them to exec javascript copied directly from bookmarklets
     // .. (directly trying to trigger the bookmarklets didnt work .. oh well)
@@ -445,7 +470,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // chrome image-only darkening bookmarklets trigger
+    /// _** Darkening / brightening for Images only **__
     let im_darken   = ag().k(LBracket).m(ctrl).gen_af();
     let im_brighten = ag().k(RBracket).m(ctrl).gen_af();
     let cell = ActionCell {
@@ -461,7 +486,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    // an empty action-cell for placeholder purposes etc
+    /// _** Empty Action-Cell for placeholder purposes **__
     static _empty : OnceCell < Arc < ActionCell>> = OnceCell::new();
     let empty = _empty .get_or_init ( move || { Arc::new (ActionCell::default()) } );
     let empty = || empty.clone();
@@ -470,6 +495,13 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // we can now start constructing the grid variants for various conditions
+
+    let cell_sz = CellDims::new (48,26);
+
+    let start_pos = Some ( Point { x: 3840-450, y: 250 } );
+    // we'll start just a bit towards the top-right corner
+    // (specifying None would make it stay invisible until invoked at cursor)
+
 
     // general use
     static _base : OnceCell < Arc < ActionGrid>> = OnceCell::new();
@@ -481,7 +513,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let label = "base".into();
     let grid_sz = GridDims::new (3, 4);
     let base = _base.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
     } );
     let base = || base.clone();
 
@@ -497,7 +529,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let label = "ide".into();
     let grid_sz = GridDims::new (3, 4);
     let ide = _ide.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
     } );
     let ide = || ide.clone();
 
@@ -513,7 +545,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let label = "web".into();
     let grid_sz = GridDims::new (3, 4);
     let web = _web.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
     } );
     let web = || web.clone();
 

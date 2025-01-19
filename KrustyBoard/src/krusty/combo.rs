@@ -175,7 +175,7 @@ impl Combo {
         // before we gen combos from these, lets make useful updates to the combo-gen as the final prep step ..
         // first we'll auto-add any mode-keys's state to its own key-down combos (as the flags will be set on before we get to combo proc)
         // .. and also set it to no-consume .. (so the key can repeat itself, unless disabled via no_rpt)
-        if let BindingsMapKey::key_ev_t (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
+        if let BindingsMapKey::key_ev_bmkt (key, KbdEv_MapKey_T::KeyEventCb_KeyDown) = cg.get_bmk() {
             for ms in ks.mode_states.ordered_mode_states() {
                 if ms.key() == Some(key) {
                     if !cg.dat.modes.contains(&ms.ms_t) { cg.dat.modes.push(ms.ms_t) }

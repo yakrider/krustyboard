@@ -290,19 +290,19 @@ impl ComboGen <ComboGenSt_Inited> {
 
 impl From <ComboGen <ComboGenSt_Key>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Key>) -> Self {
-        let bmk = BindingsMapKey::key_ev_t (cg.st.key, cg.st.action);
+        let bmk = BindingsMapKey::key_ev_bmkt (cg.st.key, cg.st.action);
         ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_MouseBtn>> for CG {
     fn from (cg : ComboGen <ComboGenSt_MouseBtn>) -> Self {
-        let bmk = BindingsMapKey::btn_ev_t (cg.st.mbtn, cg.st.action);
+        let bmk = BindingsMapKey::btn_ev_bmkt (cg.st.mbtn, cg.st.action);
         ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
 impl From <ComboGen <ComboGenSt_Wheel>> for CG {
     fn from (cg : ComboGen <ComboGenSt_Wheel>) -> Self {
-        let bmk = BindingsMapKey::wheel_ev_t (cg.st.whl, cg.st.action);
+        let bmk = BindingsMapKey::wheel_ev_bmkt (cg.st.whl, cg.st.action);
         ComboGen { dat: cg.dat, st: ComboGenSt_Inited {bmk} }
     }
 }
