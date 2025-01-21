@@ -174,6 +174,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         } );
     } );
     let sw_wh_af = || sw_wh_af.clone();
+    // lets also kick it once to get the lazy cached Instant fill up (else it would ignore first call)
+    sw_wh_af()();
 
     let sw_release = {
         // now, scrolls here bring up switche, so a click can do sw selection activation .. (no click-to-close as thad be confusing)
@@ -194,9 +196,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : "Switche".to_string(),
         icon  : icons.switche.clone(),
-        on_wheel_bkwd : ag().af(sw_wh_af()).gen_af(),    // invoke switche
-        on_wheel_frwd : ag().af(sw_wh_af()).gen_af(),    // invoke switche
-        on_release    : ag().af(sw_release).gen_af(),    // activate switche selection
+        on_wheel_bkwd : sw_wh_af(),    // invoke switche
+        on_wheel_frwd : sw_wh_af(),    // invoke switche
+        on_release    : sw_release,    // activate switche selection
         ..Default::default()
     };
     static _switche : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -287,10 +289,10 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : "Tabs".to_string(),
         icon  : icons.tabs.clone(),
-        on_wheel_bkwd : tabs_wh_af (ks, true ),          // ctrl-tab
-        on_wheel_frwd : tabs_wh_af (ks, false),          // ctrl-shift-tab
-        on_hover_end  : tabs_hover_end_af,               // ensure ctrl inactive
-        on_release    : ag().af(tabs_release).gen_af(),  // end ctrl-tab
+        on_wheel_bkwd : tabs_wh_af (ks, true ),    // ctrl-tab
+        on_wheel_frwd : tabs_wh_af (ks, false),    // ctrl-shift-tab
+        on_hover_end  : tabs_hover_end_af,         // ensure ctrl inactive
+        on_release    : tabs_release,              // end ctrl-tab
         ..Default::default()
     };
     static _tabs : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -320,61 +322,24 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     fn gen_incr_brightness (incr:i32) -> AF {
         Arc::new ( move || { let _ = incr_brightness(incr); } )
     }
-    let skip_inj_lbtn_rel = Arc::new(Flag::default());
-    let skip_inj = skip_inj_lbtn_rel.clone();
-    // we'll prep an AF to overload click-drag on any cell's press handling (no win-key needed)
-    let drag_af = Arc::new ( move || {
-        // note regarding slowness during drag, that even using an empty ui, the lag remains ..
-        // .. basically that most of the cost is outside the 'update' call, no point trying to fiddle there
-        // (and no easy way to prevent egui repainting due to external moves either)
-        //
-        // we'll prep the drag setup .. (this version of drag is via krusty, not egui!!)
-        if !qb.is_drag_active()  {
-            // we'll want to capture win-snap dat for the drag to use
-            let xy = ks.mouse.lbtn.down_xy.load();
-            let hwnd = win_get_hwnd_from_point (xy);
-            ks.capture_win_snap_dat (xy, hwnd, None);
-            // we'll do a (krusty-unseen) lbtn release so we dont have kbd-focus clamped on qbar
-            // should be mostly harmless, as the actual lbtn release later will sync everything up anyway
-            //dbg!(ks.mouse.lbtn);
-            ks.mouse.lbtn.down.set();
-            // ^^ this is just in case qbar was not defocused and so kr didnt even hear the btn down (should be rare)
-            qb.set_dragging(true);
-            // ^^ will be cleared by krusty combo on rbtn-rel itself (i.e outside qbar)
-            skip_inj.set();
-            delayed_action (20, move || {
-                LeftButton.release();
-                thread::sleep (Duration::from_millis (10));
-                qb.defocus();
-            }) ();
-            // ^^ then send out actual lbtn release so OS doesnt clamp down kbd focus on egui (due to held btn)
-        }
-        // now, we'll also use the click on drag loc to make qb persistent
+    let qbar_drag = Arc::new ( move || {
+        // for drag, we just set a flag and let krusty handle it (incl clearing flag on lbtn release)
+        qb.set_dragging(true);
+        // plus we'll also make lbtn click make qbar persist
         qb.show(true, true);         // updates persist flag and exits since its already visible
         ks.clear_cur_sticky_fsc();   // gives viz feedback of change .. (wont close qb coz we set persist flag)
-    } );
-    let skip_inj = skip_inj_lbtn_rel.clone();
-    let drag_rel_af = Arc::new ( move || {
-        //dbg!((&skip_inj, ks.mouse.lbtn));
-        // note, that the fake lbtn-rel above WILL get here, as qbar doesnt get to filter our own injected events!
-        // .. and so we'll skip it if injected flag was set earlier .. (meh, hacky but mostly harmless)
-        if skip_inj.is_set() { skip_inj.clear(); return }
-        // now we'll handle the case of actual rel while qb has focus .. (else krusty combos would handle it)
-        // (mostly happens only at the very first invocation when lbtn clicking to make it persistent)
-        ks.mouse.lbtn.down.clear(); qb.set_dragging(false);
-        if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
-    } );
-
-    let qbar_close_af = Arc::new ( move ||  qb.hide(true) );
+    });
+    //let exit_drag = Arc::new ( move || qb.set_dragging(false));
+    // we'll explicitly not set it here and rely on global release, just to face potential issues sooner
+    let qbar_close = Arc::new ( move ||  qb.hide(true) );
 
     let cell = ActionCell {
         label : "Brightness".into(),
         icon  : icons.bright.clone(),
         on_wheel_frwd : gen_incr_brightness ( 2),   // increase brightness
         on_wheel_bkwd : gen_incr_brightness (-2),   // decrease brightness
-        on_press      : drag_af,                    // enable qbar dragging
-        on_release    : drag_rel_af,                // sync btn flags if need be
-        on_rbtn_click : qbar_close_af,              // close-qbar
+        on_press      : qbar_drag,                  // persist-qbar, enable drag
+        on_rbtn_click : qbar_close,                 // close-qbar
         ..Default::default()
     };
     static _brightness : OnceCell < Arc < ActionCell>> = OnceCell::new();

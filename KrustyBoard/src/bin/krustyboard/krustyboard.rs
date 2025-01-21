@@ -654,10 +654,12 @@ fn setup_mouse_left_btn (k:KR) {
 
 
     /// for **_ mbtn release _**, we'll specify full wildcards (modkeys, modes) to avoid missing btn releases regardless of mode-states
-    fn gen_af_lbtn_release (ks:KSR) -> AF { Arc::new ( move || {
-        if ks.mouse.lbtn.active.is_set() { ks.mouse.lbtn.active.clear(); LeftButton.release() }
+    fn gen_af_lbtn_release (k:KR) -> AF { Arc::new ( move || {
+        if k.ks.mouse.lbtn.active.is_set() { k.ks.mouse.lbtn.active.clear(); LeftButton.release() }
+        // also good time to clear any qbar drag for robustness if it was lingering etc
+        k.qbar.set_dragging(false);
     } ) }
-    k.cm .add_combo ( cg().mbtn(LeftButton).rel().wcma().wcsa(), ag().af ( gen_af_lbtn_release (k.ks) ) );
+    k.cm .add_combo ( cg().mbtn(LeftButton).rel().wcma().wcsa(), ag().af ( gen_af_lbtn_release (k) ) );
 
 
     /// for win-lbtn and win-caps-lbtn, we want to **_ capture win-snap-dat _** for window drag/resizing
@@ -2586,6 +2588,8 @@ fn setup_quick_bar (k:KR) {
             k.ks.mouse.lbtn.active.clear();
             LeftButton.release()
         }
+        // mostly for robustness to avoid dangling drag flag, we'll clear that here too
+        k.qbar.set_dragging(false);
         // then just popup the bar itself .. (and open it w/o the persist flag)
         if !k.qbar.is_visible() {
             k.qbar.show (false, true);   // no persist, open at cursor loc
@@ -2647,15 +2651,6 @@ fn setup_quick_bar (k:KR) {
     // (and explicitly adding this coz dont want the wheels to fall-through to some non-fsc mapping etc)
     k.cm .add_combo ( cg().whl().bkwd().fsc(fsc),  ag().whl().bkwd().mkg_nw() );
     k.cm .add_combo ( cg().whl().frwd().fsc(fsc),  ag().whl().frwd().mkg_nw() );
-
-    // ugh, and to support our hacky way to drag qb (given doing drag while qb has focus is laggy) ..
-    // .. we'll have to manage drag-state ourselves upon lbtn release
-    let c_drag : ComboCond = Arc::new ( |_,_| k.qbar.is_drag_active() );
-    let end_drag = Arc::new (move || {
-        k.qbar.set_dragging(false);
-        if k.ks.mouse.lbtn.active.is_set() { k.ks.mouse.lbtn.active.clear(); LeftButton.release() }
-    } );
-    k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(c_drag),  ag().af (end_drag) );
 
     // and now lets populate the qbar with our action-grid
     k.qbar .set_grid_provider_builder ( Box::new (qbar_grid::grid_provider_builder) );
@@ -2872,6 +2867,10 @@ pub fn setup_krusty_board (k:KR) {
 
 
 pub fn main () {
+
+    // if we want to use a hook-guard to fork another process to install a more-recent ll-kbd-hook, must call that first thing!
+    // (coz if we're the spawned guard process we dont even want to initialize krusty etc)
+    HookGuard::instance().guard();
 
     // setup the whole krusty keyboard configuration
     let k = Krusty::instance();

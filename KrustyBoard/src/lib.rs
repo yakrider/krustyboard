@@ -83,12 +83,14 @@ pub mod utils {
     pub mod cursors;
     pub mod process_utils;
     pub mod windows_utils;
+    pub mod hook_guard;
 
     // and our (selective or wholesale) sub-module re-exports
     pub use self::brightness::*;
     pub use self::cursors::*;
     pub use self::process_utils::*;
     pub use self::windows_utils::*;
+    pub use self::hook_guard::*;
 }
 
 

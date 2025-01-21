@@ -14,7 +14,7 @@ use windows::Win32::Graphics::Gdi::{HRGN, RDW_INTERNALPAINT, RedrawWindow};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
-use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
+use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetThreadPriority, THREAD_PRIORITY_HIGHEST, GetCurrentThread};
 
 
 // we'll define our own new-type of Hwnd mostly coz HWND doesnt implement Debug, Hash etc
@@ -58,6 +58,10 @@ pub fn win_set_thread_dpi_aware() { unsafe {
 
 pub fn win_set_cur_process_priority_high() -> bool { unsafe {
     SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS) .as_bool()
+} }
+
+pub fn win_set_cur_thread_priority_high() -> bool { unsafe {
+    SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_HIGHEST) .as_bool()
 } }
 
 pub fn dpi_conv_point (hwnd:Hwnd, p:POINT) -> POINT { unsafe {

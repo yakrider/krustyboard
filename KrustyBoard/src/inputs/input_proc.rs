@@ -217,9 +217,6 @@ impl InputProcessor {
 
         thread::spawn ( || unsafe {
 
-            self.set_kbd_hook();
-            self.set_mouse_hook();
-
             // we'll store the thread-id so we can send a message to kill the thread if need be later
             self.iproc_thread .store ( GetCurrentThreadId(), Ordering::Relaxed );
 
@@ -227,9 +224,17 @@ impl InputProcessor {
             utils::win_set_thread_dpi_aware();
 
             // also, we might as well set the whole process higher priority, as we dont want lag in basic input processing
-            let _ = utils::win_set_cur_process_priority_high();
+            //let _ = utils::win_set_cur_process_priority_high();
+            let _ = utils::win_set_cur_thread_priority_high();
             // todo : ^^ check if can get away w simply increasing our thread priority
-            // (^^ although, note that the hook callback is called in the context of the thread that set the hook)
+            // (^^ note that the hook callback is called in the context of the thread that set the hook)
+
+            self.set_kbd_hook();
+            self.set_mouse_hook();
+
+            // to get around the issue of krusty kbd hook not getting events when qbar has focus if it was the last hook,
+            // we started using a guard to ensure the last ll-kbd-hook is a different process than ours .. so we gotta kick it again
+            utils::HookGuard::instance().guard();
 
             // win32 sends hook events to a thread with a 'message loop', but we dont create any windows,
             //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop

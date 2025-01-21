@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 use derive_deref::Deref;
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::OnceCell;
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
 use egui::{Align2, Context, FontFamily, FontId, PointerButton, TextureHandle, ViewportBuilder};
@@ -167,7 +167,7 @@ pub struct QuickBarDat {
     cur_pos : PointAtomic,
 
     // we'll acquire ks ref at init
-    ks : &'static KrustyState,
+    //ks : &'static KrustyState,
 
     // we'll grab hwnd and ctx when the bar comes up
     ctx  : Arc <Mutex <Option <Context>>>,
@@ -210,7 +210,7 @@ impl QuickBar {
 
                 cur_pos : PointAtomic::default(),
 
-                ks   : KrustyState::instance(),
+                //ks   : KrustyState::instance(),
                 ctx  : Arc::new (Mutex::new (None)),
                 hwnd : AtomicIsize::default(),
 
@@ -363,42 +363,6 @@ impl QuickBar {
         }
     }
 
-    fn kick_win_key_rehab (&self) {
-        // because egui eats kbd events, but has no concept of win-key, krusty states can get out-of-sync
-        // .. (causing krusty-unaware win outside, or krusty in win-dn while it is not .. pretty damaging)
-        // so instead, if we ever find lwin dn, we'll mark lwin active .. (which we check/set in all repaints)
-        //   and if we we think we're active (whether cur down or not) by the time we hover out, we'll straight up masked-release
-        //   basically, qbar will be a zone where lwin is immediately 'canceled' .. we can live w that
-        // now, since fast drags will mover cursor temp out of qbar, we want to delay this until the drag btn is released
-        // (ideally, ofc, all of this would be moot if we could detect win-press/rel inside egui and update state)
-        static _armed : Lazy<Flag> = Lazy::new (Flag::default);
-        let armed = &_armed;
-        if armed.is_clear() {
-            armed.set();
-            let ks = self.ks;
-            // ^^ coz since this fn is called by egui 'update' we cant make this fn take 'static self
-            thread::spawn (move || { loop {
-                thread::sleep (Duration::from_millis(100));
-                if ks.mouse.lbtn.down.is_clear() {
-                    armed.clear();
-                    if ks.mod_keys.lwin.active.is_set() {
-                        ks.mod_keys.lwin.down.clear();
-                        ks.mod_keys.lwin.release_w_masking();
-                    }
-                    break;
-                }
-            } } );
-        }
-    }
-    fn win_key_dirty_check (&self) {
-        // so now the checking part for the above hack ..
-        // (and this should be called just in hover-out, but every repaint .. its just a few atomic ops)
-        if self.ks.mod_keys.lwin.down.is_set() {
-            self.ks.mod_keys.lwin.active.set();
-            self.ks.mod_keys.lwin.consumed.set();
-        }
-    }
-
 
     pub fn start (&'static self) {
 
@@ -417,7 +381,7 @@ impl QuickBar {
                     .with_resizable(false)   // no manual resizing, just from code
                     .with_always_on_top()    // always on top
                     .with_visible(false)     // set hidden .. but doesnt seem to do anything
-                    // and for pos and size, we'll set to zeros for now !!
+                    // and for pos and size, we'll set to zeros for init .. will set them upon call to show
                     .with_position   ( pos2 (0.0, 0.0) )
                     .with_inner_size ( vec2 (0.0, 0.0) ),
 
@@ -488,11 +452,6 @@ impl eframe::App for QuickBar {
         // (and e.g. we'll use the hover-end on the ctrl-tab cell to release the ctrl)
         // note that using static mut rquires us to use unsafe .. should be ok here coz only the same thread calls here
         static mut hov_cell : Option <Arc <ActionCell>> = None;
-
-        // and sadly, will have to do the same for modkeys to track release..
-        // (.. esp win-key as that being delayed, makes kr think its down when its released w qb focus, as when doing win-drag)
-        //static mut mods : Option<egui::Modifiers> = None;
-        // ^^ disabled as egui seems blind to win-key, and even Get[Async]KeyStatea isnt reliable w/o fgnd and due to kr hooks
 
         // we also allow dynamically updating the grid based on fgnd context, so we'll want to cache a grid ref for cur painting ..
         // then if the grid changes, we'll pick up the change in the next repaint
@@ -598,24 +557,7 @@ impl eframe::App for QuickBar {
                 }
                 // since we hovered out of the widget, we should give up focus too (if we had it)
                 self.defocus();
-
-                // temp hack until egui fixes win-key support .. see comments on fn for details
-                self.kick_win_key_rehab();
-
             }
-            // second part of the egui win-key issue hack ..
-            // ( we're checking not just in hover-out, but every repaint as its just a few atomic ops)
-            // (but only if we had pointer in egui, as doing that limits some of the disruption)
-            if ui.input (|inp| inp.pointer.has_pointer()) {
-                self.win_key_dirty_check();
-            }
-
-            // ^^ ughh .. now this means when dragging, if it goes out qbar, we'll rel/clear win, but since lwin spams, it will
-            // soon get set down again, upon which, we'll start a drag of whatever is under the pointer .. gaaaah
-            // .. k we updated to filter out hook level reported repeats .. but we'd still stop dragging
-            // hence why we've added the dirty-checking in every frame, and win-rehab on hover-out ..
-            // seems ok for a temp solution untill egui adds in win-key to their modifiers list
-
 
             // for any btn action, we want to immediately give focus back, and send up any applicable event
             if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Primary)) {
@@ -650,39 +592,6 @@ impl eframe::App for QuickBar {
                     }
                 } );
             }
-
-
-            // ugh, we wanted to track win mod-key state change to avoid kr getting out of sync when egui eats a win-release ..
-            // .. but egui doesnt even seem to have any registration for win-key .. nothing in their Modifiers struct tracks it!
-            //
-            //if ui.input ( |inp| inp.key_released (egui::data::key::Key::) );
-            //let cur_mods = ui.input ( |inp| inp.modifiers);
-            //unsafe {
-            //    if mods != Some(cur_mods) {
-            //        println! ("modifs changed");
-            //        dbg! ((mods, Some(cur_mods)));
-            //        mods = Some(cur_mods);
-            //    }
-            //}
-            //^^^ Nope, no registraion of win-key at all .. (in their struct with alt, ctrl, shift, cmd)
-
-            // So instead, we'll have to try and directly query the OS
-            //if k.ks.mod_keys.lwin.down.is_set() {
-            //    if unsafe { dbg!(GetAsyncKeyState (VK_LWIN.0 as i32)) } >= 0 { dbg!("got it");
-            //        k.ks.mod_keys.lwin.down.clear();
-            //        k.ks.mod_keys.lwin.dbl_tap.clear();
-            //    }
-            //}
-            //  ^^^^ even this doesnt work coz apparently neither GetKeyState nor GetAsyncKeyState can be relied upon to ..
-            // .. always return the actual state .. limitations re fgnd thread etc .. and further due to kr hooks and suppression
-            //
-            // Further, there seem to be way too many issues and weirdness with how the ui event-loop responds to held keys ..
-            // We had seen some issues in sw/kr tray too, and similar here make the whole panel non-responsive or the win-state
-            // stuck out of sync both w/ kr w phantom key-dn states, and outside w stuck win keys etc .. when doing win-drags
-            //
-            // so whatever .. for now .. we'll instead make entire qbar a (delayed) win-key-kill-zone .. avoids stuck states
-            // (basically upon leaving qbar, if at any point lwin was seen down, we straight setup a masked release for when lbtn comes up)
-
 
         } );
     }
