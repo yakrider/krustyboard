@@ -5,6 +5,7 @@ use std::mem;
 use std::mem::size_of;
 
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
 use once_cell::sync::Lazy;
 
 use windows::core::{PSTR, HSTRING, PCWSTR};
@@ -17,19 +18,54 @@ use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetThreadPriority, THREAD_PRIORITY_HIGHEST, GetCurrentThread};
 
 
+
+
+// Note for the new-types below that they are globaly re-exported from _krusty (and onto crate:*)
+
 // we'll define our own new-type of Hwnd mostly coz HWND doesnt implement Debug, Hash etc
 # [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
 pub struct Hwnd (pub(crate) isize);
 
-impl From<HWND> for Hwnd {
+impl From <HWND> for Hwnd {
     fn from (hwnd:HWND) -> Self { Hwnd(hwnd.0) }
 }
-impl From<Hwnd> for isize {
-    fn from (hwnd:Hwnd) -> Self { hwnd.0 }
-}
-impl From<Hwnd> for HWND {
+impl From <Hwnd> for HWND {
     fn from (hwnd:Hwnd) -> Self { HWND(hwnd.0) }
 }
+impl From <Hwnd> for isize {
+    fn from (hwnd:Hwnd) -> Self { hwnd.0 }
+}
+impl From <isize> for Hwnd {
+    fn from (hwnd: isize) -> Self { Hwnd(hwnd) }
+}
+
+
+// and the atomic version of Hwnd for storage
+# [ derive (Debug, Default) ]
+pub struct HwndAtomic (AtomicIsize);
+
+impl HwndAtomic {
+    pub fn load (&self) -> Hwnd {
+        self.0.load (Ordering::Acquire) .into()
+    }
+    pub fn store (&self, hwnd:Hwnd) {
+        self.0 .store (hwnd.0, Ordering::Release)
+    }
+    pub fn contains (&self, hwnd:Hwnd) -> bool {
+        self.load() == hwnd
+    }
+    pub fn clear (&self) {
+        self.store (Hwnd(0))
+    }
+}
+impl From <HwndAtomic> for Hwnd {
+    fn from (h_at: HwndAtomic) -> Hwnd { h_at.load() }
+}
+impl From <HwndAtomic> for HWND {
+    fn from (h_at: HwndAtomic) -> HWND { h_at.load().into() }
+}
+
+
 
 
 // we'll define our own type of Point too, again coz POINT doesnt impl Debug, Hash etc
@@ -39,15 +75,37 @@ pub struct Point {
     pub y : i32,
 }
 impl From <POINT> for Point {
-    fn from (pt: POINT) -> Self {
-        Point { x: pt.x,  y: pt.y }
-    }
+    fn from (pt: POINT) -> Point { Point { x: pt.x,  y: pt.y } }
 }
 impl From <Point> for POINT {
-    fn from (pt:Point) -> Self {
-        POINT { x: pt.x, y: pt.y }
+    fn from (pt:Point) -> POINT { POINT { x: pt.x, y: pt.y } }
+}
+
+
+// and the atomic version of Point for storage
+# [ derive (Debug, Default) ]
+pub struct PointAtomic { x: AtomicI32, y: AtomicI32 }
+// ^^ todo should make this AtomicI64 w x/y conflated to make actually atomic
+
+impl PointAtomic {
+    pub fn store (&self, pt: Point) {
+        self.x.store (pt.x, Ordering::Relaxed);
+        self.y.store (pt.y, Ordering::Relaxed);
+    }
+    pub fn load (&self) -> Point {
+        Point {
+            x : self.x.load(Ordering::Relaxed),
+            y : self.y.load(Ordering::Relaxed)
+        }
     }
 }
+impl From <PointAtomic> for Point {
+    fn from (pt_at: PointAtomic) -> Point { pt_at.load() }
+}
+impl From <PointAtomic> for POINT {
+    fn from (pt_at: PointAtomic) -> POINT { pt_at.load().into() }
+}
+
 
 
 
@@ -432,6 +490,11 @@ pub fn win_get_switcher_hwnd__z_first () -> Option<Hwnd> {
 pub fn win_get_switcher_hwnd__z_second () -> Option<Hwnd> {
     win_get_switcher_filt_hwnds().get(1).copied()
 }
+pub fn win_get_switcher_hwnd__top_two () -> Vec<Hwnd> {
+    let mut hwnds = win_get_switcher_filt_hwnds();
+    hwnds.truncate(2);
+    hwnds
+}
 
 pub fn win_get_switcher_filt_hwnds () -> Vec<Hwnd> {
     win_get_hwnds_w_filt (win_enum_cb_switcher_filt)
@@ -440,8 +503,10 @@ pub unsafe extern "system" fn win_enum_cb_switcher_filt (hwnd:HWND, _:LPARAM) ->
     let retval = BOOL (true as i32);
     if !check_window_visible   (hwnd.into())  { return retval }
     if  check_window_cloaked   (hwnd.into())  { return retval }
-    if  check_window_has_owner (hwnd.into())  { return retval }
-    if  check_if_tool_window   (hwnd.into())  { return retval }
+    if !check_if_app_window (hwnd.into()) {
+        if  check_window_has_owner (hwnd.into())  { return retval }
+        if  check_if_tool_window   (hwnd.into())  { return retval }
+    }
     enum_hwnds.write().unwrap() .push (hwnd.into());
     retval
 }

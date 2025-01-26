@@ -18,7 +18,7 @@ use crate::utils::Cursors;
 pub type Key = KbdKey ;
 // ^^ meh, just sugar
 
-pub use utils::{Hwnd, Point};
+pub use utils::{Hwnd, HwndAtomic, Point, PointAtomic};
 // ^^ re-exporting these to everyone, as we dont typically import utils::*
 
 
@@ -168,6 +168,9 @@ pub struct KrustyState {
     /// win_snap_dat snapshot holds data to support moving/dragging/resizing windows and window-groups
     pub win_snap_dat : RwLock <WinSnapDat>,
 
+    /// the no_snap is essentially a flag to disable snap, but safer/limited to a hwnd at a time (so no need to cleanup after)
+    pub no_snap : HwndAtomic,
+
     /// the active first-stroke for modkey-sticky two-stroke-combos .. will clear when all modkeys are released
     pub sticky_first_stroke : ComboHashAtomic,
 
@@ -236,6 +239,7 @@ impl KrustyState {
                 in_right_btn_scroll_state  : Flag::default(),
 
                 win_snap_dat : RwLock::new (WinSnapDat::default()),
+                no_snap      : HwndAtomic::default(),
 
                 sticky_first_stroke   : ComboHashAtomic::default(),
                 latching_first_stroke : ComboHashAtomic::default(),

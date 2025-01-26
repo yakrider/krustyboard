@@ -86,7 +86,7 @@ fn handle_pointer_window_drag (xt:i32, yt:i32, ks:KSR) {
         bottom : wsd.rect.bottom + dy,
     };
     let mut dr_snap = RECT::default();
-    if !ks.mod_keys.lshift.down.is_set() {
+    if !ks.mod_keys.lshift.down.is_set() && !ks.no_snap.contains(wsd.hwnd) {
         // if shift is down, we'll disable snap to allow finer drag/resize motions
         dr_snap = snap_to_edge_rect_delta (&dest, &wsd);
     }
@@ -179,7 +179,7 @@ fn handle_pointer_window_resize (x:i32, y:i32, ks:KSR) {
         bottom : wsd.rect.bottom + (y - wsd.pointer.y),
     };
     let mut dr = RECT::default();
-    if !ks.mod_keys.lshift.down.is_set() {
+    if !ks.mod_keys.lshift.down.is_set() && !ks.no_snap.contains(wsd.hwnd) {
         // if shift is down, we'll disable snap to allow finer drag/resize motions
         dr = snap_to_edge_rect_delta (&dest, &wsd);
     }

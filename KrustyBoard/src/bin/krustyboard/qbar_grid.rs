@@ -325,6 +325,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let qbar_drag = Arc::new ( move || {
         // for drag, we just set a flag and let krusty handle it (incl clearing flag on lbtn release)
         qb.set_dragging(true);
+        // we'll also make it not do snap
+        ks.no_snap.store(qb.hwnd());
         // plus we'll also make lbtn click make qbar persist
         qb.show(true, true);         // updates persist flag and exits since its already visible
         ks.clear_cur_sticky_fsc();   // gives viz feedback of change .. (wont close qb coz we set persist flag)
@@ -420,8 +422,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // note that to make these chrome shortcuts work .. first installed shortkeys extension ..
     // .. then there, set the hotkeys as below, and set them to exec javascript copied directly from bookmarklets
     // .. (directly trying to trigger the bookmarklets didnt work .. oh well)
-    let darken  = ag().k(Slash    ).m(ctrl).gen_af();
-    let lighten = ag().k(Backslash).m(ctrl).gen_af();
+    let darken  = ag().k(Slash    ).m(ctrl).m(shift).gen_af();
+    let lighten = ag().k(Backslash).m(ctrl).m(shift).gen_af();
     let cell = ActionCell {
         label : "Page Dark".to_string(),
         icon  : icons.darken_pg.clone(),
@@ -436,8 +438,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Darkening / brightening for Images only **__
-    let im_darken   = ag().k(LBracket).m(ctrl).gen_af();
-    let im_brighten = ag().k(RBracket).m(ctrl).gen_af();
+    let im_darken   = ag().k(LBracket).m(ctrl).m(shift).gen_af();
+    let im_brighten = ag().k(RBracket).m(ctrl).m(shift).gen_af();
     let cell = ActionCell {
         label : "Image Dark".to_string(),
         icon  : icons.darken_im.clone(),
@@ -471,9 +473,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // general use
     static _base : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  arrows(),  refresh()  ),
-        vec! ( tabs_bl(),     tabs(),        empty(),   min_back() ),
-        vec! ( brightness(),  volume(),      tracks(),  scrub()    ),
+        vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
+        vec! ( tabs_bl(),     tabs(),        empty(),     tracks() ),
+        vec! ( brightness(),  arrows(),      empty(),     scrub()  ),
     );
     let label = "base".into();
     let grid_sz = GridDims::new (3, 4);
@@ -487,9 +489,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // ide specific
     static _ide : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  arrows(),   refresh()  ),
-        vec! ( tabs_bl(),     tabs(),        diff(),     min_back() ),
-        vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
+        vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
+        vec! ( tabs_bl(),     tabs(),        empty(),     tracks() ),
+        vec! ( brightness(),  arrows(),      diff(),      scrub()  ),
     );
     let label = "ide".into();
     let grid_sz = GridDims::new (3, 4);
@@ -503,9 +505,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // browser specific
     static _web : OnceCell < Arc < ActionGrid>> = OnceCell::new();
     let grid = vec! (
-        vec! ( switche(),     switche_bl(),  arrows(),   refresh()  ),
-        vec! ( tabs_bl(),     pg_dark(),     im_dark(),  min_back() ),
-        vec! ( brightness(),  volume(),      tracks(),   scrub()    ),
+        vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
+        vec! ( tabs_bl(),     refresh(),     arrows(),    tracks() ),
+        vec! ( brightness(),  pg_dark(),     im_dark(),   scrub()  ),
     );
     let label = "web".into();
     let grid_sz = GridDims::new (3, 4);

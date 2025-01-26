@@ -231,6 +231,9 @@ impl QuickBar {
     pub fn is_drag_active (&self) -> bool {
         self.drag_active.is_set()
     }
+    pub fn hwnd (&self) -> Hwnd {
+        self.hwnd .load (Ordering::Relaxed) .into()
+    }
 
     pub fn is_visible    (&self) -> bool { self.visible.is_set() }
     pub fn is_persistent (&self) -> bool { self.persist.is_set() }
@@ -478,11 +481,14 @@ impl eframe::App for QuickBar {
 
         egui::CentralPanel::default()
             .frame ( egui::Frame::none().outer_margin (egui::Margin::same(ActionGrid::OUTER_MARGIN as f32)) )
-            .show (ctx, |ui|
+            .show ( ctx, |ui|
         {
             // now we can setup the grid
             let last_hc = unsafe { hov_cell.clone() };
             unsafe { hov_cell = None };
+
+            // we'll also want to grab the rect of the cur hovered cell if we want to draw highlight border on it
+            //let mut hov_cell_rect : Option<Rect> = None;
 
             // first, lets add all the cells (and their behaviors)
             for row in 0 .. grid.grid_sz.rows {
@@ -503,6 +509,7 @@ impl eframe::App for QuickBar {
                     ui.painter().rect_filled ( rect, 0.0,
                         if cell.hovered() { Color32::from_gray(80) } else { Color32::from_gray(20) },
                     );
+                    //ui.painter().rect_filled ( rect, 0.0, Color32::from_gray(20) );
 
                     ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_gray(100)) );
                     // ^^ adds the border between cells that makeup the grid
@@ -535,6 +542,7 @@ impl eframe::App for QuickBar {
                             self.defocus();
                         }
                         unsafe { hov_cell = Some (cur_hc.clone()) };
+                        //hov_cell_rect = Some(rect);
                     }
 
                     if cell.clicked() {
@@ -545,6 +553,12 @@ impl eframe::App for QuickBar {
                     }
                 }
             }
+
+            //// lets highlight the cur covered cell (if any)
+            //if let Some(rect) = hov_cell_rect {
+            //    //ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_rgb(180,140,0)) );
+            //    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_rgb(70,170,170)) );
+            //}
 
             // next we'll setup whole-grid behavior .. (and mouse wheels as those arent in cell inputs)
 

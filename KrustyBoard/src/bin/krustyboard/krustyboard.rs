@@ -657,7 +657,7 @@ fn setup_mouse_left_btn (k:KR) {
     fn gen_af_lbtn_release (k:KR) -> AF { Arc::new ( move || {
         if k.ks.mouse.lbtn.active.is_set() { k.ks.mouse.lbtn.active.clear(); LeftButton.release() }
         // also good time to clear any qbar drag for robustness if it was lingering etc
-        k.qbar.set_dragging(false);
+        k.qbar.set_dragging(false); k.ks.no_snap.clear();
     } ) }
     k.cm .add_combo ( cg().mbtn(LeftButton).rel().wcma().wcsa(), ag().af ( gen_af_lbtn_release (k) ) );
 
