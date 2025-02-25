@@ -62,6 +62,10 @@ pub struct ActionCell {
     pub on_rbtn_release : AF,
     pub on_rbtn_click   : AF,
 
+    pub on_mbtn_press   : AF,
+    pub on_mbtn_release : AF,
+    pub on_mbtn_click   : AF,
+
 }
 impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
@@ -77,6 +81,9 @@ impl Default for ActionCell {
         on_rbtn_press   : Arc::new (|| {}),
         on_rbtn_release : Arc::new (|| {}),
         on_rbtn_click   : Arc::new (|| {}),
+        on_mbtn_press   : Arc::new (|| {}),
+        on_mbtn_release : Arc::new (|| {}),
+        on_mbtn_click   : Arc::new (|| {}),
     } }
 }
 impl ActionCell {
@@ -91,6 +98,9 @@ impl ActionCell {
     pub fn rbtn_press_fn   (&self)  { (self.on_rbtn_press   )() }
     pub fn rbtn_release_fn (&self)  { (self.on_rbtn_release )() }
     pub fn rbtn_click_fn   (&self)  { (self.on_rbtn_click   )() }
+    pub fn mbtn_press_fn   (&self)  { (self.on_mbtn_press   )() }
+    pub fn mbtn_release_fn (&self)  { (self.on_mbtn_release )() }
+    pub fn mbtn_click_fn   (&self)  { (self.on_mbtn_click   )() }
 }
 
 
@@ -164,7 +174,8 @@ pub struct QuickBarDat {
 
     drag_active : Flag,
 
-    cur_pos : PointAtomic,
+    prior_pos     : PointAtomic,
+    prior_persist : Flag,
 
     // we'll acquire ks ref at init
     //ks : &'static KrustyState,
@@ -208,7 +219,8 @@ impl QuickBar {
 
                 drag_active : Flag::default(),
 
-                cur_pos : PointAtomic::default(),
+                prior_pos     : PointAtomic::default(),
+                prior_persist : Flag::default(),
 
                 //ks   : KrustyState::instance(),
                 ctx  : Arc::new (Mutex::new (None)),
@@ -235,8 +247,17 @@ impl QuickBar {
         self.hwnd .load (Ordering::Relaxed) .into()
     }
 
-    pub fn is_visible    (&self) -> bool { self.visible.is_set() }
-    pub fn is_persistent (&self) -> bool { self.persist.is_set() }
+    pub fn is_visible        (&self) -> bool { self.visible.is_set() }
+    pub fn is_persistent     (&self) -> bool { self.persist.is_set() }
+
+    pub fn has_prior_persist (&self) -> bool { self.prior_persist.is_set() }
+    pub fn set_prior_persist (&self, v:bool) { self.prior_persist.store(v); }
+
+    pub fn request_repaint (&self) {
+        if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
+            ctx.request_repaint();
+        }
+    }
 
     pub fn toggle (&self) {
         // toggling will open/close it with persistence (unlike for mouse invocations with fsc)
@@ -247,18 +268,30 @@ impl QuickBar {
         }
     }
 
+    fn persist_loc (&self) {
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
+        let rect = utils::win_get_window_rect(hwnd);
+        let loc = Point { x: rect.left, y: rect.top };
+        self.prior_pos.store (loc);
+    }
+
+    pub fn set_persistent (&self) {
+        self.persist.set();
+        if self.visible.is_set() { self.persist_loc() };
+    }
+
     pub fn hide (&self, force:bool) {
 
-        if !force && self.persist.is_set() { return };
+        if self.persist.is_set() && !force { return };
         // ^^ if we were shown w persist flag, only a force close should hide it
+
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
+
+        // lets save the qbar window position (if it was persistant) in case it has moved around
+        if self.persist.is_set() { self.persist_loc() }
 
         self.visible.clear();
         self.persist.clear();
-
-        // lets save the qbar window position in case it has moved around
-        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
-        let rect = utils::win_get_window_rect(hwnd);
-        self.cur_pos.store ( Point { x: rect.left, y: rect.top } );
 
         // want to hide and minimze .. (coz due to egui bug, minimized windows stop event-loop but hidden windows dont!)
         // .. but then when we bring it back, it will have to be shown/restored before locating it, which causes flashing
@@ -278,11 +311,8 @@ impl QuickBar {
     pub fn show (&self, persist:bool, at_cursor:bool) {
 
         self.persist.store(persist);
-        // ^^ we'll update this even if we were already open
-
-        if self.visible.is_set() { return }
-
         self.visible.set();
+        self.refresh_grid.set();
 
         // we're going to hide/unhide manually, as sending Viewport cmd to unset visible appears irreversible (egui bug)
         // .. and on top, hidden egui windows seem to not stop event-loop and therefore consume cpu .. so we'll have to minimze instead
@@ -300,7 +330,7 @@ impl QuickBar {
         let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
 
         let pos = if !at_cursor {
-            self.cur_pos.load()
+            self.prior_pos.load()
         } else {
             let mut pos = utils::get_pointer_loc();
             pos.x -= (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
@@ -321,6 +351,26 @@ impl QuickBar {
             // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
         }
         self.defocus();
+    }
+
+    pub fn handle_invocation (&self) {
+        if self.is_persistent() {
+            self.prior_persist.set();  // mark that we might want this restored upon invoc-clear
+            self.persist_loc();        // store the loc to restore to later
+        }
+        // we simply re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
+        self.show (false, true);
+    }
+    pub fn handle_invocation_clear (&self) {
+        // if we had prior persistent, we move qbar back there, else we hide it
+        if self.prior_persist.is_clear() {
+            self.hide(false);
+            // ^^ closing w/o force flag means it wont close if persist flag set, e.g by kbd invocation
+        } else {
+            self.prior_persist.clear();
+            self.show (true, false);
+            // ^^ show persistent at stored loc (not at cursor)
+        }
     }
 
     pub fn handle_fgnd_change (&self, fgnd_hwnd:Hwnd) {
@@ -414,6 +464,7 @@ impl QuickBar {
                     WinEventsListener::instance().record_self_hwnd(Hwnd(hr.hwnd.into()));
                     // and tweak our quick-bar window a bit
                     utils::win_set_anim_disabled (Hwnd(hr.hwnd.into()), true);
+                    //utils::win_set_full_transparent (Hwnd(hr.hwnd.into())); // <- no difference
 
                     // and we can use the ctx to call the configured grid-provider builder ..
                     // .. which will preload any icons, and generate the grid-provider for us
@@ -424,7 +475,7 @@ impl QuickBar {
                         thread::spawn ( move || {
                             thread::sleep (Duration::from_millis(20));
                             if cur_grid.start_pos.is_some() {
-                                self.cur_pos.store (cur_grid.start_pos.unwrap());
+                                self.prior_pos.store (cur_grid.start_pos.unwrap());
                                 self.show (true, false);    // persist, but not at cursor
                             } else {
                                 self.hide(true);
@@ -494,7 +545,7 @@ impl eframe::App for QuickBar {
             for row in 0 .. grid.grid_sz.rows {
                 for col in 0 .. grid.grid_sz.cols {
 
-                    let cur_hc = &grid.grid[row as usize][col as usize];
+                    let cur_cell = &grid.grid[row as usize][col as usize];
 
                     // allocate the cell
                     let cpos = pos2 (
@@ -511,16 +562,16 @@ impl eframe::App for QuickBar {
                     );
                     //ui.painter().rect_filled ( rect, 0.0, Color32::from_gray(20) );
 
-                    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (1.0, Color32::from_gray(100)) );
+                    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (0.5, Color32::from_gray(100)) );
                     // ^^ adds the border between cells that makeup the grid
 
-                    if let Some(ico) = cur_hc.icon.as_ref() {
+                    if let Some(ico) = cur_cell.icon.as_ref() {
                         let ico_pos = pos2 ( cpos.x + (csz.x - ico.sz_hint.x)/2.0, cpos.y + (csz.y - ico.sz_hint.y)/2.0 );
                         let im_rect = Rect::from_min_size (ico_pos, ico.sz_hint);
                         egui::Image::from_texture (&ico.txh) .paint_at (ui, im_rect);
                     } else {
                         ui.painter() .text (
-                            rect.center(), Align2::CENTER_CENTER, cur_hc.label.clone(),
+                            rect.center(), Align2::CENTER_CENTER, cur_cell.label.clone(),
                             FontId::new (12.0, FontFamily::Proportional),
                             Color32::from_rgb (0, 255, 255),    // text in aqua
                         );
@@ -530,26 +581,31 @@ impl eframe::App for QuickBar {
                         // we'll eval hover-end using last stashed hover-cell id
                         // and we cant listen to wheel here, so we'll just mark which cell we're on
                         if let Some(lhc) = last_hc.as_ref() {
-                            if !Arc::ptr_eq (lhc, cur_hc) {
-                                //println! ("hover-changed .. cur: {:?} .. last: {:?}", &cur_hc.label, &lhc.label);
+                            if !Arc::ptr_eq (lhc, cur_cell) {
+                                //println! ("hover-changed .. cur: {:?} .. last: {:?}", &cur_cell.label, &lhc.label);
                                 lhc.hover_end_fn();
+                                cur_cell.hover_start_fn();
                                 self.defocus();
-                                // ^^ we never want focus .. faster we get rid, the better
+                            } else {
+                                // i.e. we're hovering on the same cell as last frame
+                                // we wont even do defocus here as thats a lil too frequent
                             }
                         } else {
-                            //println! ("hover-start .. cur: {:?}", &cur_hc.label);
-                            cur_hc.hover_start_fn();
+                            //println! ("hover-start .. cur: {:?}", &cur_cell.label);
+                            cur_cell.hover_start_fn();
                             self.defocus();
                         }
-                        unsafe { hov_cell = Some (cur_hc.clone()) };
+                        unsafe { hov_cell = Some (cur_cell.clone()) };
                         //hov_cell_rect = Some(rect);
                     }
 
                     if cell.clicked() {
                         // (note that we expect focus to be already away as both press/rel do defocus calls)
-                        cur_hc.click_fn();
+                        cur_cell.click_fn();
                     } else if cell.secondary_clicked() {
-                        cur_hc.rbtn_click_fn();
+                        cur_cell.rbtn_click_fn();
+                    } else if cell.clicked_by(PointerButton::Middle) {
+                        cur_cell.mbtn_click_fn();
                     }
                 }
             }
@@ -589,6 +645,14 @@ impl eframe::App for QuickBar {
             if ui.input (|inp| inp.pointer.button_released (PointerButton::Secondary)) {
                 self.defocus();
                 if let Some(ac) = cur_hc { ac.rbtn_release_fn() }
+            }
+            if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Middle)) {
+                self.defocus();
+                if let Some(ac) = cur_hc { ac.mbtn_press_fn() }
+            }
+            if ui.input (|inp| inp.pointer.button_released (PointerButton::Middle)) {
+                self.defocus();
+                if let Some(ac) = cur_hc { ac.mbtn_release_fn() }
             }
 
             // if we were in a cell, we'll also check for wheel

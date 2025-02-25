@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
 use once_cell::sync::Lazy;
 
 use windows::core::{PSTR, HSTRING, PCWSTR};
-use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle, TRUE, FALSE};
+use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle, TRUE, FALSE, COLORREF};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED};
 use windows::Win32::Graphics::Gdi::{HRGN, RDW_INTERNALPAINT, RedrawWindow};
+use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
@@ -257,6 +258,9 @@ pub fn win_set_anim_disabled (hwnd:Hwnd, disabled:bool) { unsafe {
     let disabled : BOOL = if disabled { TRUE } else { FALSE };
     let _ = DwmSetWindowAttribute (hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disabled as *const BOOL as *const _, size_of::<BOOL>() as _);
 } }
+pub fn win_set_full_transparent (hwnd:Hwnd) { unsafe {
+    SetLayeredWindowAttributes (hwnd, COLORREF::default(), 0, LWA_ALPHA);
+} }
 pub fn win_get_placement (hwnd:Hwnd) -> WINDOWPLACEMENT { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();
     GetWindowPlacement (hwnd, &mut win_state);
@@ -452,6 +456,11 @@ pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {
     pid
 } }
 
+
+pub fn write_win_dbg_string (msg:&str) { unsafe {
+    let msg_wide : Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+    OutputDebugStringW (PCWSTR(msg_wide.as_ptr()));
+} }
 
 
 pub fn mic_mute_toggle () { unsafe {

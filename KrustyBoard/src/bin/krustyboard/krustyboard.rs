@@ -130,7 +130,7 @@ fn _check_chrome_fgnd (wel:&WinEventsListener) -> bool {
     wel.fgnd_info.read().unwrap().exe == "chrome.exe"
 }
 fn check_browser_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and (|fi| { fi.exe == "chrome.exe" || fi.exe == "msedge.exe" } )
+    wel.fgnd_info.read() .is_ok_and (|fi| { fi.exe == "chrome.exe" || fi.exe == "firefox.exe" ||  fi.exe == "msedge.exe" } )
 }
 
 /// the idea here is to clone the listener Arc once during cond-creation, to avoid calling instance() repeatedly during runtime
@@ -249,7 +249,7 @@ fn setup_default_keys  (k:KR) {
     let fnum_keys  = (u64::from(F1) .. u64::from(F24)) .map(Key::from);
     let nav_keys   = [Left, Right, Up, Down, PageUp, PageDown, Home, End];
     let ext_keys   = [ExtLeft, ExtRight, ExtUp, ExtDown, ExtPgUp, ExtPgDn, ExtHome, ExtEnd, ExtInsert, ExtDelete];
-    let spcl_keys  = [Backspace, Delete, Space, Tab, Enter, Escape, Insert, Apps];
+    let spcl_keys  = [Backspace, Clear, Delete, Space, Tab, Enter, Escape, Insert, Apps];
     //let media_keys = [BrowserBack, BrowserForward, BrowserRefresh, VolumeMute, VolumeDown, VolumeUp,
     //                  MediaNextTrack, MediaPrevTrack, MediaStop, MediaPlayPause];
     //let mouse_keys = [MouseLeftBtn, MouseRightBtn, MouseMiddleBtn, MouseX1Btn, MouseX1Btn];
@@ -1134,7 +1134,9 @@ fn setup_win_key_combos (k:KR) {
     k.cm .add_combo ( cg().k(F).no_rpt().m(lwin).s(msF_dbl),  ag().k(F11) );
 
     // win-e should bring up whatever we configured for file-explorer alternative
-    k.cm .add_combo ( cg().k(E).no_rpt().m(lwin).s(msE),      ag().af(action(start_alt_file_explorer)) );
+    //k.cm .add_combo ( cg().k(E).no_rpt().m(lwin).s(msE),   ag().af(action(start_alt_file_explorer)) );
+    // ^^ we no longer use q-dir .. regular explorer should work fine
+    k.cm .add_combo ( cg().k(E).no_rpt().m(lwin).s(msE),   ag().k(E).m(lwin) );
 
     // since msE is often used in first-stroke-combos etc, we'll ensure held win-ee etc dont spam piles of explorer windows
     k.cm .add_combo ( cg().k(E).no_rpt().m(lwin    ).s(msE_dbl),  ag().af(no_action()) );
@@ -1148,8 +1150,13 @@ fn setup_win_key_combos (k:KR) {
     // win-i should start irfanview
     k.cm .add_combo ( cg().k(I).no_rpt().m(lwin),  ag().af(action(start_irfanview)) );
 
-    // win-n should start chrome-incognito
+    // win-n should start browser incognito
     k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af(action(start_chrome_incognito)) );
+    //k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af(action(start_firefox_incognito)) );
+
+    // caps-win-n can instead open browser open non-incognito
+    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
+    //k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_firefox)) );
 
     // win-caps-b for bard .. hah we'll see
     k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
@@ -1201,9 +1208,6 @@ fn setup_win_key_combos (k:KR) {
     k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).m(shift),      ag().k(Q).m(win).m(alt).m(shift) );
     // and since this is mode-key again, we'll disable the _dbl
     k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).s(qks_dbl),    ag().af(no_action()) );
-
-    // this is counterpart to starting chrome incognito .. w/ caps will set that to open non-incognito
-    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
 
     // caps-win-c being used to launch winmerge diff from last two clipboard entries
     //k.cm .add_combo ( cg().k(C).no_rpt().m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
@@ -2591,14 +2595,7 @@ fn setup_quick_bar (k:KR) {
         // mostly for robustness to avoid dangling drag flag, we'll clear that here too
         k.qbar.set_dragging(false);
         // then just popup the bar itself .. (and open it w/o the persist flag)
-        if !k.qbar.is_visible() {
-            k.qbar.show (false, true);   // no persist, open at cursor loc
-        }
-        else if k.qbar.is_persistent() {
-            // if it was already visible and persisting, we'll re-open at the new location, but w/o persist flag
-            k.qbar.hide (true);   // force hide
-            k.qbar.show (false, true);  // re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
-        }
+        k.qbar.handle_invocation();
     } );
     //k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc),  ag().af (trigger_af) );
     k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc_pre),  ag().af (trigger_af) );
@@ -2630,18 +2627,15 @@ fn setup_quick_bar (k:KR) {
 
 
     // and if we get kicked out of this state by anything else, we still want to hide the quick-bar
-    let fsc_clear_af = Arc::new ( move || {
-        k.qbar.hide(false);     // the bool param is the forced flag
-        // ^^ (closing w/o force flag means it wont close if persist flag set, e.g by kbd invocation)
-    } );
+    let fsc_clear_af = Arc::new ( move || k.qbar.handle_invocation_clear() );
     k.cm.register_af_sticky_first_stroke_cleared (fsc, fsc_clear_af);
 
 
     // if there's a x2 click during this mode, we'll make it persistent .. i.e can release rbtn without qb closing
     // (the next rbtn-rel whether inside/outside will close it .. so will any caps/mod-rel etc that clears the fsc)
     let persist_af = Arc::new ( move || {
-        k.qbar.show(true, true);       // the bools are whether to persist, and to open at cursor
-        k.ks.clear_cur_sticky_fsc();    // after that we can clear out fsc
+        k.qbar.set_persistent();
+        k.ks.clear_cur_sticky_fsc();   // after that we can clear out fsc
     } );
     k.cm .add_combo ( cg().mbtn(X2Button) .fsc(fsc),  ag().af (persist_af) );
 

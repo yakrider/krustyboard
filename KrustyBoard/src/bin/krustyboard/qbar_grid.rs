@@ -108,12 +108,40 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// __** Media : Tracks Play, Pause, Next, Prev **__
+    // for these we wanted to also bringup now-playing popup on hover etc,
+    // but we'd like there to be a small delay-guard to ignore unrelated fast mouse movements over it
+    static HOV_GUARD_DUR_MS : u64 = 300;
+    static _hov_dur_guard : Lazy<Flag> = Lazy::new (Flag::default);
+    let hov_dur_guard = &_hov_dur_guard;
+    let cur_track_popup = ag().k(Numpad_9).m(lctrl).m(lalt).gen_af();
+    // .. meh, gonna disable this as the focus changes it causes are just getting annoying
+    static _track_popup_enabled : Lazy<Flag> = Lazy::new (|| Flag::new(false)); // <- disabled
+    let track_popup_enabled = &_track_popup_enabled;
+    let cur_track_popup = if track_popup_enabled.is_set() { cur_track_popup } else { no_action() };
+    let ctp = cur_track_popup.clone();
+    let ctp_g = Arc::new ( move || {
+        hov_dur_guard.set();
+        let ctp = ctp.clone();
+        thread::spawn ( move || {
+            thread::sleep(Duration::from_millis(HOV_GUARD_DUR_MS));
+            if hov_dur_guard.is_set() { ctp() }
+        } );
+    } );
+    let hov_end = Arc::new (move || hov_dur_guard.clear());
+    let ctp = cur_track_popup.clone();
+    let next_track = media_next_action (ks, true);
+    let next_track = Arc::new (move || { next_track(); ctp(); });
+    let ctp = cur_track_popup.clone();
+    let prev_track = media_next_action (ks, false);
+    let prev_track = Arc::new (move || { prev_track(); ctp(); });
     let cell = ActionCell {
         label : "Tracks".to_string(),
         icon  : icons.tracks.clone(),
-        on_wheel_bkwd : media_next_action (ks, true),                  // next track
-        on_wheel_frwd : media_next_action (ks, false),                 // prev track
-        on_press      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
+        //on_hover_start : ctp_g.clone(),    // show now-playing popup
+        //on_hover_end   : hov_end.clone(),  // cancel any pending now-playing popup
+        on_wheel_bkwd  : next_track.clone(), // next track
+        on_wheel_frwd  : prev_track,         // prev track
+        on_press       : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
         ..Default::default()
     };
     static _tracks : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -123,12 +151,20 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// __** Media : Scrub track-bar .. skip fwd/bkwd **__
+    let ctp = cur_track_popup.clone();
+    let skip_fwd  = media_skips_action (1, ks, true);
+    let skip_fwd = Arc::new (move || { skip_fwd(); ctp(); });
+    let ctp = cur_track_popup.clone();
+    let skip_bkwd = media_skips_action (1, ks, false);
+    let skip_bkwd = Arc::new (move || { skip_bkwd(); ctp(); });
     let cell = ActionCell {
         label : "Scrub".to_string(),
         icon  : icons.scrub.clone(),
-        on_wheel_bkwd : media_skips_action (1, ks, true),              // skip fwd  on track-bar
-        on_wheel_frwd : media_skips_action (1, ks, false),             // skip bkwd on track-bar
-        on_press      : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
+        on_hover_start : ctp_g.clone(),      // show now-playing popup
+        on_hover_end   : hov_end.clone(),    // cancel any pending now-playing popup
+        on_wheel_bkwd  : skip_fwd,           // skip fwd  on track-bar
+        on_wheel_frwd  : skip_bkwd,          // skip bkwd on track-bar
+        on_press       : next_track.clone(), // next trac
         ..Default::default()
     };
     static _scrub : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -218,20 +254,20 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // .. so instead we'll only clear refresh flag if we're hovered out for a bit
     static _refreshed : Lazy<Flag> = Lazy::new (Flag::default);
     let refreshed = &_refreshed;   // &'static that can be moved to threads without cloning
-    static _refr_armed : Lazy<Flag> = Lazy::new (Flag::default);
-    let refr_armed = &_refr_armed;
+    static _refr_clr_armed : Lazy<Flag> = Lazy::new (Flag::default);
+    let refr_clr_armed = &_refr_clr_armed;
 
-    let hov_start = Arc::new ( move || { refr_armed.clear(); } );
+    let hov_start = Arc::new ( move || { refr_clr_armed.clear(); } );
     let hov_end = Arc::new ( move || {
-        refr_armed.set();
+        refr_clr_armed.set();
         thread::spawn ( move || {
             thread::sleep (Duration::from_millis(100));
-            if refr_armed.is_set() { refr_armed.clear(); refreshed.clear(); }
+            if refr_clr_armed.is_set() { refr_clr_armed.clear(); refreshed.clear(); }
         } );
     } );
 
     // now the actual nav-fn-gen
-    let init_af = move |is_bkwd| {
+    let nav_af = move |is_bkwd| {
         let refresh = nav_ag(F15);
         let nav = if is_bkwd { nav_ag(F16) } else { nav_ag(F17) };
         Arc::new ( move || {
@@ -247,14 +283,25 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         } )
     };
 
+    // for lbtn-press, we want it to switch to last-active window, but also have snapshot refreshed
+    let lbtn_af = nav_af (true);
+    let lbtn_af = Arc::new (move || {
+        refreshed.clear(); lbtn_af();
+        // we'll also want to clear things up for any wheel scrolls that follow
+        // and do that past the delay from actual nav, and from hov-end-restart (from fgnd change)
+        thread::spawn (move || { thread::sleep (Duration::from_millis(150)); refreshed.clear(); } );
+    });
+
     let cell = ActionCell {
         label : "Switche Blind".to_string(),
         icon  : icons.sw_blind.clone(),
-        on_wheel_bkwd  : init_af (true ),               // next window
-        on_wheel_frwd  : init_af (false),               // prev window
-        on_hover_start : hov_start,                     // clear snap refresh flag
-        on_hover_end   : hov_end,                       // clear snap refresh flag if done
-        on_rbtn_press  : ag().k(F4).m(lalt).gen_af(),   // close window
+        on_wheel_bkwd  : nav_af (true ),               // next window
+        on_wheel_frwd  : nav_af (false),               // prev window
+        on_hover_start : hov_start,                    // clear snap refresh flag
+        on_hover_end   : hov_end,                      // clear snap refresh flag if done
+        on_press       : lbtn_af,                      // last window
+        on_rbtn_press  : ag().k(F4).m(lalt).gen_af(),  // close window
+        on_mbtn_press  : ag().k(F4).m(lalt).gen_af(),  // close window
         ..Default::default()
     };
     static _switche_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -306,9 +353,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : "Tabs Blind".to_string(),
         icon  : icons.tabs_blind.clone(),
-        on_wheel_bkwd : ag().k(PageDown).m(ctrl).gen_af(),   // tab next
-        on_wheel_frwd : ag().k(PageUp  ).m(ctrl).gen_af(),   // tab prev
-        on_press      : ag().k(W).m(lctrl).gen_af(),         // close tab
+        on_wheel_bkwd : ag().k(PageDown).m(ctrl).gen_af(),   // next tab
+        on_wheel_frwd : ag().k(PageUp  ).m(ctrl).gen_af(),   // prev tab
+        on_press      : ag().k(Tab).m(ctrl).gen_af(),        // last tab
+        on_rbtn_press : ag().k(W).m(lctrl).gen_af(),         // close tab
+        on_mbtn_press : ag().k(W).m(lctrl).gen_af(),         // close tab
         ..Default::default()
     };
     static _tabs_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -328,8 +377,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         // we'll also make it not do snap
         ks.no_snap.store(qb.hwnd());
         // plus we'll also make lbtn click make qbar persist
-        qb.show(true, true);         // updates persist flag and exits since its already visible
-        ks.clear_cur_sticky_fsc();   // gives viz feedback of change .. (wont close qb coz we set persist flag)
+        qb.set_persistent();
+        // and give some viz feedback of change .. (wont close qb coz we've set persist flag)
+        ks.clear_cur_sticky_fsc();
     });
     //let exit_drag = Arc::new ( move || qb.set_dragging(false));
     // we'll explicitly not set it here and rely on global release, just to face potential issues sooner
@@ -366,12 +416,19 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Refresh for browser etc **__
+    let nav_bkwd  = ag().k(ExtLeft ).m(lalt).gen_af();
+    let nav_fwd   = ag().k(ExtRight).m(lalt).gen_af();
+    let zoom_in  = ag().k(Equal).m(lctrl).gen_af();
+    let zoom_out = ag().k(Minus).m(lctrl).gen_af();
+    let af_fwd  = Arc::new ( move || if ks.mouse.lbtn.down.is_set() { nav_fwd()  } else { zoom_in()  } );
+    let af_bkwd = Arc::new ( move || if ks.mouse.lbtn.down.is_set() { nav_bkwd() } else { zoom_out() } );
     let cell = ActionCell {
         label : "Refresh".to_string(),
         icon  : icons.refresh.clone(),
-        on_wheel_bkwd : ag().k(ExtLeft ).m(lalt).gen_af(),    // pg-bkwd
-        on_wheel_frwd : ag().k(ExtRight).m(lalt).gen_af(),    // pg-fwd
-        on_press      : ag().k(F5).gen_af(),                  // refresh
+        on_wheel_bkwd : af_bkwd,              // pg-bkwd
+        on_wheel_frwd : af_fwd,               // pg-fwd
+        on_press      : ag().k(F5).gen_af(),  // refresh
+        on_rbtn_press : ag().k(Numrow_1).m(alt).m(shift).gen_af(),  // reader-view
         ..Default::default()
     };
     static _refresh : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -382,17 +439,36 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Minimize and window Send-to-Back **__
+    // .. and overloaded on this, we wanted to set it so if upon invoc-at-cursor if we release in this square ..
+    // .. then we'd hide the qbar instead of the default of making it go back to persisted state/pos (and vice-versa)
+    // but rbtn-rel is handled by kr itself, so we wont hear it here .. so we'll just set/clear flag on hover-in/out
     let af_min_back = Arc::new (move || {
         if let Ok(fgi) = wel.fgnd_info.read() {
             win_min_and_back(fgi.hwnd)
         }
     } );
+    static _pers_flag_cache : Lazy<Flag> = Lazy::new (Flag::default);
+    let pers_flag_cache = &_pers_flag_cache;
+    let af_hov_start = Arc::new (move || {
+        if ks.mouse.rbtn.down.is_set() {
+            pers_flag_cache.store (qb.has_prior_persist());    // cache prior flag state
+            qb.set_prior_persist (!qb.has_prior_persist());    // toggle actual flag
+        }
+    } );
+    let af_hov_end = Arc::new (move || {
+        // wanna restore flag from cache .. but only if qb is still visible .. (since qb-hide also gives hov-end)
+        if qb.is_visible() {
+            qb.set_prior_persist (pers_flag_cache.is_set())
+        }
+    } );
     let cell = ActionCell {
         label : "MinBack".to_string(),
         icon  : icons.min_back.clone(),
-        on_wheel_bkwd : af_min_back.clone(),    // min-and-back
-        on_wheel_frwd : af_min_back.clone(),    // min-and-back
-        on_press      : af_min_back.clone(),    // min-and-back
+        on_wheel_bkwd   : af_min_back.clone(),    // min-and-back
+        on_wheel_frwd   : af_min_back.clone(),    // min-and-back
+        on_press        : af_min_back.clone(),    // min-and-back
+        on_hover_start  : af_hov_start,           // mark to hide upon rbtn-rel
+        on_hover_end    : af_hov_end,             // un-mark hide upon rbtn-rel
         ..Default::default()
     };
     static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -422,13 +498,44 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // note that to make these chrome shortcuts work .. first installed shortkeys extension ..
     // .. then there, set the hotkeys as below, and set them to exec javascript copied directly from bookmarklets
     // .. (directly trying to trigger the bookmarklets didnt work .. oh well)
-    let darken  = ag().k(Slash    ).m(ctrl).m(shift).gen_af();
-    let lighten = ag().k(Backslash).m(ctrl).m(shift).gen_af();
+
+    // re. short-keys two stroke combo usage (not krusty two-stroke) .. again similar to that for for IDE, its very restrictive as we'd want
+    // .. the second (unsuppressed) stroke to not trigger anything either .. plus, for shortkeys, can only use till f19 ..
+    // so we'll use .. alt-ctrl-F13-F15 as first strokes, and alt-F13-F19 as second strokes .. (7*3=21)
+    fn shortkeys_two_stroke_combo (s1k:Key, s2k:Key) -> AF {
+        let s1c = ag().k(s1k).m(alt).m(ctrl).gen_af();
+        let s2c = ag().k(s2k).m(alt).gen_af();
+        Arc::new ( move || { s1c(); s2c(); } )
+    }
+    let darken      = shortkeys_two_stroke_combo (F13, F13);
+    let lighten     = shortkeys_two_stroke_combo (F13, F14);
+    let im_darken   = shortkeys_two_stroke_combo (F13, F15);
+    let im_brighten = shortkeys_two_stroke_combo (F13, F16);
+    let dark_mode   = shortkeys_two_stroke_combo (F13, F17);
+    let invert_mode = shortkeys_two_stroke_combo (F13, F18);
+    let im_zap      = shortkeys_two_stroke_combo (F13, F19);
+    let im_inv      = shortkeys_two_stroke_combo (F14, F13);
+    let inv_darken  = shortkeys_two_stroke_combo (F14, F14);
+    let inv_lighten = shortkeys_two_stroke_combo (F14, F15);
+    let zap_all     = shortkeys_two_stroke_combo (F14, F16);
+
+    let wheel_bkwd_af = Arc::new ( move || {
+        if ks.mod_keys.caps.down.is_clear() { darken() }
+        else { inv_darken() }
+    } );
+    let wheel_frwd_af = Arc::new ( move || {
+        if ks.mod_keys.caps.down.is_clear() { lighten() }
+        else { inv_lighten() }
+    } );
+
     let cell = ActionCell {
         label : "Page Dark".to_string(),
         icon  : icons.darken_pg.clone(),
-        on_wheel_bkwd : ag().af(darken ).gen_af(),
-        on_wheel_frwd : ag().af(lighten).gen_af(),
+        on_wheel_bkwd : wheel_bkwd_af,
+        on_wheel_frwd : wheel_frwd_af,
+        on_release    : invert_mode,
+        on_rbtn_press : dark_mode,
+        on_mbtn_press : zap_all,
         ..Default::default()
     };
     static _pg_dark : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -436,15 +543,15 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let pg_dark = || pg_dark.clone();
 
 
-
     /// _** Darkening / brightening for Images only **__
-    let im_darken   = ag().k(LBracket).m(ctrl).m(shift).gen_af();
-    let im_brighten = ag().k(RBracket).m(ctrl).m(shift).gen_af();
     let cell = ActionCell {
         label : "Image Dark".to_string(),
         icon  : icons.darken_im.clone(),
-        on_wheel_bkwd : ag().af(im_darken  ).gen_af(),
-        on_wheel_frwd : ag().af(im_brighten).gen_af(),
+        on_wheel_bkwd : im_darken,
+        on_wheel_frwd : im_brighten,
+        on_press      : im_inv,
+        on_rbtn_press : im_zap.clone(),
+        on_mbtn_press : im_zap,
         ..Default::default()
     };
     static _im_dark : OnceCell < Arc < ActionCell>> = OnceCell::new();

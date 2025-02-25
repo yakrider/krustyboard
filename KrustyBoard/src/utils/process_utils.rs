@@ -13,6 +13,7 @@ use super::windows_utils::*;
 static APP_RUNNER_LOC : &str = r#"D:\cygwin64\bin\run.exe"#;
 static EXPLORER_LOC   : &str = r#"C:\Windows\explorer.exe"#;
 static CHROME_LOC     : &str = r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#;
+static FIREFOX_LOC    : &str = r#"C:\Program Files\Mozilla Firefox\firefox.exe"#;
 static IRFAN_VIEW_LOC : &str = r#"C:\Program Files\IrfanView\i_view64.exe"#;
 static VLC_LOC        : &str = r#"C:\Program Files\VideoLAN\VLC\vlc.exe"#;
 static WINMERGE_LOC   : &str = r#"C:\Program Files\WinMerge\WinMergeU.exe"#;
@@ -21,8 +22,12 @@ static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJIdea2023.3\
 static CLICK_MONITOR_CDC_LOC : &str = r#"D:\yakdat\downloads\ins-bin\_MONITOR_BRIGHTNESS_UTILS\ClickMonitorDDC_7_2\ClickMonitorDDC_7_2.exe"#;
 
 
+
 /* reminder - re UAC elevation when starting processes while running krusy elevated (as we often want to do)
-    - since processes started here directly
+    - processes started here directly when krusty is running elevated also start with elevated priveleges ..
+    - (which we ofc would like to avoid as much as possible) ..
+    - so instead we'll start a bunch of these by calling explorer instead (e.g. iview, vlc etc)
+    - (which seems to manage its own process creation in such a way that the child processes are not elevated .. oh well)
 */
 
 
@@ -55,6 +60,15 @@ pub fn start_chrome_incognito() {
 
 pub fn start_chrome_app (app_id:&str) {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(format!(r#"--profile-directory="Default" --app-id={}"#, app_id)) .spawn();
+}
+
+pub fn start_firefox() {
+    let _ = Command::new(APP_RUNNER_LOC) .arg(FIREFOX_LOC) .spawn();
+    setup_opened_window("MozillaWindow");
+}
+pub fn start_firefox_incognito() {
+    let _ = Command::new(APP_RUNNER_LOC) .arg(FIREFOX_LOC) .arg(r#"-private-window"#) .spawn();
+    setup_opened_window("MozillaWindow");
 }
 
 pub fn start_alt_file_explorer() {
@@ -99,6 +113,9 @@ fn setup_opened_window (win_class_part_match_str: &str) {
                 //snap_closest_edge_side (ks, RectEdgeSide::Top);
                 //thread::sleep (Duration::from_millis(300));
                 win_fgnd_toggle_vertmax();
+                // then re-focus on addressbar (mostly for firefox)
+                key_utils::alt_press_release(Key::D);
+                //Key::Escape.press_release();
                 true
             } else { false }
         }

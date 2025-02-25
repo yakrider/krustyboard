@@ -19,16 +19,13 @@ name = "krustyboard"
 path = "src/bin/krustyboard/krustyboard.rs"
 
 
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld"
+[package.metadata.winres]
+OriginalFilename = "krustyboard.exe"
+ProductName = "KrustyBoard"
 
 
 [build-dependencies]
 winres = "0.1"
-
-[package.metadata.winres]
-OriginalFilename = "krustyboard.exe"
-ProductName = "KrustyBoard"
 
 
 [dependencies]
@@ -71,6 +68,7 @@ features = [
     "Win32_Graphics_Dwm",
     "Win32_UI_HiDpi",
     "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
 ]
 
 

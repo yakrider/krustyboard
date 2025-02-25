@@ -475,6 +475,7 @@ pub mod key_utils {
     // note that these are ONLY to be used when the mod key states DONT need to be tracked (e.g. in composition fallback actions)
     pub fn ctrl_press_release  (key:Key) { wrapped_press_release (Key::Ctrl,  Key::press_release, key) }
     pub fn shift_press_release (key:Key) { wrapped_press_release (Key::Shift, Key::press_release, key) }
+    pub fn alt_press_release   (key:Key) { wrapped_press_release (Key::Alt,   Key::press_release, key) }
     pub fn win_press_release   (key:Key) { wrapped_press_release (Key::LWin,  Key::press_release, key) }
 
     pub fn double_press_release (key:Key) { key.press_release(); key.press_release(); }
