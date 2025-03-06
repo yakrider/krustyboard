@@ -4,7 +4,9 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use core::ffi::c_int;
 use once_cell::sync::OnceCell;
-use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{BOOL, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, HHOOK, MSG, SetWindowsHookExW, WH_KEYBOARD_LL};
 
 
@@ -14,12 +16,17 @@ use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, HHOOK
 /// Else, we simply assume we are the hook-guard and install a dummy LL Keyboard hook and sit on it, never returning!
 
 pub struct HookGuard {
+    // we'll hold a job object to assign any hook-guard processes we create (so they get auto cleaned up on exit)
+    job : Option <HANDLE>,
+    // and we'll keep a handle to any active hook-guard child process (to restart it when need be)
     guard : Mutex <Option <Child>>,
 }
+
 
 impl HookGuard {
 
     pub fn instance () -> &'static HookGuard {
+
         static INSTANCE : OnceCell <HookGuard> = OnceCell::new();
 
         INSTANCE .get_or_init ( || unsafe {
@@ -30,10 +37,22 @@ impl HookGuard {
                 let mut msg: MSG = MSG::default();
                 while BOOL(0) != GetMessageW (&mut msg, HWND(0), 0, 0) { }
             }
-            HookGuard { guard : Mutex::new (None) }
+
+            // we'll create a job object that we'll associate hook-guards to, and set to kill the guards if the main process exits
+            let job = CreateJobObjectW (None, None) .ok();
+            if let Some(jh) = job.as_ref() {
+                let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject (*jh, JobObjectExtendedLimitInformation, &info as *const _ as *const _, size_of_val(&info) as u32);
+            }
+
+            HookGuard { job,  guard : Mutex::new (None) }
         } )
+
     }
 
+
+    /// this sets up and launches a new hook-guard process (killing any old ones).
     pub fn guard (&'static self) {
         // if we ever get called, we must not have been the guard itself, so we should allow launching one
         // if we've already launched one, we'd have a process-handle stored, we'll kill that and relaunch
@@ -44,17 +63,25 @@ impl HookGuard {
             let _ = guard.as_mut().unwrap().kill();
             *guard = None;
         }
+
         // we can now launch a new guard process ..
-        // and just to make accidental process bombing during dev etc maangeable, we'll add a small delay
         thread::spawn ( move || {
+            // and just to make accidental process bombing during dev etc maangeable, we'll add a small delay
             thread::sleep (Duration::from_millis (500));
+
             // lets recheck to ensure something hasnt already thrown up a guard
             if self.guard.lock().unwrap().is_some() { return }
+
             // and now we can launch the guard process w the ll-kbd-hook
-            if let Ok (guard) = Command::new (env::current_exe().unwrap()) .arg("--hook-guard") .spawn() {
+            if let Ok (guard) = Command::new (env::current_exe().unwrap()) .arg("--hook-guard") .spawn() { unsafe {
                 println! ("Launched a new hook-guard with pid: {:?}", guard.id());
+                // we'll also add this process to our job (so it will be cleaned up if we get killed/exit)
+                let gh = OpenProcess (PROCESS_TERMINATE | PROCESS_SET_QUOTA, false, guard.id());
+                if let (Some(jh), Ok(gh)) = (self.job, gh) {
+                    AssignProcessToJobObject (jh, gh);
+                }
                 *self.guard.lock().unwrap() = Some(guard);
-            }
+            } }
         } );
     }
 
