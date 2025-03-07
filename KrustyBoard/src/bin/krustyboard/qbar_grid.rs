@@ -246,9 +246,6 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     /// _** Direct Task Switching (switche-blind) **__
     // blind switch is just sending prev/next, but we gotta refresh the snapshot before we start
-    // the nav-keys should be .. refresh:F15,  next:F16,  prev:F17,  top:F18,  bottom:F19  (w/ alt-shift)
-    let nav_ag = |nav_key:Key| ag().k(nav_key).m(alt).m(shift).gen_af();
-
     // we're going to track whether we've refreshed, and have it clear whenever cursor leaves the cell
     // .. but the switching can trigger grid layout change, which can end/restart hover
     // .. so instead we'll only clear refresh flag if we're hovered out for a bit
@@ -268,8 +265,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     // now the actual nav-fn-gen
     let nav_af = move |is_bkwd| {
-        let refresh = nav_ag(F15);
-        let nav = if is_bkwd { nav_ag(F16) } else { nav_ag(F17) };
+        use SwitchePipeCmd::*;
+        let refresh = SnapListRefresh.send_af();
+        let nav = if is_bkwd { SnapListSwitchNext.send_af() } else { SnapListSwitchPrev.send_af() };
         Arc::new ( move || {
             if refreshed.is_set() { nav() }
             else { // we'll have to refresh, and give some time for the win-enum snap to be taken

@@ -124,8 +124,9 @@ fn check_alt_tab_fgnd (wel:&WinEventsListener) -> bool {
         fi.class == "XamlExplorerHostIslandWindow" || fi.class == "MultitaskingViewFrame"
 } ) }
 fn check_intellij_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read().unwrap().exe == "idea64.exe"
-}
+    wel.fgnd_info.read() .is_ok_and ( |fi| {
+        fi.exe == "idea64.exe" || fi.exe == "rider64.exe" || fi.exe == "rustrover64.exe"
+} ) }
 fn _check_chrome_fgnd (wel:&WinEventsListener) -> bool {
     wel.fgnd_info.read().unwrap().exe == "chrome.exe"
 }
@@ -552,6 +553,13 @@ fn setup_l2 (k:KR) {
         k.cm .add_combo ( cg().k(key).m(caps).s(msE),         ag().k(l2k).m(shift) );
         k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msF),  ag().af (wafg(l2k)) .m(shift) );
 
+        // and since we often seem to want to do these right after col-mode (caps-e-e), we'll support that too
+        // (for the subset that these col-mode actions make sense)
+        if l2k == ExtLeft || l2k == ExtRight || l2k == ExtHome || l2k == ExtEnd {
+            k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl),         ag().k(l2k).m(shift) );
+            k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl).s(msF),  ag().af (wafg(l2k)) .m(shift) );
+        }
+
         //k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msR),  ag().af (fafg(l2k)) .m(shift) );
         // ^^ we'd rather keep this for other stuff than this 2x selection which basically never gets used
 
@@ -735,7 +743,7 @@ fn setup_mouse_right_btn (k:KR) {
 
     // we're doing a rel-delayed-rbtn scheme .. we'll postpone rbtn-press till release (to avoid ctx menu on rbtn-scroll swi invocation)
     // (otherwise if letting sw handle rbtn-scroll natively, we would've been fine with just the default fallback for press)
-    let sw_snap_af = ag().k(F15).m(alt).m(shift).gen_af();
+    let sw_snap_af = SwitchePipeCmd::SnapListRefresh.send_af();
     let rbtn_press_af = Arc::new ( move || {
         // if we've already got switche up, or are trying to do tab-switching, we'd rather clear pending than set it!
         if check_switche_fgnd(k.wel) || k.ks.mod_keys.caps.down.is_set() {
@@ -1468,12 +1476,15 @@ fn setup_misc_standalone_combos (k:KR) {
     // .. make normal backquote be Delete, caps can do back-tick, and shift or ralt do its tilde
     k.cm .add_combo ( cg().k(Backquote),          ag().k(ExtDelete) );
     k.cm .add_combo ( cg().k(Backquote).m(caps),  ag().k(Backquote) );
-    //k.cm .add_combo ( cg().k(Backquote).m(lalt),    ag().k(Backquote) );
     //k.cm .add_combo ( cg().k(Backquote).m(shift),   ag().k(Backquote).m(shift) );
     //k.cm .add_combo ( cg().k(Backquote).m(ralt),    ag().k(Backquote).m(shift) );
     // ^^ not strictly necessary as cb composition now defaults to this, but also useful to see here for reference
 
-    // .. alt-backquote, we'll set that up to give ctrl-tab as more ergo alternative, and tying in w alt-tab
+    // we do shift-del often enough that we'll set caps-shift-tilde to do shift-del
+    k.cm .add_combo ( cg().k(Backquote).m(caps).m(lshift),  ag().k(ExtDelete).m(shift) );
+
+    //k.cm .add_combo ( cg().k(Backquote).m(lalt),    ag().k(Backquote) );
+    // ^^ we'll set alt-tilde to give ctrl-tab instead as more ergo alternative, and tying in w alt-tab
     k.cm .add_combo ( cg().k(Backquote).m(lalt),  ag().k(Tab).m(lctrl) );
 
 
@@ -1498,7 +1509,7 @@ fn setup_switche_alt_tab (k:KR) {
     // ^^ no longer true as we wanted many more overloads, so now we drive switche alt-tab from krusty again
 
     // either way, we'll override F1 so we can use it via ralt-F1 (if we disable F1 in swi-configs)
-    k.cm .add_combo ( cg().k(F1),          ag().k(F15).m(alt).m(ctrl)  );
+    k.cm .add_combo ( cg().k(F1),          ag().af (SwitchePipeCmd::Invoke.send_af()) );
     k.cm .add_combo ( cg().k(F1).m(ralt),  ag().k(F1) );
 
     // now we can setup the actual nav ..
@@ -1658,6 +1669,10 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
 
     // re the complex combo-condition gating this below .. refer to comments in the rbtn ctrl-tab sections
 
+    // NOTE : reminder that we've since impld pipe based comm between kr-sw, and so all this could be much more straight-froward
+    // .. however, it's been working quite robustly so far just simulating alt-tab in complex manner below, so not bothering with it yet
+    // .. (but this reminder is here so if something breaks or needs update etc, prob would be much easier to switch to pipe-comm instead)
+
     let cc : ComboCond = Arc::new ( |ks,_ev| {
         // rbtn-wheel is for window-switching, but we want to leave x2-rbtn-wheel for tab switching!
         // (note that caps during rbtn-scroll is handled separately below)
@@ -1726,6 +1741,7 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
 
 
 fn setup_switch_windows_blind_sfsc (k:KR) {
+    use SwitchePipeCmd::*;
 
     // sfsc : caps-d-w ..  we'll **_ navigate across windows _** (via switche snapshots w/o switche popup)
     // note that unlike for the non-blind version, we dont get visual feedback of which dir it switching
@@ -1733,12 +1749,9 @@ fn setup_switch_windows_blind_sfsc (k:KR) {
     let fsc = FSC::SwitcheBlind.ch();
     k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(W).no_rpt().m(caps).s(msD) );
 
-    // the nav-keys should be .. refresh:F15,  next:F16,  prev:F17,  top:F18,  bottom:F19  (w/ alt-shift)
-    let nav_ag = |nav_key:Key| ag().k(nav_key).m(alt).m(shift);
-
     // we'll make the fsc trigger itself do the first switch, similar to how alt-tab works
     let init_af : AF = {
-        let (refresh_af, fwd_af) = (nav_ag(F15).gen_af(), nav_ag(F16).gen_af());
+        let (refresh_af, fwd_af) = (SnapListRefresh.send_af(), SnapListSwitchNext.send_af());
         Arc::new ( move || {
             let (refresh_af, fwd_af) = (refresh_af.clone(), fwd_af.clone());
             thread::spawn ( move || {
@@ -1752,20 +1765,23 @@ fn setup_switch_windows_blind_sfsc (k:KR) {
 
     // D/W should nav fwd/bkwd through the snapshot stack ..
     // W -> prev in z-stack .. (might look reverse from invocation but preserving up/down direction was more important)
-    k.cm .add_combo ( cg().k(W).m(caps).fsc(fsc).no_rpt(),  nav_ag(F17) );
+    k.cm .add_combo ( cg().k(W).m(caps).fsc(fsc).no_rpt(),  ag().af(SnapListSwitchPrev.send_af()) );
 
     // D -> next in z-stack .. and since its a mode-key that cares about _dbl, we'll set that too
-    k.cm .add_combo ( cg().k(D).m(caps).s(msD    ).fsc(fsc).no_rpt(),  nav_ag(F16) );
-    k.cm .add_combo ( cg().k(D).m(caps).s(msD_dbl).fsc(fsc).no_rpt(),  nav_ag(F16) );
+    k.cm .add_combo ( cg().k(D).m(caps).s(msD    ).fsc(fsc).no_rpt(),  ag().af(SnapListSwitchNext.send_af()) );
+    k.cm .add_combo ( cg().k(D).m(caps).s(msD_dbl).fsc(fsc).no_rpt(),  ag().af(SnapListSwitchNext.send_af()) );
 
     // and similar using keyboard keys too .. (using l2 keys as arrows as expected)
-    [ (K,F16), (Comma,F16), (J,F17), (I,F17), (U,F18), (M,F19) ] .iter().for_each ( |&(k1,k2)| {
-        k.cm .add_combo ( cg().k(k1).m(caps).fsc(fsc).no_rpt(),  nav_ag(k2) );
+    [ (K, SnapListSwitchNext), (Comma, SnapListSwitchNext),
+      (J, SnapListSwitchPrev), (I, SnapListSwitchPrev),
+      (U, SnapListSwitchTop),  (M, SnapListSwitchBottom)
+    ] .iter().for_each ( |(k1,cmd)| {
+        k.cm .add_combo ( cg().k(*k1).m(caps).fsc(fsc).no_rpt(),  ag().af(cmd.send_af()) );
     } );
 
     // and for the wheels
-    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc), nav_ag(F16) );
-    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc), nav_ag(F17) );
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),  ag().af(SnapListSwitchNext.send_af()) );
+    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),  ag().af(SnapListSwitchPrev.send_af()) );
 
     // we'll enable caps-o to send windows to back while doing that
     k.cm .add_combo ( cg().k(O).m(caps).fsc(fsc),  ag().af (action(win_fgnd_min_and_back)) );
@@ -1776,49 +1792,49 @@ fn setup_switch_windows_blind_sfsc (k:KR) {
 
 fn setup_switch_windows_direct_sfsc (k:KR) {
     // (Note that there also a bunch of these in mouse/wheel sections)
+    use SwitchePipeCmd::*;
 
-    let switche_direct__z_top            =  ag().k(F16).m(alt).m(ctrl);
-    let switche_direct__z_second         =  ag().k(F17).m(alt).m(ctrl);
-    let switche_direct__z_third          =  ag().k(F18).m(alt).m(ctrl);
+    let switche_direct__z_top     =  SwitchZIndex(1).send_af();
+    let switche_direct__z_second  =  SwitchZIndex(2).send_af();
+    let switche_direct__z_third   =  SwitchZIndex(3).send_af();
 
-    let switche_direct__claude           =  ag().k(F19).m(alt).m(ctrl);
-    let switche_direct__tabs_outliner    =  ag().k(F20).m(alt).m(ctrl);
-    let switche_direct__notepadpp        =  ag().k(F21).m(alt).m(ctrl);
-    let switche_direct__ide              =  ag().k(F22).m(alt).m(ctrl);
-    let switche_direct__music            =  ag().k(F23).m(alt).m(ctrl);
-    let switche_direct__browser          =  ag().k(F24).m(alt).m(ctrl);
-    let switche_direct__kbd_evs_printer  =  ag().k(F24).m(alt).m(shift);
+    let switche_direct__ide       =  SwitchePipeCmd::sw_exe_af (&vec!("idea64.exe".into(), "rustrover64.exe".into(), "rider64.exe".into()));
+    let switche_direct__browser   =  SwitchePipeCmd::sw_exe_af (&vec!("chrome.exe".into(), "firefox.exe".into(), "msedge.exe".into() ));
+    let switche_direct__music     =  SwitchePipeCmd::sw_exe_af (&vec!("winamp.exe".into(), "MusicBee.exe".into() ));
+    let switche_direct__notepadpp =  SwitchePipeCmd::sw_exe_af (&vec!("notepad++.exe".into() ));
 
+    let switche_direct__claude          = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Claude", true);
+    let switche_direct__tabs_outliner   = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Tabs Outliner", false);
+    let switche_direct__kbd_evs_printer = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "kbd: Keyboard Events Printer", false);
 
-    k.cm .add_combo ( cg().k(F1).m(lalt),      switche_direct__z_top     .clone() );
-    k.cm .add_combo ( cg().k(F1).m(lalt_dbl),  switche_direct__z_second  .clone() );
-    k.cm .add_combo ( cg().k(F2).m(lalt_dbl),  switche_direct__z_third   .clone() );
+    k.cm .add_combo ( cg().k(F1).m(lalt),      ag().af (switche_direct__z_top   .clone()) );
+    k.cm .add_combo ( cg().k(F1).m(lalt_dbl),  ag().af (switche_direct__z_second.clone()) );
+    k.cm .add_combo ( cg().k(F2).m(lalt_dbl),  ag().af (switche_direct__z_third .clone()) );
 
     // we'll set Alt-F2 to bring chrome tabs-outliner (via switche) to keep w the theme of Alt-F<n> keys for task switching
-    k.cm .add_combo ( cg().k(F2).m(lalt),      switche_direct__tabs_outliner.clone() );
-
+    k.cm .add_combo ( cg().k(F2).m(lalt),      ag().af (switche_direct__tabs_outliner.clone()) );
 
     // we'll put app-specific direct-switch on lalt-qks1 combos, and on caps-d-s sticky fsc
+    // (note that it must be caps-d-s in that order, as caps-s-d will trigger the caps-s to bring up swithce first)
     let fsc = FSC::SwitcheDirect.ch();
     k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(S).m(caps).s(msD) );
 
     // and we'll allow wheel snapshot-switch on this, so lets refresh the snapshot on trigger (via sw Alt-Shift-F15)
-    k.cm .add_combo ( cg().k(S).m(caps).s(msD).no_rpt(),   ag().k(F15).m(alt).m(shift) );
+    k.cm .add_combo ( cg().k(S).m(caps).s(msD).no_rpt(),   ag().af (SnapListRefresh.send_af()) );
 
     // and enable wheel to do snapshot-switch (as in the actual snap-switch sfsc)
-    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().k(F16).m(alt).m(shift) );
-    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().k(F17).m(alt).m(shift) );
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).fsc(fsc),   ag().af (SnapListSwitchNext.send_af()) );
+    k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().af (SnapListSwitchPrev.send_af()) );
 
-
-    let setup_direct_switch = move |key:Key, ag: &ActionGen<ActionGenSt_Key>| {
-        k.cm .add_combo ( cg().k(key).m(lalt).s(qks1),   ag.clone() );
-        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc),  ag.clone() );
+    let setup_direct_switch = move |key:Key, af:&AF| {
+        k.cm .add_combo ( cg().k(key).m(lalt).s(qks1),   ag().af(af.clone()) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc),  ag().af(af.clone()) );
     };
     setup_direct_switch ( Space,  & switche_direct__z_top           );   // Space -> last-active
     setup_direct_switch ( L,      & switche_direct__z_top           );   // L -> last-active
+    setup_direct_switch ( I,      & switche_direct__ide             );   // I -> first IDEA window
     setup_direct_switch ( B,      & switche_direct__browser         );   // B -> first browser window
     setup_direct_switch ( M,      & switche_direct__music           );   // M -> winamp (music)
-    setup_direct_switch ( I,      & switche_direct__ide             );   // I -> first IDEA window
     setup_direct_switch ( N,      & switche_direct__notepadpp       );   // N -> Notepad++
     setup_direct_switch ( T,      & switche_direct__tabs_outliner   );   // O -> TabsOutliner (chrome)
     setup_direct_switch ( C,      & switche_direct__claude          );   // C -> Claude (chrome)

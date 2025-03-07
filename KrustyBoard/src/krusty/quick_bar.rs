@@ -5,7 +5,6 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
-use derive_deref::Deref;
 use once_cell::sync::OnceCell;
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
@@ -167,7 +166,9 @@ pub type GetGridBuilderFn = Box <dyn Fn (&Context) -> GetGridFn + Send + Sync + 
 
 pub type GetGridFn = Box <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
 
-pub struct QuickBarDat {
+
+# [derive ()]
+pub struct QuickBar {
 
     visible : Flag,
     persist : Flag,
@@ -198,9 +199,6 @@ pub struct QuickBarDat {
 
 }
 
-#[derive (Deref, Clone)]
-pub struct QuickBar ( Arc <QuickBarDat> );
-
 
 
 impl QuickBar {
@@ -213,7 +211,7 @@ impl QuickBar {
 
         static INSTANCE: OnceCell<QuickBar> = OnceCell::new();
         INSTANCE .get_or_init ( ||
-            QuickBar ( Arc::new ( QuickBarDat {
+            QuickBar {
                 visible  : Flag::default(),
                 persist  : Flag::default(),
 
@@ -229,7 +227,7 @@ impl QuickBar {
                 get_grid_builder : Arc::new ( Mutex::new ( None ) ),
                 get_grid         : Arc::new ( Mutex::new ( Box::new (move || gg_empty .clone()))),
                 refresh_grid     : Flag::default(),
-            } ) )
+            }
         )
     }
 
@@ -446,7 +444,7 @@ impl QuickBar {
                 ..Default::default()
             };
 
-            let app = || Box::new(self.clone());
+            let app = || Box::new(self);
             let _ = eframe::run_native (
                 "QuickBar",
                 options,
@@ -498,7 +496,7 @@ impl QuickBar {
 
 
 
-impl eframe::App for QuickBar {
+impl eframe::App for &QuickBar {
 
     fn update (&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
 

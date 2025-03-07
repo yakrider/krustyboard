@@ -84,6 +84,7 @@ pub mod utils {
     pub mod process_utils;
     pub mod windows_utils;
     pub mod hook_guard;
+    pub mod switche_pipe;
 
     // and our (selective or wholesale) sub-module re-exports
     pub use self::brightness::*;
@@ -91,6 +92,7 @@ pub mod utils {
     pub use self::process_utils::*;
     pub use self::windows_utils::*;
     pub use self::hook_guard::*;
+    pub use self::switche_pipe::*;
 }
 
 
