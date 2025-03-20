@@ -87,7 +87,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     use { KbdKey::*, ModKey::*};
 
-    let (ks, wel, qb) = (KrustyState::instance(), WinEventsListener::instance(), QuickBar::instance());
+    let (ks, wel, qb, ov) = (KrustyState::instance(), WinEventsListener::instance(), QuickBar::instance(), DimmingOverlay::instance());
 
     let icons = load_icons (ctx);
 
@@ -366,8 +366,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Brightness .. plus ..  Lbtn Qbar Dragging ..  Rbtn Qbar Close **__
-    fn gen_incr_brightness (incr:i32) -> AF {
-        Arc::new ( move || { let _ = incr_brightness(incr); } )
+    fn gen_incr_af (ks:KSR, overlay:&'static DimmingOverlay, incr:i32) -> AF {
+        Arc::new ( move || {
+            if ks.mod_keys.caps.down.is_clear() {
+                let _ = incr_brightness (2 * incr);
+            } else {
+                overlay.incr_dimming (-4 * incr)
+            }
+        } )
     }
     let qbar_drag = Arc::new ( move || {
         // for drag, we just set a flag and let krusty handle it (incl clearing flag on lbtn release)
@@ -383,13 +389,17 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // we'll explicitly not set it here and rely on global release, just to face potential issues sooner
     let qbar_close = Arc::new ( move ||  qb.hide(true) );
 
+    // we'll set it to bringup Gamgee on x2 click
+    let gamgee_open = Arc::new (bringup_gamgee);
+
     let cell = ActionCell {
         label : "Brightness".into(),
         icon  : icons.bright.clone(),
-        on_wheel_frwd : gen_incr_brightness ( 2),   // increase brightness
-        on_wheel_bkwd : gen_incr_brightness (-2),   // decrease brightness
+        on_wheel_frwd : gen_incr_af (ks, ov,  1),   // adjust brightness (or w/ caps, dimming overlay)
+        on_wheel_bkwd : gen_incr_af (ks, ov, -1),   // adjust brightness (or w/ caps, dimming overlay)
         on_press      : qbar_drag,                  // persist-qbar, enable drag
         on_rbtn_click : qbar_close,                 // close-qbar
+        on_mbtn_click : gamgee_open,                // bringup gamma management utility
         ..Default::default()
     };
     static _brightness : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -400,11 +410,25 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Wheel to Arrows **__
+    let arrow_up   = ag().k(ExtUp  ).gen_af();
+    let arrow_down = ag().k(ExtDown).gen_af();
+    let line_up    = ag().k(I      ).m(alt).m(ctrl).gen_af();
+    let line_down  = ag().k(Comma  ).m(alt).m(ctrl).gen_af();
+    let arrow_af = |dir_bkwd:bool| -> AF {
+        Arc::new ( move || {
+            match (dir_bkwd, ks.mod_keys.caps.down.is_set()) {
+                (true,  false) => arrow_down(),
+                (false, false) => arrow_up(),
+                (true,  true ) => line_down(),
+                (false, true ) => line_up(),
+            };
+        } )
+    };
     let cell = ActionCell {
         label : "Arrows".to_string(),
         icon  : icons.arrows.clone(),
-        on_wheel_bkwd : ag().k(ExtDown).gen_af(),    // arrow down
-        on_wheel_frwd : ag().k(ExtUp  ).gen_af(),    // arrow up
+        on_wheel_bkwd : arrow_af.clone()(true),
+        on_wheel_frwd : arrow_af(false),
         ..Default::default()
     };
     static _arrows : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -568,7 +592,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     // we can now start constructing the grid variants for various conditions
 
-    let cell_sz = CellDims::new (48,26);
+    //let cell_sz = CellDims::new (48,26);
+    let cell_sz = CellDims::new (38,22);
 
     let start_pos = Some ( Point { x: 3840-450, y: 250 } );
     // we'll start just a bit towards the top-right corner

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use once_cell::sync::OnceCell;
 
 use crate::*;
-use crate::utils::Cursors;
+use crate::utils::{Cursors, DimmingOverlay};
 
 
 // todo : just a reminder that we added some hacky meddling into keycodes and sending key events to get L/R scancodes out on alt/ctrl/shift
@@ -215,6 +215,10 @@ pub struct Krusty {
     /// The QuickBar by default provides the ui framework for the quick-bar (but the actual action-grid there should be populated later) <br><br>
     /// This will need to be started separately after setting up all the combos
     pub qbar : &'static QuickBar,
+
+    /// DimmingOverlay maintains a opacity adjustable dark overlay over the entire screen
+    pub overlay : &'static DimmingOverlay,
+    // ^^ todo .. will have to make this maintain monitor specific overlays instead (ofc w hotplug support etc)
 
 }
 
@@ -446,6 +450,7 @@ impl Krusty {
                 wel     : WinEventsListener::instance(),
                 cursors : Cursors::instance(),
                 qbar    : QuickBar::instance(),
+                overlay : DimmingOverlay::instance(),
             }
         )
     }

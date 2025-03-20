@@ -116,6 +116,16 @@ impl FSC {
 
 
 
+
+fn check_browser_fgnd (wel:&WinEventsListener) -> bool {
+    wel.fgnd_info.read() .is_ok_and (|fi| BROWSER_EXES.contains (&fi.exe))
+}
+fn _check_chrome_fgnd (wel:&WinEventsListener) -> bool {
+    wel.fgnd_info.read().unwrap().exe == "chrome.exe"
+}
+fn check_intellij_fgnd (wel:&WinEventsListener) -> bool {
+    wel.fgnd_info.read() .is_ok_and (|fi| IDE_EXES.contains (&fi.exe))
+}
 fn check_switche_fgnd (wel:&WinEventsListener) -> bool {
     wel.fgnd_info.read().unwrap().exe == "Switche.exe"
 }
@@ -123,16 +133,6 @@ fn check_alt_tab_fgnd (wel:&WinEventsListener) -> bool {
     wel.fgnd_info.read() .is_ok_and ( |fi| {
         fi.class == "XamlExplorerHostIslandWindow" || fi.class == "MultitaskingViewFrame"
 } ) }
-fn check_intellij_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and ( |fi| {
-        fi.exe == "idea64.exe" || fi.exe == "rider64.exe" || fi.exe == "rustrover64.exe"
-} ) }
-fn _check_chrome_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read().unwrap().exe == "chrome.exe"
-}
-fn check_browser_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and (|fi| { fi.exe == "chrome.exe" || fi.exe == "firefox.exe" ||  fi.exe == "msedge.exe" } )
-}
 
 /// the idea here is to clone the listener Arc once during cond-creation, to avoid calling instance() repeatedly during runtime
 fn win_evs_cond <WFN> (wfn:WFN) -> ComboCond
@@ -159,6 +159,9 @@ fn win_evs_cond <WFN> (wfn:WFN) -> ComboCond
 
 fn gen_af_incr_brightness (step:i32) -> AF {
     Arc::new ( move || { let _ = incr_brightness(step); } )
+}
+fn gen_af_incr_overlay (overlay:&'static DimmingOverlay, step:i32) -> AF {
+    Arc::new ( move || overlay.incr_dimming(step) )
 }
 
 // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
@@ -423,7 +426,8 @@ fn setup_caps_as_shift_mappings  (k:KR) {
 
     // now for at least some of these, we want to enable caps-q for ctrl (e.g. ctrl +/-)
     for key in [Minus, Equal, Slash] {
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1),  ag().k(key).m(ctrl) )
+        k.cm .add_combo ( cg().k(key).m(caps).s(qks ),  ag().k(key).m(ctrl) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(qks1),  ag().k(key).m(ctrl) );
     }
 }
 
@@ -948,6 +952,8 @@ fn setup_vert_wheel (k:KR) {
 
         - alt-wh        -->  brightness  .. (plus switche and alt-tab overloads set-up elsewhere)
         - alt-1-wh      -->  fine-mode brightness
+        - caps-alt-wh   -->  dimming overlay
+
         - win-wh        -->  volume
         - caps-win-3-wh -->  media skip fwd/bkwd
 
@@ -1045,9 +1051,9 @@ fn setup_vert_wheel (k:KR) {
     // qks1-alt-wheel (i.e. alt+1+wheel) .. we'll do finer brightness adjustments
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),   -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
+    // caps-alt-wheel can do dimming overlay adjustments
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).m(caps),   4, -4,   |ag,p| ag.af (gen_af_incr_overlay (k.overlay, p)) );
 
-    // caps-alt-wheel .. we'll do up/down nav .. (and switche etc is set-up separately)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(lalt),   ExtDown, ExtUp,   |ag,p| ag.k(p).m(lalt) );
 
     /// setups for **_ Arrow-Up/Down nav _** (in addn to some portions above)
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
@@ -1499,6 +1505,9 @@ fn setup_misc_standalone_combos (k:KR) {
     // quick shortcut to reset system cursors .. mostly useful while impl/testing it
     k.cm .add_combo ( cg().k(C).m(caps_dbl).m(lalt),  ag().af (action (|| Cursors::instance().apply_sys())) );
 
+    // caps-caps-G can invoke the hotkey for Gamgee (Alt-Shift-G)
+    k.cm .add_combo ( cg().k(G).m(caps_dbl),  ag().k(G).m(alt).m(shift) )
+
 }
 
 
@@ -1798,10 +1807,10 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     let switche_direct__z_second  =  SwitchZIndex(2).send_af();
     let switche_direct__z_third   =  SwitchZIndex(3).send_af();
 
-    let switche_direct__ide       =  SwitchePipeCmd::sw_exe_af (&vec!("idea64.exe".into(), "rustrover64.exe".into(), "rider64.exe".into()));
-    let switche_direct__browser   =  SwitchePipeCmd::sw_exe_af (&vec!("chrome.exe".into(), "firefox.exe".into(), "msedge.exe".into() ));
-    let switche_direct__music     =  SwitchePipeCmd::sw_exe_af (&vec!("winamp.exe".into(), "MusicBee.exe".into() ));
-    let switche_direct__notepadpp =  SwitchePipeCmd::sw_exe_af (&vec!("notepad++.exe".into() ));
+    let switche_direct__ide       =  SwitchePipeCmd::sw_exe_af (&IDE_EXES);
+    let switche_direct__browser   =  SwitchePipeCmd::sw_exe_af (&BROWSER_EXES);
+    let switche_direct__music     =  SwitchePipeCmd::sw_exe_af (&MUSIC_EXES);
+    let switche_direct__notepadpp =  SwitchePipeCmd::sw_exe_af (&["notepad++.exe".into()]);
 
     let switche_direct__claude          = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Claude", true);
     let switche_direct__tabs_outliner   = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Tabs Outliner", false);
@@ -2251,6 +2260,8 @@ fn setup_IDE_combos (k:KR) {
     let show_file_git_diff   =  ag().k(D).m(ctrl).m(alt).m(shift);
     let toggle_diff_preview  =  ag().af (ide_two_stroke_combo (F13, F18));
 
+    let toggle_statusbar  =  ag().af (ide_two_stroke_combo (F13, F21));
+
     //let tab_nav_left  = ag().k(PageUp  ).m(ctrl);
     //let tab_nav_right = ag().k(PageDown).m(ctrl);
     // these are kept uniform between IDE, chrome, npp etc .. so these are covered by tab-nav-tscs
@@ -2270,6 +2281,8 @@ fn setup_IDE_combos (k:KR) {
 
     k.cm .add_combo ( cg().k(G).m(caps).s(msE),   show_file_git_diff );
     k.cm .add_combo ( cg().k(P).m(caps).s(qks3),  toggle_diff_preview );
+
+    k.cm .add_combo ( cg().k(B).m(caps_dbl),   toggle_statusbar );
 
     k.cm .add_combo ( cg().k(Comma).m(caps).s(msR_dbl),  goto_ref_usage );
     k.cm .add_combo ( cg().k(I    ).m(caps).s(msR_dbl),  goto_impl_decl );

@@ -3,24 +3,39 @@
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use once_cell::sync::Lazy;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
 
 use super::windows_utils::*;
 
 
-static APP_RUNNER_LOC : &str = r#"D:\cygwin64\bin\run.exe"#;
-static EXPLORER_LOC   : &str = r#"C:\Windows\explorer.exe"#;
-static CHROME_LOC     : &str = r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#;
-static FIREFOX_LOC    : &str = r#"C:\Program Files\Mozilla Firefox\firefox.exe"#;
-static IRFAN_VIEW_LOC : &str = r#"C:\Program Files\IrfanView\i_view64.exe"#;
-static VLC_LOC        : &str = r#"C:\Program Files\VideoLAN\VLC\vlc.exe"#;
-static WINMERGE_LOC   : &str = r#"C:\Program Files\WinMerge\WinMergeU.exe"#;
-static Q_DIR_LOC      : &str = r#"C:\Users\yakrider\AppData\Roaming\Q-Dir\Q-Dir.exe"#;
-static IDEA_LOC       : &str = r#"C:\Program Files\JetBrains\IntelliJIdea2023.3\bin\idea64.exe"#;
-static CLICK_MONITOR_CDC_LOC : &str = r#"D:\yakdat\downloads\ins-bin\_MONITOR_BRIGHTNESS_UTILS\ClickMonitorDDC_7_2\ClickMonitorDDC_7_2.exe"#;
+static APP_RUNNER_LOC    : &str = r#"D:\cygwin64\bin\run.exe"#;
+static EXPLORER_LOC      : &str = r#"C:\Windows\explorer.exe"#;
+static CHROME_LOC        : &str = r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#;
+static FIREFOX_LOC       : &str = r#"C:\Program Files\Mozilla Firefox\firefox.exe"#;
+static IRFAN_VIEW_LOC    : &str = r#"C:\Program Files\IrfanView\i_view64.exe"#;
+static VLC_LOC           : &str = r#"C:\Program Files\VideoLAN\VLC\vlc.exe"#;
+static WINMERGE_LOC      : &str = r#"C:\Program Files\WinMerge\WinMergeU.exe"#;
+static Q_DIR_LOC         : &str = r#"C:\Users\yakrider\AppData\Roaming\Q-Dir\Q-Dir.exe"#;
+static IDEA_LOC          : &str = r#"C:\Program Files\JetBrains\IntelliJIdea2023.3\bin\idea64.exe"#;
+static CLICK_MON_DDC_LOC : &str = r#"C:\yakdl\Downloads\ins-bin\_MONITOR_BRIGHTNESS_UTILS\ClickMonitorDDC_7_2\ClickMonitorDDC_7_2.exe"#;
+static GAMGEE_LOC        : &str = r#"C:\yakdl\Downloads\ins-bin\_MONITOR_BRIGHTNESS_UTILS\Gamgee\Gamgee.exe"#;
 
+
+// we'll also maintain groupings of exes here for easier list filtering, or sneding switche pipe cmds etc
+pub static BROWSER_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+    ["chrome", "firefox", "msedge", "brave"] .map (String::from) .map (|s| s+".exe") .to_vec()
+);
+pub static IDE_EXES : Lazy<Vec<String>> = Lazy::new ( || [
+        "idea", "rustrover", "goland", "rider", "clion", "pycharm", "webstorm"
+    ] .map (String::from) .map (|s| s+"64.exe") .to_vec()
+);
+pub static MUSIC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+    ["winamp", "MusicBee",] .map (String::from) .map (|s| s+".exe") .to_vec()
+);
 
 
 /* reminder - re UAC elevation when starting processes while running krusy elevated (as we often want to do)
@@ -50,45 +65,45 @@ pub fn check_proc_elevated (h_proc:HANDLE) -> Option<bool> { unsafe {
 
 pub fn start_chrome() {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .spawn();
-    setup_opened_window("Chrome");
+    setup_opened_window ("Chrome");
 }
 
 pub fn start_chrome_incognito() {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(r#"--profile-directory="Default" -incognito"#) .spawn();
-    setup_opened_window("Chrome");
+    setup_opened_window ("Chrome");
 }
 
 pub fn start_chrome_app (app_id:&str) {
     let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(format!(r#"--profile-directory="Default" --app-id={}"#, app_id)) .spawn();
 }
 
-pub fn start_firefox() {
+pub fn start_firefox () {
     let _ = Command::new(APP_RUNNER_LOC) .arg(FIREFOX_LOC) .spawn();
     setup_opened_window("MozillaWindow");
 }
-pub fn start_firefox_incognito() {
+pub fn start_firefox_incognito () {
     let _ = Command::new(APP_RUNNER_LOC) .arg(FIREFOX_LOC) .arg(r#"-private-window"#) .spawn();
     setup_opened_window("MozillaWindow");
 }
 
-pub fn start_alt_file_explorer() {
+pub fn start_alt_file_explorer () {
     let _ = Command::new(EXPLORER_LOC) .arg(Q_DIR_LOC) .spawn();
 }
 
-pub fn start_irfanview() {
+pub fn start_irfanview () {
     let _ = Command::new(EXPLORER_LOC) .arg(IRFAN_VIEW_LOC) .spawn();
     setup_opened_window("IrfanView");
 }
 
-pub fn start_vlc() {
+pub fn start_vlc () {
     let _ = Command::new(EXPLORER_LOC) .arg(VLC_LOC) .spawn();
 }
 
-pub fn start_winmerge_clipboard() {
+pub fn start_winmerge_clipboard () {
     let _ = Command::new(APP_RUNNER_LOC) .arg(WINMERGE_LOC) .arg("/clipboard-compare").spawn();
 }
 
-pub fn start_idea_diff() {
+pub fn start_idea_diff () {
     let _ = Command::new(APP_RUNNER_LOC) .arg(IDEA_LOC) .arg("diff").spawn();
 }
 
@@ -96,8 +111,14 @@ pub fn open_mic_cpl () {
     let _ = Command::new("rundll32.exe") .arg("shell32.dll,Control_RunDLL") .arg("mmsys.cpl,,1").spawn();
 }
 
-pub fn bringup_click_monitor_cdc () {
-    let _ = Command::new(APP_RUNNER_LOC) .arg(CLICK_MONITOR_CDC_LOC) .spawn();
+pub fn bringup_click_monitor_ddc () {
+    let _ = Command::new(APP_RUNNER_LOC) .arg(CLICK_MON_DDC_LOC) .spawn();
+}
+
+pub fn bringup_gamgee () {
+    unsafe { let _ = AllowSetForegroundWindow (ASFW_ANY); }
+    // ^^ this can help make it a bit more robust if its hidden/minimized ?? idk man
+    let _ = Command::new(APP_RUNNER_LOC) .arg(GAMGEE_LOC) .spawn();
 }
 
 fn setup_opened_window (win_class_part_match_str: &str) {

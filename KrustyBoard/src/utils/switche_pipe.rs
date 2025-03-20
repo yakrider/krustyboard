@@ -76,8 +76,8 @@ impl SwitchePipeCmd {
     }
 
     // and some static syntactic sugar methods
-    pub fn sw_exe_af (exes:&Vec<String>) -> AF {
-        Self::SwitchApp { exes: exes.clone(), title:None, partial:false } .send_af()
+    pub fn sw_exe_af (exes:&[String]) -> AF {
+        Self::SwitchApp { exes: exes.to_vec(), title:None, partial:false } .send_af()
     }
     pub fn sw_exe_title_af (exe:&str, title:&str, partial:bool) -> AF {
         Self::SwitchApp { exes: vec!(exe.into()), title: Some(title.into()), partial } .send_af()

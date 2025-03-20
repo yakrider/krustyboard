@@ -27,6 +27,10 @@ use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA,
 # [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
 pub struct Hwnd (pub(crate) isize);
 
+impl Hwnd {
+    pub fn is_valid (&self) -> bool { self.0 != 0 }
+}
+
 impl From <HWND> for Hwnd {
     fn from (hwnd:HWND) -> Self { Hwnd(hwnd.0) }
 }
@@ -530,7 +534,7 @@ pub unsafe extern "system" fn win_enum_cb_ide_dialog_filt (hwnd:HWND, _:LPARAM) 
     if  check_if_tool_window (hwnd.into())  { return retval }
     //if  check_window_has_owner (hwnd.into())  { return retval }
     if get_win_class_by_hwnd (hwnd.into()) != "SunAwtDialog" { return retval }
-    if get_exe_by_hwnd (hwnd.into()) .filter (|s| s == "idea64.exe" || s == "rider64.exe" || s == "rustrover64.exe") .is_none() { return retval }
+    if get_exe_by_hwnd (hwnd.into()) .filter (|s| crate::utils::IDE_EXES.contains(s)) .is_none() { return retval }
     enum_hwnds.write().unwrap() .push (hwnd.into());
     retval
 }
