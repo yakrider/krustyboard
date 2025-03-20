@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
 use once_cell::sync::Lazy;
 
-use windows::core::{PSTR, HSTRING, PCWSTR};
-use windows::Win32::Foundation::{HINSTANCE, POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, BOOL, CloseHandle, TRUE, FALSE, COLORREF};
+use windows::core::{PSTR, HSTRING, PCWSTR, BOOL};
+use windows::Win32::Foundation::{POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, CloseHandle, TRUE, FALSE, COLORREF};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED};
-use windows::Win32::Graphics::Gdi::{HRGN, RDW_INTERNALPAINT, RedrawWindow};
+use windows::Win32::Graphics::Gdi::{RDW_INTERNALPAINT, RedrawWindow};
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -32,10 +32,10 @@ impl Hwnd {
 }
 
 impl From <HWND> for Hwnd {
-    fn from (hwnd:HWND) -> Self { Hwnd(hwnd.0) }
+    fn from (hwnd:HWND) -> Self { Hwnd(hwnd.0 as _) }
 }
 impl From <Hwnd> for HWND {
-    fn from (hwnd:Hwnd) -> Self { HWND(hwnd.0) }
+    fn from (hwnd:Hwnd) -> Self { HWND(hwnd.0 as _) }
 }
 impl From <Hwnd> for isize {
     fn from (hwnd:Hwnd) -> Self { hwnd.0 }
@@ -120,16 +120,16 @@ pub fn win_set_thread_dpi_aware() { unsafe {
 } }
 
 pub fn win_set_cur_process_priority_high() -> bool { unsafe {
-    SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS) .as_bool()
+    SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS) .ok() .is_some()
 } }
 
 pub fn win_set_cur_thread_priority_high() -> bool { unsafe {
-    SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_HIGHEST) .as_bool()
+    SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_HIGHEST) .ok() .is_some()
 } }
 
 pub fn dpi_conv_point (hwnd:Hwnd, p:POINT) -> POINT { unsafe {
     let mut p = POINT { x: p.x, y: p.y };
-    PhysicalToLogicalPoint (hwnd, &mut p);
+    let _ = PhysicalToLogicalPoint (hwnd.into(), &mut p);
     p
 } }
 pub fn get_thread_dpi_awareness() -> DPI_AWARENESS { unsafe {
@@ -141,29 +141,29 @@ pub fn get_process_dpi_awareness() -> DPI_AWARENESS { unsafe {
 
 
 pub fn check_window_visible (hwnd:Hwnd) -> bool { unsafe {
-    IsWindowVisible (hwnd) .as_bool()
+    IsWindowVisible (hwnd.into()) .as_bool()
 } }
 
 pub fn check_window_cloaked (hwnd:Hwnd) -> bool { unsafe {
     let mut cloaked_state: isize = 0;
     let out_ptr = &mut cloaked_state as *mut isize as *mut c_void;
-    let _ = DwmGetWindowAttribute (hwnd, DWMWA_CLOAKED, out_ptr, size_of::<isize>() as u32);
+    let _ = DwmGetWindowAttribute (hwnd.into(), DWMWA_CLOAKED, out_ptr, size_of::<isize>() as u32);
     cloaked_state != 0
 } }
 
 pub fn check_if_app_window (hwnd:Hwnd) -> bool { unsafe {
-    GetWindowLongW (hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW.0 as i32 != 0
+    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) & WS_EX_APPWINDOW.0 as i32 != 0
 } }
 pub fn check_if_tool_window (hwnd:Hwnd) -> bool { unsafe {
-    GetWindowLongW (hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 as i32 != 0
+    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 as i32 != 0
 } }
 
 pub fn check_window_has_owner (hwnd:Hwnd) -> bool { unsafe {
-    GetAncestor (hwnd, GA_ROOTOWNER).0 != hwnd.0
+    !GetAncestor (hwnd.into(), GA_ROOTOWNER) .is_invalid()
 } }
 
 pub fn win_check_hwnd (hwnd:Hwnd) -> bool { unsafe {
-    IsWindow (hwnd).as_bool()
+    IsWindow (Some(hwnd.into())).as_bool()
 } }
 
 
@@ -171,21 +171,21 @@ pub fn win_get_fgnd () -> Hwnd { unsafe {
     GetForegroundWindow().into()
 } }
 pub fn win_set_fgnd (hwnd:Hwnd) { unsafe {
-    SetForegroundWindow (hwnd);
+    let _ = SetForegroundWindow (hwnd.into());
 } }
 
 /// Of note, GetWindows only returns z-top, z-next etc of windows of SAME CLASS.
 /// So, this cant be used to get regular z-next when querying with topmost hwnd etc
-pub fn win_get_class_hwnd__z_next (hwnd:Hwnd) -> Hwnd { unsafe {
-    GetWindow (hwnd, GW_HWNDNEXT) .into()
+pub fn win_get_class_hwnd__z_next (hwnd:Hwnd) -> Option<Hwnd> { unsafe {
+    GetWindow (hwnd.into(), GW_HWNDNEXT) .ok() .map(|h| h.into())
 } }
-pub fn win_get_class_hwnd__z_first (hwnd:Hwnd) -> Hwnd { unsafe {
-    GetWindow (hwnd, GW_HWNDFIRST) .into()
+pub fn win_get_class_hwnd__z_first (hwnd:Hwnd) -> Option<Hwnd> { unsafe {
+    GetWindow (hwnd.into(), GW_HWNDFIRST) .ok() .map(|h| h.into())
 } }
 
 pub fn get_pointer_loc () -> Point { unsafe {
     let mut point = POINT::default();
-    GetCursorPos (&mut point);
+    let _ = GetCursorPos (&mut point);
     point.into()
 } }
 
@@ -200,19 +200,19 @@ pub fn win_get_hwnd_from_pointer () -> Hwnd {
 
 pub fn win_get_window_rect (hwnd:Hwnd) -> RECT { unsafe {
     let mut rect = RECT::default();
-    GetWindowRect (hwnd, &mut rect as *mut RECT);
+    let _ = GetWindowRect (hwnd.into(), &mut rect as *mut RECT);
     rect
 } }
 pub fn win_get_window_frame (hwnd:Hwnd) -> RECT { unsafe {
     let mut rect = RECT::default();
-    let _ = DwmGetWindowAttribute (hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
+    let _ = DwmGetWindowAttribute (hwnd.into(), DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
     rect
 } }
 
 pub fn win_get_fgnd_rect () -> (Hwnd, RECT) { unsafe {
     let hwnd = GetForegroundWindow();
     let mut rect = RECT::default();
-    GetWindowRect (hwnd, &mut rect as *mut RECT);
+    let _ = GetWindowRect (hwnd, &mut rect as *mut RECT);
     (hwnd.into(), rect)
 } }
 
@@ -227,106 +227,106 @@ pub fn win_activate (hwnd:Hwnd) { unsafe {     //println!("winapi activate {:?}"
     //ShowWindowAsync (hwnd, SW_NORMAL);
     // ^^ this will cause minimized/maximized windows to be restored
     if win_check_minimized (hwnd) {
-        ShowWindowAsync (hwnd, SW_RESTORE);
+        let _ = ShowWindowAsync (hwnd.into(), SW_RESTORE);
     } else {
-        ShowWindowAsync (hwnd, SW_SHOW);
+        let _ = ShowWindowAsync (hwnd.into(), SW_SHOW);
     }
     //keybd_event (0, 0, KEYBD_EVENT_FLAGS::default(), 0);
-    SetForegroundWindow (hwnd);
+    let _ = SetForegroundWindow (hwnd.into());
 } }
 
 pub fn win_send_to_back (hwnd:Hwnd) { unsafe {     //println!("winapi send to back {:?}",(&hwnd));
-   SetWindowPos (hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+   let _ = SetWindowPos (hwnd.into(), Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 } }
 pub fn win_hide (hwnd:Hwnd) { unsafe {      //println!("winapi hide {:?}",hwnd);
-    ShowWindow (hwnd, SW_HIDE);
+    let _ = ShowWindow (hwnd.into(), SW_HIDE);
 } }
 pub fn win_show (hwnd:Hwnd) { unsafe {      //println!("winapi show {:?}",hwnd);
-    ShowWindow (hwnd, SW_SHOW);
+    let _ = ShowWindow (hwnd.into(), SW_SHOW);
 } }
 pub fn win_show_no_activate (hwnd:Hwnd) { unsafe {      //println!("winapi show no-act {:?}",hwnd);
-    ShowWindow (hwnd, SW_SHOWNOACTIVATE);
+    let _ = ShowWindow (hwnd.into(), SW_SHOWNOACTIVATE);
 } }
 pub fn win_close (hwnd:Hwnd) { unsafe {     //println!("winapi close {:?}",hwnd);
     //CloseWindow(hwnd);
     // note ^^ that the u32 'CloseWindow' cmd actually minimizes it, to close, send it a WM_CLOSE msg
-    PostMessageA (hwnd, WM_CLOSE, WPARAM::default(), LPARAM::default());
+    let _ = PostMessageA (Some(hwnd.into()), WM_CLOSE, WPARAM::default(), LPARAM::default());
 } }
 pub fn win_check_minimized (hwnd:Hwnd) -> bool { unsafe {
-    IsIconic (hwnd).as_bool()
+    IsIconic (hwnd.into()).as_bool()
 } }
 pub fn win_minimize (hwnd:Hwnd) { unsafe {
-    ShowWindowAsync (hwnd, SW_MINIMIZE);
+    let _ = ShowWindowAsync (hwnd.into(), SW_MINIMIZE);
 } }
 pub fn win_set_anim_disabled (hwnd:Hwnd, disabled:bool) { unsafe {
     let disabled : BOOL = if disabled { TRUE } else { FALSE };
-    let _ = DwmSetWindowAttribute (hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disabled as *const BOOL as *const _, size_of::<BOOL>() as _);
+    let _ = DwmSetWindowAttribute (hwnd.into(), DWMWA_TRANSITIONS_FORCEDISABLED, &disabled as *const BOOL as *const _, size_of::<BOOL>() as _);
 } }
 pub fn win_set_full_transparent (hwnd:Hwnd) { unsafe {
-    SetLayeredWindowAttributes (hwnd, COLORREF::default(), 0, LWA_ALPHA);
+    let _ = SetLayeredWindowAttributes (hwnd.into(), COLORREF::default(), 0, LWA_ALPHA);
 } }
 pub fn win_get_placement (hwnd:Hwnd) -> WINDOWPLACEMENT { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();
-    GetWindowPlacement (hwnd, &mut win_state);
+    let _ = GetWindowPlacement (hwnd.into(), &mut win_state);
     win_state
 } }
 pub fn win_set_placement (hwnd:Hwnd, wp:&mut WINDOWPLACEMENT) { unsafe {
-    SetWindowPlacement (hwnd, &*wp);
+    let _ = SetWindowPlacement (hwnd.into(), &*wp);
 } }
 pub fn win_check_maximized (hwnd:Hwnd) -> bool {
-    win_get_placement(hwnd).showCmd == SW_SHOWMAXIMIZED
+    (win_get_placement(hwnd).showCmd as i32) == SW_SHOWMAXIMIZED.0
 }
 pub fn win_maximize (hwnd:Hwnd) { unsafe {
-    ShowWindowAsync (hwnd, SW_MAXIMIZE);
+    let _ = ShowWindowAsync (hwnd.into(), SW_MAXIMIZE);
 } }
 pub fn win_restore (hwnd:Hwnd) { unsafe {
-    ShowWindowAsync (hwnd, SW_RESTORE);
+    let _ = ShowWindowAsync (hwnd.into(), SW_RESTORE);
 } }
 pub fn win_toggle_maximize (hwnd:Hwnd) { unsafe {
     let mut win_state =  WINDOWPLACEMENT::default();
-    GetWindowPlacement (hwnd, &mut win_state);
-    if win_state.showCmd == SW_SHOWMAXIMIZED || win_state.showCmd == SW_SHOWMINIMIZED {
-        ShowWindowAsync (hwnd, SW_RESTORE);
+    let _ = GetWindowPlacement (hwnd.into(), &mut win_state);
+    if (win_state.showCmd as i32) == SW_SHOWMAXIMIZED.0 || (win_state.showCmd as i32) == SW_SHOWMINIMIZED.0 {
+        let _ = ShowWindowAsync (hwnd.into(), SW_RESTORE);
     } else {
-        ShowWindowAsync (hwnd, SW_SHOWMAXIMIZED);
+        let _ = ShowWindowAsync (hwnd.into(), SW_SHOWMAXIMIZED);
     }
 
 } }
 
 pub fn win_redraw (hwnd:Hwnd) { unsafe {
-    let _ = RedrawWindow ( hwnd, None, HRGN::default(), RDW_INTERNALPAINT );
+    let _ = RedrawWindow ( Some(hwnd.into()), None, None, RDW_INTERNALPAINT );
 } }
 
 
 pub fn set_cursor (cursor_style:PCWSTR) { unsafe {
-    SetCursor (LoadCursorW (HINSTANCE::default(), cursor_style).unwrap());
+    SetCursor (LoadCursorW (None, cursor_style) .ok());
 } }
 
 pub fn win_fgnd_move_rel (dx:i32, dy:i32) { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
-    MoveWindow (hwnd, r.left + dx, r.top + dy, r.right-r.left, r.bottom-r.top, true);
+    let _ = MoveWindow (hwnd.into(), r.left + dx, r.top + dy, r.right-r.left, r.bottom-r.top, true);
 } }
 pub fn win_fgnd_move_to (x:i32, y:i32, w:i32, h:i32) { win_move_to (win_get_fgnd(), x, y, w, h) }
 pub fn win_move_to (hwnd:Hwnd, x:i32, y:i32, width:i32, height:i32) { unsafe {
-    MoveWindow (hwnd, x, y, width, height, false);    // the bool param at end flags whether to repaint or not
+    let _ = MoveWindow (hwnd.into(), x, y, width, height, false);    // the bool param at end flags whether to repaint or not
 } }
 
-pub fn win_find_by_win_class (cls:&str) -> Hwnd { unsafe {
-   FindWindowW (&HSTRING::from(cls), PCWSTR::null()) .into()
+pub fn win_find_by_win_class (cls:&str) -> Option<Hwnd> { unsafe {
+   FindWindowW (&HSTRING::from(cls), PCWSTR::null()) .ok() .map (|h| h.into())
 } }
 
 
 
 pub fn win_fgnd_stretch (dx:i32, dy:i32) { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
-    MoveWindow (hwnd, r.left, r.top, r.right-r.left+dx, r.bottom-r.top+dy, true);
+    let _ = MoveWindow (hwnd.into(), r.left, r.top, r.right-r.left+dx, r.bottom-r.top+dy, true);
 } }
 
 
 pub fn win_fgnd_center () { unsafe {
     let scr_w = GetSystemMetrics(SM_CXSCREEN);
     let (hwnd, r) = win_get_fgnd_rect();
-    MoveWindow (hwnd, (scr_w - (r.right - r.left))/2, r.top, r.right-r.left, r.bottom-r.top, true);
+    let _ = MoveWindow (hwnd.into(), (scr_w - (r.right - r.left))/2, r.top, r.right-r.left, r.bottom-r.top, true);
 } }
 
 
@@ -336,7 +336,7 @@ pub fn win_fgnd_center_if_past_screen () { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
     if r.right > (scr_w - 30) {
         let (w, h) = (r.right - r.left,  r.bottom - r.top);
-        MoveWindow (hwnd, (scr_w - w)/2 + 100, r.top, w, h, true);
+        let _ = MoveWindow (hwnd.into(), (scr_w - w)/2 + 100, r.top, w, h, true);
     }
 } }
 /// places screen to right of workarea (uses usable screen area, not incl taskbar etc)
@@ -345,17 +345,17 @@ pub fn win_fgnd_place_right_if_past_screen () { unsafe {
     let (hwnd, r) = win_get_fgnd_rect();
     if r.right > wa.right || r.bottom > wa.bottom || r.top < wa.top || r.left < wa.left {
         let (w, h) = (r.right - r.left,  r.bottom - r.top);
-        MoveWindow (hwnd, wa.right - w, r.top, w, h, true);
+        let _ = MoveWindow (hwnd.into(), wa.right - w, r.top, w, h, true);
     }
 } }
 
 
 pub fn win_check_if_topmost (hwnd: Hwnd) -> bool { unsafe {
-    GetWindowLongW (hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == WS_EX_TOPMOST.0
+    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == WS_EX_TOPMOST.0
 } }
 
 fn win_change_always_on_top (hwnd: Hwnd, z_val:HWND) { unsafe {
-    SetWindowPos (hwnd, z_val, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+    let _ = SetWindowPos (hwnd.into(), Some(z_val), 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 } }
 pub fn win_set_always_on_top   (hwnd: Hwnd) { win_change_always_on_top (hwnd, HWND_TOPMOST) }
 pub fn win_unset_always_on_top (hwnd: Hwnd) { win_change_always_on_top (hwnd, HWND_NOTOPMOST) }
@@ -388,7 +388,7 @@ pub fn win_fgnd_toggle_titlebar () { unsafe {
 
 pub fn win_fgnd_toggle_vertmax () { unsafe {
     // works by sending doubleclick at top of window (which also works manually)
-    PostMessageW (GetForegroundWindow(), WM_NCLBUTTONDBLCLK, WPARAM(HTTOP as _), LPARAM(0));
+    let _ = PostMessageW (Some(GetForegroundWindow()), WM_NCLBUTTONDBLCLK, WPARAM(HTTOP as _), LPARAM(0));
 } }
 
 
@@ -404,7 +404,7 @@ pub fn win_fgnd_min () { unsafe {
     let hwnd = GetForegroundWindow();
     //PostMessageW (hwnd, WM_SYSCOMMAND, WPARAM(SC_MINIMIZE as _), LPARAM(0));
     //ShowWindowAsync (hwnd, SW_MINIMIZE);
-    win_minimize (Hwnd(hwnd.0));
+    win_minimize (Hwnd(hwnd.0 as _));
 } }
 pub fn win_fgnd_min_and_back () {
     win_min_and_back (win_get_fgnd())
@@ -423,7 +423,7 @@ pub fn get_fgnd_win_title () -> String { unsafe {
 pub fn get_win_title (hwnd:Hwnd) -> String { unsafe {
     const MAX_LEN : usize = 512;
     let mut lpstr : [u16; MAX_LEN] = [0; MAX_LEN];
-    let copied_len = GetWindowTextW (hwnd, &mut lpstr);
+    let copied_len = GetWindowTextW (hwnd.into(), &mut lpstr);
     String::from_utf16_lossy (&lpstr[..(copied_len as _)])
 } }
 
@@ -433,7 +433,7 @@ pub fn get_fgnd_win_class () -> String { unsafe {
 } }
 pub fn get_win_class_by_hwnd (hwnd:Hwnd) -> String { unsafe {
     let mut lpstr: [u16; 120] = [0; 120];
-    let len = GetClassNameW (hwnd, &mut lpstr);
+    let len = GetClassNameW (hwnd.into(), &mut lpstr);
     String::from_utf16_lossy(&lpstr[..(len as _)])
 } }
 
@@ -445,18 +445,18 @@ pub fn get_exe_by_hwnd (hwnd:Hwnd) -> Option<String> {
     get_exe_by_pid ( get_pid_by_hwnd (hwnd))
 }
 pub fn get_exe_by_pid (pid:u32) -> Option<String> { unsafe {
-    let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid);
+    let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
     let mut lpstr: [u8; 256] = [0; 256];
     let mut lpdwsize = 256u32;
     if handle.is_err() { return None }
     let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
-    if let Ok(h) = handle { CloseHandle(h); }
+    if let Ok(h) = handle { let _ = CloseHandle(h); }
     PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .and_then (|s| s.split("\\").last().map(|s| s.to_string()))
 } }
 
 pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {
     let mut pid = 0u32;
-    let _ = GetWindowThreadProcessId (hwnd, Some(&mut pid));
+    let _ = GetWindowThreadProcessId (hwnd.into(), Some(&mut pid));
     pid
 } }
 
@@ -469,7 +469,12 @@ pub fn write_win_dbg_string (msg:&str) { unsafe {
 
 pub fn mic_mute_toggle () { unsafe {
     // note that the 'mute' appcommands actually do toggle, both for mic and volume
-    PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MICROPHONE_VOLUME_MUTE.0 << 16) as _));
+    let _ = PostMessageW (
+        Some (GetForegroundWindow()),
+        WM_APPCOMMAND,
+        WPARAM (0),
+        LPARAM ((APPCOMMAND_MICROPHONE_VOLUME_MUTE.0 << 16) as _)
+    );
 } }
 
 
@@ -561,9 +566,9 @@ pub fn test_mic_mute_toggle () {
     //mic_mute_toggle();
     //let _ = std::process::Command::new("rundll32.exe").arg("user32.dll,MessageBeep").spawn();
     let _ = std::process::Command::new("rundll32.exe").arg("shell32.dll,Control_RunDLL").arg("mmsys.cpl,,1").spawn();
-    unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
+    unsafe{PostMessageW (Some(GetForegroundWindow()), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
     std::thread::sleep(std::time::Duration::from_millis(500));
-    unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
+    unsafe{PostMessageW (Some(GetForegroundWindow()), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_VOLUME_MUTE.0 << 16) as _));}
     std::thread::sleep(std::time::Duration::from_millis(100));
     //unsafe{PostMessageW (GetForegroundWindow(), WM_APPCOMMAND, WPARAM(0), LPARAM((APPCOMMAND_MEDIA_PLAY_PAUSE.0 << 16) as _));}
     //std::thread::sleep(std::time::Duration::from_millis(100));

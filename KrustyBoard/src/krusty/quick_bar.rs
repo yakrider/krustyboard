@@ -298,11 +298,11 @@ impl QuickBar {
         unsafe {
             //SetWindowPos (hwnd, HWND_BOTTOM, -200, 0, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             // ^^ off-screen co-ords seem to get adjusted, so we'll instead make it to zero-sized square at zero co-ords
-            SetWindowPos (hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOACTIVATE);
+            let _ = SetWindowPos (hwnd.into(), Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOACTIVATE);
 
             //ShowWindow (hwnd, SW_HIDE);
             // ^^ cant do that, will make one core busy wait!
-            ShowWindow (hwnd, SW_MINIMIZE);
+            let _ = ShowWindow (hwnd.into(), SW_MINIMIZE);
         }
     }
 
@@ -344,8 +344,8 @@ impl QuickBar {
         // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
         // and to move it to the right location .. (and this must come after un-minimize for the move to work)
         unsafe {
-            ShowWindow (hwnd, SW_RESTORE);
-            SetWindowPos (hwnd, HWND_TOPMOST, pos.x, pos.y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            let _ = ShowWindow (hwnd.into(), SW_RESTORE);
+            let _ = SetWindowPos (hwnd.into(), Some(HWND_TOPMOST), pos.x, pos.y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
         }
         self.defocus();
@@ -391,7 +391,7 @@ impl QuickBar {
         let grid_sz = grid.grid_px_sz();
         let width  = (scaling * grid_sz.width  as f32) as i32;
         let height = (scaling * grid_sz.height as f32) as i32;
-        SetWindowPos (hwnd, HWND_TOPMOST, 0, 0, width, height, SWP_NOZORDER | SWP_NOMOVE | SWP_ASYNCWINDOWPOS);
+        let _ = SetWindowPos (hwnd.into(), Some(HWND_TOPMOST), 0, 0, width, height, SWP_NOZORDER | SWP_NOMOVE | SWP_ASYNCWINDOWPOS);
     } }
 
     pub fn defocus (&self) {

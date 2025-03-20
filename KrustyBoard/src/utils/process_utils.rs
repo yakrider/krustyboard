@@ -52,13 +52,13 @@ pub fn check_cur_proc_elevated () -> Option<bool> {
 }
 pub fn check_proc_elevated (h_proc:HANDLE) -> Option<bool> { unsafe {
     let mut h_token = HANDLE::default();
-    if false == OpenProcessToken (h_proc, TOKEN_QUERY, &mut h_token) { return None };
+    if OpenProcessToken (h_proc, TOKEN_QUERY, &mut h_token) .is_err() { return None };
     let mut token_info : TOKEN_ELEVATION = TOKEN_ELEVATION::default();
     let mut token_info_len = size_of::<TOKEN_ELEVATION>() as u32;
-    if ! GetTokenInformation (
+    GetTokenInformation (
         h_token, TokenElevation, Some(&mut token_info as *mut _ as *mut _),
         token_info_len, &mut token_info_len
-    ) .as_bool() { return None }
+    ) .ok()?;
     Some (token_info.TokenIsElevated != 0)
 } }
 

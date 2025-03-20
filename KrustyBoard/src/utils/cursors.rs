@@ -3,7 +3,6 @@ use std::{thread, time::Duration};
 use once_cell::sync::OnceCell;
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::UI::WindowsAndMessaging;
 use windows::Win32::Graphics::Gdi::{
     BITMAP, HGDIOBJ, CreateBitmap, DeleteObject, GetBitmapBits, SetBitmapBits, GetObjectW
@@ -23,7 +22,7 @@ use crate::Flag;
 pub struct Cursor {
     // Note here that HICON is a pointer underneath, and making it copy/clone isnt exactly kosher ..
     // .. to avoid a retained HICON ever being dropped/modified by OS, we should only keep owned/copied hicons here
-    pub hicon  : HICON,             // isize
+    pub hicon  : isize,             // isize
     pub sys_id : SYSTEM_CURSOR_ID,  // u32
 }
 
@@ -247,7 +246,7 @@ impl Cursors {
     /// Resets any system cursor customizations and reloads them from OS configs. <br>
     /// (Instead of making this public, we'd rather encourage using apply_sys which flashes before reset)
     fn reset_system_cursors () { unsafe {
-        SystemParametersInfoW ( SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE );
+        let _ = SystemParametersInfoW ( SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE );
     } }
 }
 
@@ -261,47 +260,47 @@ impl Cursor {
     unsafe fn _cursor_from_file (path:&str) -> Option<HICON> {
         use std::os::windows::ffi::OsStrExt;
         let wide_path: Vec<u16> = std::ffi::OsStr::new(path) .encode_wide() .chain(std::iter::once(0)) .collect();
-        let hc = LoadImageW ( HINSTANCE(0), PCWSTR(wide_path.as_ptr()), IMAGE_CURSOR, 64, 64, LR_LOADFROMFILE ) .ok()?;
+        let hc = LoadImageW ( None, PCWSTR(wide_path.as_ptr()), IMAGE_CURSOR, 64, 64, LR_LOADFROMFILE ) .ok()?;
         if hc.is_invalid() { None } else { Some ( HICON (hc.0) ) }
     }
     // ^^ no longer used as we just load system cursors, but we'll leave here for reference, as it does allow higher-res cursors
 
     unsafe fn get_sys_cursor (id:PCWSTR) -> Option<HICON> {
-        LoadCursorW (HINSTANCE(0), id) .ok() .and_then (|hc| CopyIcon(hc).ok())
+        LoadCursorW (None, id) .ok() .and_then (|hc| CopyIcon(hc.into()).ok())
         // ^^ we copy the hicon before we store it, as LoadCursor gives handles to the live cursor set
         // Note also that ms-docs say LoadCursor is apparently a dpi-unaware function ..
         //   however, trying to load cursors before calling SetThreadDpiAwarenessContext gives small dim cursors .. \\_(_)_//
     }
 
     fn cache_sys_cursor (id_str:PCWSTR, sys_id:SYSTEM_CURSOR_ID) -> Option<Cursor> {
-        let hicon = unsafe { Cursor::get_sys_cursor (id_str) } ?;
+        let hicon = unsafe { Cursor::get_sys_cursor (id_str)? .0 as isize };
         Some ( Cursor { hicon, sys_id } )
     }
 
     fn colorized (&self, rgb:&RGB) -> Option<Cursor> {
-        let hicon = unsafe { colorize_cursor (&self.hicon, rgb) }?;
+        let hicon = unsafe { colorize_cursor (&HICON (self.hicon as _), rgb) }? .0 as isize;
         Some ( Cursor { hicon, ..*self } )
     }
 
     /// replace system cursor of this cursors id by this cursor
     pub fn apply (&self) { unsafe {
         if self.sys_id.0 == 0 { return }
-        if let Ok(cc) = CopyIcon(self.hicon) {
-            SetSystemCursor (HCURSOR(cc.0), self.sys_id);
+        if let Ok(cc) = CopyIcon (HICON (self.hicon as _)) {
+            let _ = SetSystemCursor (HCURSOR(cc.0), self.sys_id);
         }
     } }
 
     /// replace system cursor of given id by this cursor for a short period
     pub fn _tmp_swap_cursor (&self, millis:u64,  after:Cursor) { unsafe {
         if after.sys_id.0 == 0 { return }
-        // gotta copy before we send, as these get consumed
-        if let (Some(hicon_tmp), Some(hicon_restore)) = (CopyIcon(self.hicon).ok(), CopyIcon(after.hicon).ok()) {
-            thread::spawn ( move || {
-                SetSystemCursor (HCURSOR(hicon_tmp.0), after.sys_id);
-                thread::sleep (Duration::from_millis(millis));
-                SetSystemCursor (HCURSOR(hicon_restore.0), after.sys_id);
-            } );
-        }
+        let (hicon_tmp, hicon_restore) = (self.hicon, after.hicon);
+        thread::spawn ( move || {
+            let Some (hicon_tmp)     = CopyIcon (HICON (hicon_tmp  as _)).ok() else { return };
+            let Some (hicon_restore) = CopyIcon (HICON (hicon_restore as _)).ok() else { return };
+            let _ = SetSystemCursor (HCURSOR (hicon_tmp.0), after.sys_id);
+            thread::sleep (Duration::from_millis(millis));
+            let _ = SetSystemCursor (HCURSOR (hicon_restore.0), after.sys_id);
+        } );
     } }
     // ^^ no longer use cursor flashing, but we'll leave here as reference
 
@@ -319,7 +318,7 @@ unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
     // first gotta get the details on the icon
     let mut info = ICONINFO::default();
     let res = GetIconInfo (*hicon, &mut info as *mut _);
-    if !res.as_bool() { return None }
+    if res.is_err() { return None }
 
     // then we'll get the actual bitmap (and later its mask if necessary)
     let mut bmp = BITMAP::default();
@@ -334,7 +333,7 @@ unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
 
     // requesting info has the system allocate the bitmap and mask, should release that memory
     // we'll keep most fields and use them in new icon-info
-    let _ = DeleteObject (info.hbmColor);
+    let _ = DeleteObject (info.hbmColor.into());
 
     // now lets try colorizing the hicons by rgba chunks
     // The cursors themselves are colored/white shapes with black border .. (apparently with some smoothing?)
@@ -354,7 +353,7 @@ unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
     // copy our modified buffer into the new bitmap
     let bytes_set = SetBitmapBits (new_bitmap, buf_size as _, buf.as_ptr() as _);
     if bytes_set == 0 {
-        let _ = DeleteObject(new_bitmap);
+        let _ = DeleteObject(new_bitmap.into());
         return None;
     }
 
@@ -362,7 +361,7 @@ unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
     let new_icon_info = ICONINFO { hbmColor: new_bitmap, ..info };
     let new_icon = CreateIconIndirect (&new_icon_info) .ok()?;
 
-    let _ = DeleteObject(new_bitmap);
+    let _ = DeleteObject(new_bitmap.into());
 
     if new_icon.is_invalid() { None } else { Some(new_icon) }
 

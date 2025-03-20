@@ -4,10 +4,11 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use core::ffi::c_int;
 use once_cell::sync::OnceCell;
-use windows::Win32::Foundation::{BOOL, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HANDLE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject};
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
-use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, HHOOK, MSG, SetWindowsHookExW, WH_KEYBOARD_LL};
+use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, MSG, SetWindowsHookExW, WH_KEYBOARD_LL};
 
 
 /// The idea here is that we needed a setup to ensure that hooks from the krusty process were NOT the most recent installed hook.
@@ -17,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, HHOOK
 
 pub struct HookGuard {
     // we'll hold a job object to assign any hook-guard processes we create (so they get auto cleaned up on exit)
-    job : Option <HANDLE>,
+    job : Option <isize>,
     // and we'll keep a handle to any active hook-guard child process (to restart it when need be)
     guard : Mutex <Option <Child>>,
 }
@@ -33,9 +34,9 @@ impl HookGuard {
             // if we got started with "--hook-guard", we install dummy hook and sit checking on it forever
             // else, we're not the guard, nothing to do right away .. we'll just launch some guards on demand later
             if env::args() .any (|arg| arg == "--hook-guard") {
-                let _ = SetWindowsHookExW (WH_KEYBOARD_LL, Some(hook_proc), HINSTANCE(0), 0);
+                let _ = SetWindowsHookExW (WH_KEYBOARD_LL, Some(hook_proc), None, 0);
                 let mut msg: MSG = MSG::default();
-                while BOOL(0) != GetMessageW (&mut msg, HWND(0), 0, 0) { }
+                while BOOL(0) != GetMessageW (&mut msg, None, 0, 0) { }
             }
 
             // we'll create a job object that we'll associate hook-guards to, and set to kill the guards if the main process exits
@@ -43,9 +44,9 @@ impl HookGuard {
             if let Some(jh) = job.as_ref() {
                 let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
                 info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                SetInformationJobObject (*jh, JobObjectExtendedLimitInformation, &info as *const _ as *const _, size_of_val(&info) as u32);
+                let _ = SetInformationJobObject (*jh, JobObjectExtendedLimitInformation, &info as *const _ as *const _, size_of_val(&info) as u32);
             }
-
+            let job = job .map (|h| h.0 as isize);
             HookGuard { job,  guard : Mutex::new (None) }
         } )
 
@@ -78,7 +79,7 @@ impl HookGuard {
                 // we'll also add this process to our job (so it will be cleaned up if we get killed/exit)
                 let gh = OpenProcess (PROCESS_TERMINATE | PROCESS_SET_QUOTA, false, guard.id());
                 if let (Some(jh), Ok(gh)) = (self.job, gh) {
-                    AssignProcessToJobObject (jh, gh);
+                    let _ = AssignProcessToJobObject (HANDLE (jh as _), gh);
                 }
                 *self.guard.lock().unwrap() = Some(guard);
             } }
@@ -89,5 +90,5 @@ impl HookGuard {
 
 pub unsafe extern "system"
 fn hook_proc ( code: c_int, w_param: WPARAM, l_param: LPARAM ) -> LRESULT {
-    CallNextHookEx (HHOOK(0), code, w_param, l_param)
+    CallNextHookEx (None, code, w_param, l_param)
 }

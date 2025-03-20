@@ -7,7 +7,8 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 
 use once_cell::sync::{OnceCell};
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, BOOL, GetLastError};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM, GetLastError};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -164,9 +165,9 @@ impl InputProcessor {
         hhook: &AtomicIsize,
         hook_proc: unsafe extern "system" fn (c_int, WPARAM, LPARAM) -> LRESULT,
     ) { unsafe {
-        if let Ok(hh) = SetWindowsHookExW (hook_id, Some(hook_proc), HINSTANCE(0), 0) {
+        if let Ok(hh) = SetWindowsHookExW (hook_id, Some(hook_proc), None, 0) {
             println! ("hooking attempt .. succeeded!");
-            hhook.store (hh.0, Ordering::SeqCst);
+            hhook.store (hh.0 as _, Ordering::SeqCst);
         } else {
             eprintln!("hooking attempt .. FAILED .. error code : {:?} !!", GetLastError());
         }
@@ -176,9 +177,9 @@ impl InputProcessor {
 
 
     fn unset_hook (hhook: &AtomicIsize) -> bool {
-        if HHOOK (hhook.load (Ordering::SeqCst)) != HHOOK::default() {
-            if true == unsafe { UnhookWindowsHookEx ( HHOOK (hhook.load(Ordering::SeqCst)) ) } {
-                hhook.store (HHOOK::default().0, Ordering::SeqCst);
+        if HHOOK (hhook.load (Ordering::SeqCst) as _) != HHOOK::default() {
+            if unsafe { UnhookWindowsHookEx ( HHOOK (hhook.load(Ordering::SeqCst) as _) ) }.is_ok() {
+                hhook.store (HHOOK::default().0 as _, Ordering::SeqCst);
                 println!("unhooking attempt .. succeeded!");
                 return true
             }
@@ -200,15 +201,15 @@ impl InputProcessor {
     }
 
     pub fn are_hooks_set (&'static self) -> bool {
-        HHOOK (self.kbd_hook.load(Ordering::Relaxed)) != HHOOK::default()
-            || HHOOK (self.mouse_hook.load(Ordering::Relaxed)) != HHOOK::default()
+        HHOOK (self.kbd_hook.load(Ordering::Relaxed) as _) != HHOOK::default()
+            || HHOOK (self.mouse_hook.load(Ordering::Relaxed) as _) != HHOOK::default()
     }
 
     pub fn stop_input_processing (&'static self) { unsafe {
         // we'll unhook any prior hooks and signal prior input-processing thread to terminate
         self.unset_kbd_hook();
         self.unset_mouse_hook();
-        PostThreadMessageW (self.iproc_thread.load(Ordering::Relaxed), MSG_LOOP_KILL_MSG, WPARAM::default(), LPARAM::default());
+        let _ = PostThreadMessageW (self.iproc_thread.load(Ordering::Relaxed), MSG_LOOP_KILL_MSG, WPARAM::default(), LPARAM::default());
     } }
 
 
@@ -240,7 +241,7 @@ impl InputProcessor {
             //  so we wont get any actual messages, so we can just leave a forever waiting GetMessage instead of setting up a msg-loop
             // .. basically while its waiting, the thread is awakened simply to call kbd hook (for an actual msg, itd awaken give the msg)
             let mut msg: MSG = MSG::default();
-            while BOOL(0) != GetMessageW (&mut msg, HWND(0), 0, 0) {
+            while BOOL(0) != GetMessageW (&mut msg, None, 0, 0) {
                 if msg.message == MSG_LOOP_KILL_MSG {
                     println! ("received kill-msg in input-processing thread .. terminating thread ..");
                     break
@@ -363,7 +364,7 @@ fn _print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
 pub unsafe extern "system"
 fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
-    let return_call = || { CallNextHookEx(HHOOK(0), code, w_param, l_param) };
+    let return_call = || { CallNextHookEx (None, code, w_param, l_param) };
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 
@@ -440,7 +441,7 @@ fn print_mouse_ev (ev: Event) {
 pub unsafe extern "system"
 fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
 
-    let return_call = || { CallNextHookEx(HHOOK(0), code, w_param, l_param) };
+    let return_call = || { CallNextHookEx (None, code, w_param, l_param) };
 
     if code < 0 { return return_call() }      // ms-docs says we MUST do this, so ig k fine
 

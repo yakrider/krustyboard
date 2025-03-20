@@ -343,7 +343,7 @@ impl MousePointer {
     /// corner of the screen is (0, 0).
     pub fn move_abs (x: i32, y: i32) {
         unsafe {
-            SetCursorPos (x, y);
+            let _ = SetCursorPos (x, y);
         }
     }
 
@@ -362,7 +362,7 @@ fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
             mi : MOUSEINPUT {
                 dx,
                 dy,
-                mouseData: data,
+                mouseData: data as u32,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO

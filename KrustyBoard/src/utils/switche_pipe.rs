@@ -43,7 +43,7 @@ impl SwitchePipeCmd {
         // lets get the pipe first (and bail if we cant)
         let h_pipe = CreateFileW (
             &HSTRING::from(PIPE_NAME),
-            FILE_GENERIC_WRITE,
+            FILE_GENERIC_WRITE.0,
             FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
@@ -58,14 +58,13 @@ impl SwitchePipeCmd {
         // then we'll try and send the cmd
         let cmd_json = serde_json::to_string(&self).unwrap();
         let mut bytes_written = 0;
-        WriteFile (
+        let _ = WriteFile(
             h_pipe,
-            Some (cmd_json.as_ptr() as *const _),
-            cmd_json.len() as u32,
+            Some (cmd_json.as_ref()),
             Some (&mut bytes_written),
             None,
         );
-        CloseHandle(h_pipe);
+        let _ = CloseHandle(h_pipe);
         Ok(())
     } }
 

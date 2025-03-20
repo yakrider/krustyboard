@@ -7,8 +7,8 @@ use std::{thread, time};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use rustc_hash::{FxHashMap, FxHashSet};
-
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SW_SHOWMAXIMIZED, WINDOWPLACEMENT};
 
 use crate::{ *, utils::*};
@@ -128,7 +128,7 @@ fn re_position_maxed_window_for_drag (ks:KSR) {
     wp.rcNormalPosition.top =  wsd.pointer.y - wsd.pointer.y * h / wah;
     wp.rcNormalPosition.right = wp.rcNormalPosition.left + w;
     wp.rcNormalPosition.bottom = wp.rcNormalPosition.top + h;
-    wp.showCmd = SW_RESTORE;
+    wp.showCmd = SW_RESTORE.0 as _;
     win_set_placement (wsd.hwnd, &mut wp);
 }
 
@@ -138,12 +138,12 @@ fn ensure_maxed_windows_drag_ready (ks:KSR) -> bool {
     // - but it takes a bit for that to reflect in window-dimensions/edges etc that we want for drag/snap ..
     // - so we skip that round and set the hwnd to zero to indicate we need to re-capture next round
 
-    if ks.win_snap_dat.read().unwrap().win_placement.showCmd == SW_SHOWMAXIMIZED {
+    if ks.win_snap_dat.read().unwrap().win_placement.showCmd == SW_SHOWMAXIMIZED.0 as u32 {
         re_position_maxed_window_for_drag (ks);
         // we'll zero out the hwnd so next time we'll refresh the snap-dat (so new dimensions/edges are reflected)
         ks.win_snap_dat.write().unwrap().hwnd = Hwnd(0);
         // and update the showCmd for when we get here hext mouse-move
-        ks.win_snap_dat.write().unwrap().win_placement.showCmd = SW_RESTORE;
+        ks.win_snap_dat.write().unwrap().win_placement.showCmd = SW_RESTORE.0 as u32;
         return false
     }
     // now if the hwnd had been wiped, we'll re-capture snap-dat
@@ -458,7 +458,7 @@ fn gather_win_rects (wsd_hwnd: Hwnd) -> Vec<(Hwnd, RECT)> { unsafe {
 pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, wsd_hwnd:LPARAM) -> BOOL {
     let retval = BOOL (true as i32);
 
-    if  wsd_hwnd.0 == hwnd.0           { return retval }        // ignore self window for snap calcs
+    if  wsd_hwnd.0 == hwnd.0 as isize         { return retval }        // ignore self window for snap calcs
 
     if !check_window_visible   (hwnd.into())  { return retval }
     if  check_window_cloaked   (hwnd.into())  { return retval }

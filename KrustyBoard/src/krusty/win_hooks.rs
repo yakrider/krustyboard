@@ -5,8 +5,8 @@ use std::thread::spawn;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use once_cell::sync::OnceCell;
-
-use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_OBJECT_NAMECHANGE};
 
@@ -74,13 +74,13 @@ impl WinEventsListener {
         if self.is_hooked.is_clear() { self.is_hooked.set(); } else { return }
 
         spawn ( move || unsafe {
-            SetWinEventHook ( 0x0003, 0x0003, HINSTANCE::default(), Some(Self::win_event_hook_cb), 0, 0, 0);
-            SetWinEventHook ( 0x0017, 0x0017, HINSTANCE::default(), Some(Self::win_event_hook_cb), 0, 0, 0);
-            SetWinEventHook ( 0x800C, 0x800C, HINSTANCE::default(), Some(Self::win_event_hook_cb), 0, 0, 0);
+            SetWinEventHook ( 0x0003, 0x0003, None, Some(Self::win_event_hook_cb), 0, 0, 0);
+            SetWinEventHook ( 0x0017, 0x0017, None, Some(Self::win_event_hook_cb), 0, 0, 0);
+            SetWinEventHook ( 0x800C, 0x800C, None, Some(Self::win_event_hook_cb), 0, 0, 0);
 
             // win32 only sends hook events to a thread with a 'message loop', so we'll  start a forever-loop waiting on GetMessage
             let mut msg: MSG = MSG::default();
-            while BOOL(0) != GetMessageW (&mut msg, HWND(0), 0, 0) { };
+            while BOOL(0) != GetMessageW (&mut msg, None, 0, 0) { };
         } );
     }
 
