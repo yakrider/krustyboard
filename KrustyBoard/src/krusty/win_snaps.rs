@@ -466,17 +466,13 @@ pub unsafe extern "system" fn enum_windows_callback (hwnd:HWND, wsd_hwnd:LPARAM)
     if !check_if_app_window (hwnd.into()) {
         if  check_window_has_owner (hwnd.into())  { return retval }
         if  check_if_tool_window   (hwnd.into())  { return retval }
+        //if check_window_style (hwnd.into(), WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT ) { return retval }
     }
-
     if win_check_minimized(hwnd.into()) { return retval }
 
+    //println!("{:?}",(hwnd, win_get_window_frame(hwnd.into()), get_exe_by_hwnd(hwnd.into()), get_win_class_by_hwnd(hwnd.into())));
+
     let frame = win_get_window_frame (hwnd.into());
-
-    // note: the WDADesktopService.exe ghost window still gets here, similar to seen in switche ..
-    // .. dont think its worthwhile trying to filter that by querying exe/class etc ..
-    // .. seems to sit in a slender wide rectangle in SE corner giving ghost edges .. oh well
-
-    //println!("{:?}",(hwnd, &frame, get_exe_by_hwnd(hwnd.into()), get_win_class_by_hwnd(hwnd.into())));
 
     enum_rects.write().unwrap() .push ((hwnd.into(),frame));
 

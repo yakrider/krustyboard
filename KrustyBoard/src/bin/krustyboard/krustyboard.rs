@@ -160,8 +160,12 @@ fn win_evs_cond <WFN> (wfn:WFN) -> ComboCond
 fn gen_af_incr_brightness (step:i32) -> AF {
     Arc::new ( move || { let _ = incr_brightness(step); } )
 }
-fn gen_af_incr_overlay (overlay:&'static DimmingOverlay, step:i32) -> AF {
-    Arc::new ( move || overlay.incr_dimming(step) )
+fn gen_af_incr_overlay (kr:KR, step:i32) -> AF {
+    Arc::new ( move || {
+        kr.overlay.incr_dimming(step);
+        kr.qbar.request_repaint();
+        // ^^ kicking the qbar lets it update its dimming indicator if need be
+    } )
 }
 
 // skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
@@ -1052,7 +1056,7 @@ fn setup_vert_wheel (k:KR) {
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),   -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
     // caps-alt-wheel can do dimming overlay adjustments
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).m(caps),   4, -4,   |ag,p| ag.af (gen_af_incr_overlay (k.overlay, p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).m(caps),   4, -4,   |ag,p| ag.af (gen_af_incr_overlay (k, p)) );
 
 
     /// setups for **_ Arrow-Up/Down nav _** (in addn to some portions above)

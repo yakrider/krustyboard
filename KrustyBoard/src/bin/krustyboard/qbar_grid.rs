@@ -87,7 +87,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     use { KbdKey::*, ModKey::*};
 
-    let (ks, wel, qb, ov) = (KrustyState::instance(), WinEventsListener::instance(), QuickBar::instance(), DimmingOverlay::instance());
+    let (kr, ks) = ( Krusty::instance(), KrustyState::instance() );
 
     let icons = load_icons (ctx);
 
@@ -218,7 +218,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         // (^^ we're putting this on release (cf click) coz clicks come out at release anyway, except if held too long, theres nothing)
         let select = ag().k(Space).m(lctrl).mkg_nw().gen_af();    // again ctrl-alt-space is the most harmless (cf Enter)
         Arc::new ( move || {
-            if check_switche_fgnd(wel) {
+            if check_switche_fgnd(kr.wel) {
                 if ks.mod_keys.lalt.active.is_set() {       // if Alt is active we're prob still in qbar sw cell
                     select();                               // so first disarm
                     ks.mod_keys.lalt.ensure_inactive();     // then release Alt
@@ -366,40 +366,43 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Brightness .. plus ..  Lbtn Qbar Dragging ..  Rbtn Qbar Close **__
-    fn gen_incr_af (ks:KSR, overlay:&'static DimmingOverlay, incr:i32) -> AF {
+    fn gen_incr_af (kr:KR, incr:i32) -> AF {
         Arc::new ( move || {
-            if ks.mod_keys.caps.down.is_clear() {
+            if kr.ks.mod_keys.caps.down.is_clear() {
                 let _ = incr_brightness (2 * incr);
             } else {
-                overlay.incr_dimming (-4 * incr)
+                kr.overlay.incr_dimming (-4 * incr);
             }
         } )
     }
     let qbar_drag = Arc::new ( move || {
         // for drag, we just set a flag and let krusty handle it (incl clearing flag on lbtn release)
-        qb.set_dragging(true);
+        kr.qbar.set_dragging(true);
         // we'll also make it not do snap
-        ks.no_snap.store(qb.hwnd());
+        ks.no_snap.store(kr.qbar.hwnd());
         // plus we'll also make lbtn click make qbar persist
-        qb.set_persistent();
+        kr.qbar.set_persistent();
         // and give some viz feedback of change .. (wont close qb coz we've set persist flag)
         ks.clear_cur_sticky_fsc();
     });
-    //let exit_drag = Arc::new ( move || qb.set_dragging(false));
+    //let exit_drag = Arc::new ( move || kr.qbar.set_dragging(false));
     // we'll explicitly not set it here and rely on global release, just to face potential issues sooner
-    let qbar_close = Arc::new ( move ||  qb.hide(true) );
+    let qbar_close = Arc::new ( move ||  kr.qbar.hide(true) );
 
     // we'll set it to bringup Gamgee on x2 click
     let gamgee_open = Arc::new (bringup_gamgee);
 
+    let ov_indc = Arc::new (move || kr.overlay.is_active());
+
     let cell = ActionCell {
-        label : "Brightness".into(),
-        icon  : icons.bright.clone(),
-        on_wheel_frwd : gen_incr_af (ks, ov,  1),   // adjust brightness (or w/ caps, dimming overlay)
-        on_wheel_bkwd : gen_incr_af (ks, ov, -1),   // adjust brightness (or w/ caps, dimming overlay)
-        on_press      : qbar_drag,                  // persist-qbar, enable drag
-        on_rbtn_click : qbar_close,                 // close-qbar
-        on_mbtn_click : gamgee_open,                // bringup gamma management utility
+        label         : "Brightness".into(),
+        icon          : icons.bright.clone(),
+        indicator     : Some(ov_indc),          // dimming overlay active indicator
+        on_wheel_frwd : gen_incr_af (kr,  1),   // adjust brightness (or w/ caps, dimming overlay)
+        on_wheel_bkwd : gen_incr_af (kr, -1),   // adjust brightness (or w/ caps, dimming overlay)
+        on_press      : qbar_drag,              // persist-qbar, enable drag
+        on_rbtn_click : qbar_close,             // close-qbar
+        on_mbtn_click : gamgee_open,            // bringup gamma management utility
         ..Default::default()
     };
     static _brightness : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -465,7 +468,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // .. then we'd hide the qbar instead of the default of making it go back to persisted state/pos (and vice-versa)
     // but rbtn-rel is handled by kr itself, so we wont hear it here .. so we'll just set/clear flag on hover-in/out
     let af_min_back = Arc::new (move || {
-        if let Ok(fgi) = wel.fgnd_info.read() {
+        if let Ok(fgi) = kr.wel.fgnd_info.read() {
             win_min_and_back(fgi.hwnd)
         }
     } );
@@ -473,14 +476,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let pers_flag_cache = &_pers_flag_cache;
     let af_hov_start = Arc::new (move || {
         if ks.mouse.rbtn.down.is_set() {
-            pers_flag_cache.store (qb.has_prior_persist());    // cache prior flag state
-            qb.set_prior_persist (!qb.has_prior_persist());    // toggle actual flag
+            pers_flag_cache.store (kr.qbar.has_prior_persist());         // cache prior flag state
+            kr.qbar.set_prior_persist (!kr.qbar.has_prior_persist());    // toggle actual flag
         }
     } );
     let af_hov_end = Arc::new (move || {
         // wanna restore flag from cache .. but only if qb is still visible .. (since qb-hide also gives hov-end)
-        if qb.is_visible() {
-            qb.set_prior_persist (pers_flag_cache.is_set())
+        if kr.qbar.is_visible() {
+            kr.qbar.set_prior_persist (pers_flag_cache.is_set())
         }
     } );
     let cell = ActionCell {
@@ -650,8 +653,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     // finally we can build the grid provider itself
     Box::new ( move || {
-        if check_intellij_fgnd (wel) { ide() }
-        else if check_browser_fgnd (wel) { web() }
+        if check_intellij_fgnd (kr.wel) { ide() }
+        else if check_browser_fgnd (kr.wel) { web() }
         else { base() }
     } )
 

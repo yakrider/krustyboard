@@ -56,11 +56,14 @@ impl HwndAtomic {
     pub fn store (&self, hwnd:Hwnd) {
         self.0 .store (hwnd.0, Ordering::Release)
     }
+    pub fn clear (&self) {
+        self.store (Hwnd(0))
+    }
     pub fn contains (&self, hwnd:Hwnd) -> bool {
         self.load() == hwnd
     }
-    pub fn clear (&self) {
-        self.store (Hwnd(0))
+    pub fn is_valid (&self) -> bool {
+        self.load() != Hwnd(0)
     }
 }
 impl From <HwndAtomic> for Hwnd {
@@ -151,15 +154,22 @@ pub fn check_window_cloaked (hwnd:Hwnd) -> bool { unsafe {
     cloaked_state != 0
 } }
 
-pub fn check_if_app_window (hwnd:Hwnd) -> bool { unsafe {
-    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) & WS_EX_APPWINDOW.0 as i32 != 0
+pub fn check_window_style (hwnd:Hwnd, style: WINDOW_EX_STYLE) -> bool { unsafe {
+    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) & style.0 as i32 != 0
 } }
-pub fn check_if_tool_window (hwnd:Hwnd) -> bool { unsafe {
-    GetWindowLongW (hwnd.into(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 as i32 != 0
-} }
+pub fn check_if_app_window (hwnd:Hwnd) -> bool {
+    check_window_style (hwnd, WS_EX_APPWINDOW)
+}
+pub fn check_if_tool_window (hwnd:Hwnd) -> bool {
+    check_window_style (hwnd, WS_EX_TOOLWINDOW)
+}
+pub fn check_if_window_passthrough (hwnd:Hwnd) -> bool {
+    check_window_style (hwnd, WS_EX_TRANSPARENT)
+}
 
 pub fn check_window_has_owner (hwnd:Hwnd) -> bool { unsafe {
-    !GetAncestor (hwnd.into(), GA_ROOTOWNER) .is_invalid()
+    let hr = GetAncestor (hwnd.into(), GA_ROOTOWNER);
+    !hr.is_invalid() && Hwnd::from(hr) != hwnd
 } }
 
 pub fn win_check_hwnd (hwnd:Hwnd) -> bool { unsafe {

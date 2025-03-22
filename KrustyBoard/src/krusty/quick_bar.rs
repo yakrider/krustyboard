@@ -36,6 +36,12 @@ impl Icon {
 
 
 
+/// ActionCells can have an optional pixel indicator that gets drawn at rendering time
+///   if a query to the cell's IndicatorFn (if any) returns true
+pub type IndicatorFn = Arc <dyn Fn() -> bool + Send + Sync + 'static>;
+
+
+
 #[derive (Clone)]
 /// ActionCell holds all the behaviors for a cell in the Quick-bar ActionGrid
 /// .. (incl wheel-fwd/bkwd, hover/hover-end, press/release, click) <br>
@@ -46,6 +52,8 @@ pub struct ActionCell {
 
     pub label : String,
     pub icon  : Option<Icon>,
+
+    pub indicator : Option <IndicatorFn>,
 
     pub on_wheel_bkwd : AF,
     pub on_wheel_frwd : AF,
@@ -70,6 +78,7 @@ impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
         label           : "".to_string(),
         icon            : None,
+        indicator       : None,
         on_wheel_bkwd   : Arc::new (|| {}),
         on_wheel_frwd   : Arc::new (|| {}),
         on_hover_start  : Arc::new (|| {}),
@@ -573,6 +582,14 @@ impl eframe::App for &QuickBar {
                             FontId::new (12.0, FontFamily::Proportional),
                             Color32::from_rgb (0, 255, 255),    // text in aqua
                         );
+                    }
+
+                    // we'll then paint any optional indicator for the action-cell
+                    if cur_cell.indicator.as_ref().is_some_and (|p| p()) {
+                        // paint a 3px yellow square at bottom corner of cell with 1px margin
+                        let sq_xy = pos2 ( rect.left() + 1.0, rect.bottom() - 4.0 );
+                        let sq_wh = Rect::from_min_size (sq_xy, Vec2::splat(3.0));
+                        ui.painter() .rect_filled (sq_wh, 0.0, Color32::from_rgb(255, 255, 0));
                     }
 
                     if cell.hovered() {
