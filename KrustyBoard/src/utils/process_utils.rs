@@ -36,6 +36,9 @@ pub static IDE_EXES : Lazy<Vec<String>> = Lazy::new ( || [
 pub static MUSIC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
     ["winamp", "MusicBee",] .map (String::from) .map (|s| s+".exe") .to_vec()
 );
+pub static CALC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+    ["qalculate", "qcalculate", "CalculatorApp",] .map (String::from) .map (|s| s+".exe") .to_vec()
+);
 
 
 /* reminder - re UAC elevation when starting processes while running krusy elevated (as we often want to do)

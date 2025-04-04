@@ -94,7 +94,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     /// __** Volume, Mute **__
     let cell = ActionCell {
-        label : "Volume".into(),
+        label : Some (Label::new ("Volume")),
         icon  : icons.volume.clone(),
         on_wheel_bkwd : ag().k(VolumeDown).gen_af(),    // vol down
         on_wheel_frwd : ag().k(VolumeUp  ).gen_af(),    // vol up
@@ -135,7 +135,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let prev_track = media_next_action (ks, false);
     let prev_track = Arc::new (move || { prev_track(); ctp(); });
     let cell = ActionCell {
-        label : "Tracks".to_string(),
+        label : Some (Label::new ("Tracks")),
         icon  : icons.tracks.clone(),
         //on_hover_start : ctp_g.clone(),    // show now-playing popup
         //on_hover_end   : hov_end.clone(),  // cancel any pending now-playing popup
@@ -158,7 +158,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let skip_bkwd = media_skips_action (1, ks, false);
     let skip_bkwd = Arc::new (move || { skip_bkwd(); ctp(); });
     let cell = ActionCell {
-        label : "Scrub".to_string(),
+        label : Some (Label::new ("Scrub")),
         icon  : icons.scrub.clone(),
         on_hover_start : ctp_g.clone(),      // show now-playing popup
         on_hover_end   : hov_end.clone(),    // cancel any pending now-playing popup
@@ -230,7 +230,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     };
 
     let cell = ActionCell {
-        label : "Switche".to_string(),
+        label : Some (Label::new ("Switche")),
         icon  : icons.switche.clone(),
         on_wheel_bkwd : sw_wh_af(),    // invoke switche
         on_wheel_frwd : sw_wh_af(),    // invoke switche
@@ -291,7 +291,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     });
 
     let cell = ActionCell {
-        label : "Switche Blind".to_string(),
+        label : Some (Label::new ("Switche Blind")),
         icon  : icons.sw_blind.clone(),
         on_wheel_bkwd  : nav_af (true ),               // next window
         on_wheel_frwd  : nav_af (false),               // prev window
@@ -332,7 +332,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         } )
     };
     let cell = ActionCell {
-        label : "Tabs".to_string(),
+        label : Some (Label::new ("Tabs")),
         icon  : icons.tabs.clone(),
         on_wheel_bkwd : tabs_wh_af (ks, true ),    // ctrl-tab
         on_wheel_frwd : tabs_wh_af (ks, false),    // ctrl-shift-tab
@@ -349,7 +349,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     /// _** Direct Tabs Switching **__
     let cell = ActionCell {
-        label : "Tabs Blind".to_string(),
+        label : Some (Label::new ("Tabs Blind")),
         icon  : icons.tabs_blind.clone(),
         on_wheel_bkwd : ag().k(PageDown).m(ctrl).gen_af(),   // next tab
         on_wheel_frwd : ag().k(PageUp  ).m(ctrl).gen_af(),   // prev tab
@@ -395,7 +395,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let ov_indc = Arc::new (move || kr.overlay.is_active());
 
     let cell = ActionCell {
-        label         : "Brightness".into(),
+        label         : Some (Label::new ("Brightness")),
         icon          : icons.bright.clone(),
         indicator     : Some(ov_indc),          // dimming overlay active indicator
         on_wheel_frwd : gen_incr_af (kr,  1),   // adjust brightness (or w/ caps, dimming overlay)
@@ -428,7 +428,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         } )
     };
     let cell = ActionCell {
-        label : "Arrows".to_string(),
+        label : Some (Label::new ("Arrows")),
         icon  : icons.arrows.clone(),
         on_wheel_bkwd : arrow_af.clone()(true),
         on_wheel_frwd : arrow_af(false),
@@ -448,7 +448,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let af_fwd  = Arc::new ( move || if ks.mouse.lbtn.down.is_set() { nav_fwd()  } else { zoom_in()  } );
     let af_bkwd = Arc::new ( move || if ks.mouse.lbtn.down.is_set() { nav_bkwd() } else { zoom_out() } );
     let cell = ActionCell {
-        label : "Refresh".to_string(),
+        label : Some (Label::new ("Refresh")),
         icon  : icons.refresh.clone(),
         on_wheel_bkwd : af_bkwd,              // pg-bkwd
         on_wheel_frwd : af_fwd,               // pg-fwd
@@ -476,18 +476,19 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let pers_flag_cache = &_pers_flag_cache;
     let af_hov_start = Arc::new (move || {
         if ks.mouse.rbtn.down.is_set() {
-            pers_flag_cache.store (kr.qbar.has_prior_persist());         // cache prior flag state
-            kr.qbar.set_prior_persist (!kr.qbar.has_prior_persist());    // toggle actual flag
+            let prior_persist = kr.qbar.cur_grid_check_prior_persist();
+            pers_flag_cache.store (prior_persist);                 // cache prior flag state
+            kr.qbar.cur_grid_set_prior_persist (!prior_persist);   // toggle actual flag
         }
     } );
     let af_hov_end = Arc::new (move || {
         // wanna restore flag from cache .. but only if qb is still visible .. (since qb-hide also gives hov-end)
-        if kr.qbar.is_visible() {
-            kr.qbar.set_prior_persist (pers_flag_cache.is_set())
+        if kr.qbar.cur_grid_check_visible() {
+            kr.qbar.cur_grid_set_prior_persist (pers_flag_cache.is_set())
         }
     } );
     let cell = ActionCell {
-        label : "MinBack".to_string(),
+        label : Some (Label::new ("MinBack")),
         icon  : icons.min_back.clone(),
         on_wheel_bkwd   : af_min_back.clone(),    // min-and-back
         on_wheel_frwd   : af_min_back.clone(),    // min-and-back
@@ -505,7 +506,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
     /// _** Diff Nav (while IDE fgnd) **__
     let cell = ActionCell {
-        label : "Diff".to_string(),
+        label : Some (Label::new ("Diff")),
         icon  : icons.diff.clone(),
         on_wheel_bkwd : ag().k(ExtDown).m(ctrl).m(alt).gen_af(),   // next diff
         on_wheel_frwd : ag().k(ExtUp  ).m(ctrl).m(alt).gen_af(),   // prev diff
@@ -554,7 +555,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     } );
 
     let cell = ActionCell {
-        label : "Page Dark".to_string(),
+        label : Some (Label::new ("Page Dark")),
         icon  : icons.darken_pg.clone(),
         on_wheel_bkwd : wheel_bkwd_af,
         on_wheel_frwd : wheel_frwd_af,
@@ -568,9 +569,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let pg_dark = || pg_dark.clone();
 
 
-    /// _** Darkening / brightening for Images only **__
+    /// __** Darkening / brightening for Images only **__
     let cell = ActionCell {
-        label : "Image Dark".to_string(),
+        label : Some (Label::new ("Image Dark")),
         icon  : icons.darken_im.clone(),
         on_wheel_bkwd : im_darken,
         on_wheel_frwd : im_brighten,
@@ -582,6 +583,23 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     static _im_dark : OnceCell < Arc < ActionCell>> = OnceCell::new();
     let im_dark = _im_dark .get_or_init ( move || { Arc::new (cell) } );
     let im_dark = || im_dark.clone();
+
+
+
+    /// __** y-axis percent toggle for TradingView **__
+    let cell = ActionCell {
+        label : Some (Label::new("%").sz(18)),
+        icon  : None,
+        indicator: None,
+        on_wheel_bkwd: ag().k(P).m(lalt).gen_af(),
+        on_wheel_frwd: ag().k(P).m(lalt).gen_af(),
+        ..Default::default()
+    };
+    static _tv_y_toggle : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    let tv_y_toggle = _tv_y_toggle .get_or_init ( move || { Arc::new (cell) } );
+    let tv_y_toggle = || tv_y_toggle.clone();
+
+
 
 
 
@@ -598,9 +616,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     //let cell_sz = CellDims::new (48,26);
     let cell_sz = CellDims::new (38,22);
 
-    let start_pos = Some ( Point { x: 3840-450, y: 250 } );
     // we'll start just a bit towards the top-right corner
-    // (specifying None would make it stay invisible until invoked at cursor)
+    let start_pos = Point { x: 3840-450, y: 250 };
+
+    // and we'll create a shared storage for position for grids that dont specify their own
+    let default_pos = Arc::new ( PointAtomic::new (start_pos) );
 
 
     // general use
@@ -612,10 +632,16 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     );
     let label = "base".into();
     let grid_sz = GridDims::new (3, 4);
+    let cur_pos = default_pos.clone();
     let base = _base.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
     } );
-    let base = || base.clone();
+
+    // disabled grid .. (e.g. for switche)
+    static _disabled : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    let disabled = _disabled.get_or_init ( move || {
+        Arc::new ( ActionGrid { enabled: Flag::new(false), ..ActionGrid::default() } )
+    } );
 
 
 
@@ -628,10 +654,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     );
     let label = "ide".into();
     let grid_sz = GridDims::new (3, 4);
+    let cur_pos = Arc::new ( PointAtomic::new (start_pos) );
+    // ^^ we'll set IDE qbar-grid positioning to be remembered separately
     let ide = _ide.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
     } );
-    let ide = || ide.clone();
 
 
 
@@ -644,18 +671,50 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     );
     let label = "web".into();
     let grid_sz = GridDims::new (3, 4);
+    let cur_pos = default_pos.clone();
     let web = _web.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, start_pos } )
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
     } );
-    let web = || web.clone();
 
 
+    // TradingView
+    static _trading_view : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    let grid = vec! (
+        vec! ( switche(),     switche_bl(),  min_back(),    volume() ),
+        vec! ( tabs_bl(),     refresh(),     tv_y_toggle(), tracks() ),
+        vec! ( brightness(),  pg_dark(),     im_dark(),     scrub()  ),
+    );
+    let label = "TradingView".into();
+    let grid_sz = GridDims::new (3, 4);
+    let cur_pos =  Arc::new ( PointAtomic::new ( Point { x: 2500, y: 160 } ) );
+    let trading_view = _trading_view.get_or_init ( move || {
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
+    } );
+
+
+
+    //let grids = [base(), ide(), web(), trading_view()];
+    //let dbg_grids = Arc::new ( move || {
+    //    for g in grids.as_ref() { println!("vpp{:?}",(&g.label, g.is_visible.is_set(), g.is_persist.is_set(), g.prior_persist.is_set())) };
+    //} );
 
     // finally we can build the grid provider itself
-    Box::new ( move || {
-        if check_intellij_fgnd (kr.wel) { ide() }
-        else if check_browser_fgnd (kr.wel) { web() }
-        else { base() }
+    Box::new ( move || {  //dbg_grids();
+        if check_intellij_fgnd (kr.wel) {
+            return ide
+        }
+        if check_browser_fgnd (kr.wel) {
+            if check_title_contains (kr.wel, "TradingView") {
+                return trading_view
+            }
+            return web
+        }
+        if check_switche_fgnd (kr.wel) {
+            // we specifically disable for switche, coz if sw is general and general is on but say ide is off ..
+            // .. then qbar hwnd coming up unhidden (coz of sw fgnd) would interfere w sw release-activation etc
+            return disabled
+        }
+        base
     } )
 
 

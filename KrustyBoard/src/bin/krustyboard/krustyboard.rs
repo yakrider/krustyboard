@@ -134,6 +134,10 @@ fn check_alt_tab_fgnd (wel:&WinEventsListener) -> bool {
         fi.class == "XamlExplorerHostIslandWindow" || fi.class == "MultitaskingViewFrame"
 } ) }
 
+fn check_title_contains (wel:&WinEventsListener, title_frag: &str) -> bool {
+    wel.fgnd_info.read() .is_ok_and (|fi| fi.title.contains(title_frag))
+}
+
 /// the idea here is to clone the listener Arc once during cond-creation, to avoid calling instance() repeatedly during runtime
 fn win_evs_cond <WFN> (wfn:WFN) -> ComboCond
     where WFN : Fn(&WinEventsListener) -> bool + Send + Sync + 'static
@@ -1168,18 +1172,21 @@ fn setup_win_key_combos (k:KR) {
     // win-i should start irfanview
     k.cm .add_combo ( cg().k(I).no_rpt().m(lwin),  ag().af(action(start_irfanview)) );
 
-    // win-n should start browser incognito
-    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af(action(start_chrome_incognito)) );
-    //k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af(action(start_firefox_incognito)) );
+    // win-n can open browser window
+    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af (action (start_chrome)) );
+    //k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af (action (start_firefox)) );
 
-    // caps-win-n can instead open browser open non-incognito
-    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_chrome)) );
-    //k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af (action (start_firefox)) );
+    // and caps-win-n can then open an incognito browser window
+    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af(action(start_chrome_incognito)) );
+    //k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af(action(start_firefox_incognito)) );
 
     // win-caps-b for bard .. hah we'll see
-    k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
+    //k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
     // and win-caps-c for claude
-    k.cm .add_combo ( cg().k(C).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "fmpnliohjhemenmnlpbfagaolkdacoja")) );
+    //k.cm .add_combo ( cg().k(C).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "fmpnliohjhemenmnlpbfagaolkdacoja")) );
+
+    // we'll set win-caps-i to have windows invert screen colors (via OS hardcoded win-ctrl-c)
+    k.cm .add_combo ( cg().k(I).no_rpt().m(lwin).m(caps),  ag().k(C).m(ctrl).m(lwin) );
 
     // win-v can bring up vlc .. note that this will override native win-c for win clipboard (can get that win dbl-win-v)
     k.cm .add_combo ( cg().k(V).no_rpt().m(lwin),  ag().af(action(start_vlc)) );
@@ -1445,6 +1452,10 @@ fn setup_space_key (k:KR) {
     k.cm .add_combo ( cg().k(Space).m(caps).s(msF_dbl),     ag().k(Enter).m(ctrl) );    // caps-ff-space    -> ctrl-enter
     k.cm .add_combo ( cg().k(Space).m(caps).s(msE).s(msF),  ag().k(Enter).m(ctrl) );    // caps-e-f-space   -> ctrl-enter
 
+    // somewhere OS seems to be munging ctrl-win-space .. so we'll use caps-win-space to give alt-win-space and use that instead
+    // (specifically for the powertools cmd-palette invocation)
+    k.cm .add_combo ( cg().k(Space).m(caps).m(lwin),  ag().k(Space).m(win).m(alt) );   // caps-win-space  -> alt-win-space
+
 
     // beyond that .. caps-space as ctrl-space, caps-lalt-space as alt-enter for intellij
     // and some actual Space outputs
@@ -1510,7 +1521,12 @@ fn setup_misc_standalone_combos (k:KR) {
     k.cm .add_combo ( cg().k(C).m(caps_dbl).m(lalt),  ag().af (action (|| Cursors::instance().apply_sys())) );
 
     // caps-caps-G can invoke the hotkey for Gamgee (Alt-Shift-G)
-    k.cm .add_combo ( cg().k(G).m(caps_dbl),  ag().k(G).m(alt).m(shift) )
+    let gamgee_ag = ag().k(G).m(alt).m(shift);
+    k.cm .add_combo ( cg().k(G).m(caps_dbl),  gamgee_ag.clone() );
+    // but we'll also support caps-gg for easier ergonomics (where ctrl-g on first press is harmless)
+    k.cm .add_combo ( cg().k(G).dbl().m(caps),  gamgee_ag.clone() );
+    // and we'll add caps-d-g too going by what was done for qbar invocation (cc-a, c-aa, c-d-a)
+    k.cm .add_combo ( cg().k(G).m(caps).s(msD),  gamgee_ag.clone() );
 
 }
 
@@ -1814,9 +1830,10 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     let switche_direct__ide       =  SwitchePipeCmd::sw_exe_af (&IDE_EXES);
     let switche_direct__browser   =  SwitchePipeCmd::sw_exe_af (&BROWSER_EXES);
     let switche_direct__music     =  SwitchePipeCmd::sw_exe_af (&MUSIC_EXES);
+    let switche_direct__calc      =  SwitchePipeCmd::sw_exe_af (&CALC_EXES);
     let switche_direct__notepadpp =  SwitchePipeCmd::sw_exe_af (&["notepad++.exe".into()]);
 
-    let switche_direct__claude          = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Claude", true);
+    //let switche_direct__claude        = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Claude", true);
     let switche_direct__tabs_outliner   = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Tabs Outliner", false);
     let switche_direct__kbd_evs_printer = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "kbd: Keyboard Events Printer", false);
 
@@ -1848,9 +1865,9 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     setup_direct_switch ( I,      & switche_direct__ide             );   // I -> first IDEA window
     setup_direct_switch ( B,      & switche_direct__browser         );   // B -> first browser window
     setup_direct_switch ( M,      & switche_direct__music           );   // M -> winamp (music)
+    setup_direct_switch ( C,      & switche_direct__calc            );   // C -> Calculator
     setup_direct_switch ( N,      & switche_direct__notepadpp       );   // N -> Notepad++
     setup_direct_switch ( T,      & switche_direct__tabs_outliner   );   // O -> TabsOutliner (chrome)
-    setup_direct_switch ( C,      & switche_direct__claude          );   // C -> Claude (chrome)
     setup_direct_switch ( K,      & switche_direct__kbd_evs_printer );   // K -> kbd-events-printer (chrome)
 
     // we'll enable caps-o / caps-q to send windows to back while doing that too
@@ -2240,6 +2257,9 @@ fn setup_IDE_combos (k:KR) {
     let collapse_nav_tree  =  ag().k(Slash    ).m(ctrl).m(alt).m(shift);
     let expand_nav_tree    =  ag().k(Backslash).m(ctrl).m(alt).m(shift);
 
+    let fold_cur_level   = ag().k(Minus).m(ctrl).m(shift);
+    let unfold_cur_level = ag().k(Equal).m(ctrl).m(shift);
+
     let caret_to_block_start  =  ag().k(LBracket).m(alt);
     let caret_to_block_end    =  ag().k(RBracket).m(alt);
     let sel_to_block_start    =  ag().k(LBracket).m(alt).m(shift);
@@ -2309,6 +2329,9 @@ fn setup_IDE_combos (k:KR) {
     k.cm .add_combo ( cg().k(Backslash).m(caps).s(msF),  expand_nav_tree.clone() );
     k.cm .add_combo ( cg().k(Numrow_8 ).m(caps).s(msF),  expand_nav_tree );
     k.cm .add_combo ( cg().k(Slash    ).m(caps).s(msF),  collapse_nav_tree );
+
+    k.cm .add_combo ( cg().k(J).m(caps).s(msF_dbl),  fold_cur_level );
+    k.cm .add_combo ( cg().k(K).m(caps).s(msF_dbl),  unfold_cur_level );
 
     k.cm .add_combo ( cg().k(LBracket).m(caps).s(msF),  caret_to_matching_brace.clone() );
     k.cm .add_combo ( cg().k(RBracket).m(caps).s(msF),  caret_to_matching_brace.clone() );
@@ -2511,6 +2534,24 @@ fn setup_one_note_combos (k:KR) {
     k.cm .add_combo ( cg().k(E).m(caps).s(qks).s(msE_dbl) .c(one_note_fgnd()),   ag().af (eraser) );
     k.cm .add_combo ( cg().k(D).m(caps).s(qks).s(msD_dbl) .c(one_note_fgnd()),   ag().af (threaded (pen.clone())) );
 
+
+    // one note has gone weird, not letting customize buttons w/o pro, and therefore unable to add any btn to ui to enable touch-draw !!!
+
+    // so here's some quick setups to use alternative .. e.g. inkodo
+    // we'll set the rbtn (which is normally rel-delayed, to issue press normally if inkodo is active .. (it uses that for delete)
+    // (note that regular rbtn-release will handle releasing it)
+    let rbtn_press_af = Arc::new ( move || {
+        k.ks.mouse.rbtn.pending.clear();
+        k.ks.mouse.rbtn.active.set();
+        RightButton.press();
+    } );
+    let cc : ComboCond = Arc::new ( |_ks,_ev| {
+        //k.wel.fgnd_info.read() .is_ok_and (|fi| fi.exe == "Inkodo.exe")
+        k.wel.fgnd_info.read() .is_ok_and (|fi| fi.exe == "ApplicationFrameHost.exe" && fi.title.contains("Inkodo"))
+    });
+    k.cm .add_combo ( cg().mbtn(RightButton) .c(cc),  ag().af (rbtn_press_af) );
+
+
 }
 
 
@@ -2522,9 +2563,9 @@ fn setup_gaming_combos (k:KR) {
     fn gen_pointed_v2 (x:i32, y:i32, key:Option<Key>) -> AF {
         Arc::new ( move || {
             thread::spawn ( move || {
-                MousePointer::move_abs(x,y);
-                LeftButton.press_release();
-                if let Some(key) = key { s(20); key.press_release(); s(5); key.press_release(); }
+                MousePointer::move_abs(x,y); s(10);
+                LeftButton.press_release(); s(10);
+                if let Some(key) = key { s(20); key.press_release(); s(10); key.press_release(); }
             } );
         } )
     }
@@ -2566,12 +2607,8 @@ fn setup_gaming_combos (k:KR) {
         // assume four sized windows are up, move them to right loc, start em up, deblur,
         let _xd = 950;
         for _i in (0 .. 4).rev() {
-            //MousePointer::move_abs (240, 200);         // home
-            MousePointer::move_abs (600, 600); s(50);    // video
-            LeftButton.press_release(); s(800);          //
-            MousePointer::move_abs (80, 300); s(50);     // unblur
-            LeftButton.press_release(); s(800); LeftButton.press_release(); s(50); s(20);
-            //win_fgnd_move_to (_xd*_i, 0, 940, 2400); s(500);
+            MousePointer::move_abs (600, 600); s(50);
+            LeftButton.press_release(); s(800);
             snap_closest_edge_side (k.ks, RectEdgeSide::Left ); s(10);
             snap_closest_edge_side (k.ks, RectEdgeSide::Right); s(10);
         }
@@ -2579,7 +2616,7 @@ fn setup_gaming_combos (k:KR) {
 
     let og_teardown = Arc::new ( || {  thread::spawn ( || {
         for i in 0 .. 4 {
-            MousePointer::move_abs (950*i + 240, 180); s(50);       // home
+            MousePointer::move_abs (950*i + 240, 180); s(50);
             LeftButton.press_release(); s(500);
             ctrl_press_release(W); s(50);
         }
@@ -2637,11 +2674,14 @@ fn setup_quick_bar (k:KR) {
     // and we'll setup kbd only combo to toggle quick-bar too .. leaves it persistent, mostly useful for testing
     // caps-caps-A --> bring up Action Grid
     k.cm.add_combo ( cg().k(A).m(caps_dbl),     ag().af (Arc::new (move || k.qbar.toggle())) );
+    // we'll also setup caps-a-a for ergonomics (can be useful where the first ctrl-a is harmless)
+    k.cm.add_combo ( cg().k(A).dbl().m(caps),   ag().af (Arc::new (move || k.qbar.toggle())) );
+    // and we'll overload yet another invocation on caps-d with a/o .. we'll see if it sees use
+    k.cm.add_combo ( cg().k(A).m(caps).s(msD),  ag().af (Arc::new (move || k.qbar.toggle())) );
     k.cm.add_combo ( cg().k(O).m(caps).s(msD),  ag().af (Arc::new (move || k.qbar.toggle())) );
     // ^^ we could have tried to have this also enter the fsc state .. (with a bit of manual toggle management here)
     // However, we've decided NOT to do that, as not doing so means the quick-bar persists over [caps/mod]-rel etc clearing fscs
     // Further, since we only care about wheel actions in this fsc, and w/o alt/ctrl, they work decently from regular fallback
-    // (note that a few combos esp w rbtn, alt-tab etc wont work w qbar up .. but fail mostly harmlessly)
 
 
     // for cleanup, we'll setup the rbtn-rel to hide the quick-bar and clear out of the state and related flags etc

@@ -5,7 +5,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
 use egui::{Align2, Context, FontFamily, FontId, PointerButton, TextureHandle, ViewportBuilder};
@@ -36,6 +36,32 @@ impl Icon {
 
 
 
+#[derive (Clone)]
+pub struct Label {
+    pub label   : Arc<String>,
+    pub color   : Color32,
+    pub font_id : FontId,
+}
+
+impl Label {
+    pub fn new (label:&str) -> Label {
+        Label {
+            label   : Arc::new (label.into()),
+            color   : Color32::from_rgb (0, 255, 255),  // Aqua
+            font_id : FontId::new (12.0, FontFamily::Proportional)
+        }
+    }
+    pub fn sz (&self, size:u32) -> Label {
+        Label {
+            label   : self.label.clone(),
+            color   : self.color,
+            font_id : FontId::new (size as f32, FontFamily::Proportional)
+        }
+    }
+}
+
+
+
 /// ActionCells can have an optional pixel indicator that gets drawn at rendering time
 ///   if a query to the cell's IndicatorFn (if any) returns true
 pub type IndicatorFn = Arc <dyn Fn() -> bool + Send + Sync + 'static>;
@@ -50,8 +76,8 @@ pub type IndicatorFn = Arc <dyn Fn() -> bool + Send + Sync + 'static>;
 ///
 pub struct ActionCell {
 
-    pub label : String,
-    pub icon  : Option<Icon>,
+    pub label : Option <Label>,
+    pub icon  : Option <Icon>,
 
     pub indicator : Option <IndicatorFn>,
 
@@ -74,9 +100,10 @@ pub struct ActionCell {
     pub on_mbtn_click   : AF,
 
 }
+
 impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
-        label           : "".to_string(),
+        label           : None,
         icon            : None,
         indicator       : None,
         on_wheel_bkwd   : Arc::new (|| {}),
@@ -94,6 +121,7 @@ impl Default for ActionCell {
         on_mbtn_click   : Arc::new (|| {}),
     } }
 }
+
 impl ActionCell {
     // we'll just add some syntactic sugar for easy calling
     pub fn wheel_bkwd_fn   (&self)  { (self.on_wheel_bkwd   )() }
@@ -113,35 +141,6 @@ impl ActionCell {
 
 
 
-/// full grid of ActionCells that will be rendered by egui
-pub struct ActionGrid {
-    pub label     : String,
-    pub cell_sz   : CellDims,
-    pub grid_sz   : GridDims,
-    pub grid      : Vec <Vec <Arc <ActionCell>>>,
-    pub start_pos : Option <Point>,
-}
-impl Default for ActionGrid {
-    fn default() -> ActionGrid {
-        ActionGrid {
-            label     : String::new(),
-            cell_sz   : CellDims::default(),
-            grid_sz   : GridDims::default(),
-            grid      : vec![vec![]],
-            start_pos : None,
-        }
-    }
-}
-impl ActionGrid {
-    const OUTER_MARGIN : u32 = 3;
-    fn grid_px_sz (&self) -> CellDims {
-        let width  = self.cell_sz.width  * self.grid_sz.cols as u32  +  2 * Self::OUTER_MARGIN;
-        let height = self.cell_sz.height * self.grid_sz.rows as u32  +  2 * Self::OUTER_MARGIN;
-        CellDims::new (width, height)
-    }
-}
-
-
 #[derive (Copy, Clone, Eq, PartialEq)]
 pub struct CellDims { pub width: u32, pub height: u32 }
 
@@ -156,12 +155,12 @@ impl CellDims {
 }
 
 
+
 #[derive (Copy, Clone, Eq, PartialEq)]
 pub struct GridDims { pub rows: u8, pub cols: u8 }
 
 impl Default for GridDims {
-    // we'll set default grid to be 3x3
-    fn default() -> Self { GridDims::new (3,3) }
+    fn default() -> Self { GridDims::new (1,1) }
 }
 impl GridDims {
     pub fn new (rows:u8, cols:u8) -> GridDims {
@@ -171,24 +170,63 @@ impl GridDims {
 
 
 
+/// full grid of ActionCells that will be rendered by egui
+pub struct ActionGrid {
+    // We'll have the grid structure hold both its pre-defined properties, and runtime values
+
+    // first the pre-defined values
+    pub label     : String,
+    pub cell_sz   : CellDims,
+    pub grid_sz   : GridDims,
+    pub grid      : Vec <Vec <Arc <ActionCell>>>,
+
+    // next the dynamic (runtime-updating) values
+    pub enabled       : Flag,
+    pub is_visible    : Flag,
+    pub is_persist    : Flag,
+    pub prior_persist : Flag,
+    pub cur_pos       : Arc <PointAtomic>,
+}
+
+impl Default for ActionGrid {
+    fn default() -> ActionGrid {
+        ActionGrid {
+            label     : String::new(),
+            cell_sz   : CellDims::default(),
+            grid_sz   : GridDims::default(),
+            grid      : vec![vec![Arc::new(ActionCell::default())]],
+
+            // and its dynamic value placeholders
+            enabled       : Flag::new(true),
+            is_visible    : Flag::new(true),
+            is_persist    : Flag::new(true),
+            prior_persist : Flag::new(true),
+            cur_pos       : Arc::new ( PointAtomic::new ( Point { x:0, y:0 } ) ),
+        }
+    }
+}
+
+impl ActionGrid {
+    const OUTER_MARGIN : u32 = 3;
+    fn grid_px_sz (&self) -> CellDims {
+        let width  = self.cell_sz.width  * self.grid_sz.cols as u32  +  2 * Self::OUTER_MARGIN;
+        let height = self.cell_sz.height * self.grid_sz.rows as u32  +  2 * Self::OUTER_MARGIN;
+        CellDims::new (width, height)
+    }
+}
+
+
+
 pub type GetGridBuilderFn = Box <dyn Fn (&Context) -> GetGridFn + Send + Sync + 'static>;
 
-pub type GetGridFn = Box <dyn Fn() -> Arc<ActionGrid> + Send + Sync + 'static>;
+pub type GetGridFn = Box <dyn Fn() -> &'static ActionGrid + Send + Sync + 'static>;
 
 
 # [derive ()]
 pub struct QuickBar {
 
-    visible : Flag,
-    persist : Flag,
-
+    is_visible  : Flag,
     drag_active : Flag,
-
-    prior_pos     : PointAtomic,
-    prior_persist : Flag,
-
-    // we'll acquire ks ref at init
-    //ks : &'static KrustyState,
 
     // we'll grab hwnd and ctx when the bar comes up
     ctx  : Arc <Mutex <Option <Context>>>,
@@ -216,25 +254,19 @@ impl QuickBar {
 
         // we'll prep a default get-grid fn that returns an empty grid
         // (instead of having the get-gird be option wrapped just for init purposes)
-        let gg_empty : Arc<ActionGrid> = Arc::default();
+        static gg_empty : Lazy <ActionGrid> = Lazy::new (ActionGrid::default);
 
         static INSTANCE: OnceCell<QuickBar> = OnceCell::new();
         INSTANCE .get_or_init ( ||
             QuickBar {
-                visible  : Flag::default(),
-                persist  : Flag::default(),
-
+                is_visible  : Flag::default(),
                 drag_active : Flag::default(),
 
-                prior_pos     : PointAtomic::default(),
-                prior_persist : Flag::default(),
-
-                //ks   : KrustyState::instance(),
                 ctx  : Arc::new (Mutex::new (None)),
                 hwnd : AtomicIsize::default(),
 
                 get_grid_builder : Arc::new ( Mutex::new ( None ) ),
-                get_grid         : Arc::new ( Mutex::new ( Box::new (move || gg_empty .clone()))),
+                get_grid         : Arc::new ( Mutex::new ( Box::new (move || &gg_empty))),
                 refresh_grid     : Flag::default(),
             }
         )
@@ -244,8 +276,13 @@ impl QuickBar {
         *self.get_grid_builder.lock().unwrap() = Some (gpbfn);
     }
 
-    pub fn set_dragging (&self, state:bool) {
-        self.drag_active.store (state);
+    pub fn set_dragging (&self, is_dragging:bool) {
+        if !is_dragging && self.drag_active.is_set() {
+            if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+                self.persist_pos (grid);
+            }
+        }
+        self.drag_active.store (is_dragging);
     }
     pub fn is_drag_active (&self) -> bool {
         self.drag_active.is_set()
@@ -254,11 +291,20 @@ impl QuickBar {
         self.hwnd .load (Ordering::Relaxed) .into()
     }
 
-    pub fn is_visible        (&self) -> bool { self.visible.is_set() }
-    pub fn is_persistent     (&self) -> bool { self.persist.is_set() }
-
-    pub fn has_prior_persist (&self) -> bool { self.prior_persist.is_set() }
-    pub fn set_prior_persist (&self, v:bool) { self.prior_persist.store(v); }
+    pub fn cur_grid_check_visible(&self) -> bool {
+        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.is_visible.is_set())
+    }
+    pub fn cur_grid_check_persist (&self) -> bool {
+        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.is_persist.is_set())
+    }
+    pub fn cur_grid_check_prior_persist(&self) -> bool {
+        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.prior_persist.is_set())
+    }
+    pub fn cur_grid_set_prior_persist (&self, v:bool) {
+        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+            grid.prior_persist.store(v);
+        }
+    }
 
     pub fn request_repaint (&self) {
         if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
@@ -268,37 +314,45 @@ impl QuickBar {
 
     pub fn toggle (&self) {
         // toggling will open/close it with persistence (unlike for mouse invocations with fsc)
-        if self.visible.is_clear() {
-            self.show (true, false)  // bools : persist, and open at stored loc
-        } else {
-            self.hide (true)         // bool : hide w force flag (if was persistent)
+        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+            if grid.is_visible.is_clear() {
+                self.show (true, false)  // bools : persist, and open at stored loc
+            } else {
+                self.hide (true)         // bool : hide w force flag (if was persistent)
+            }
         }
     }
 
-    fn persist_loc (&self) {
+    fn persist_pos (&self, grid: &ActionGrid) {
         let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
         let rect = utils::win_get_window_rect(hwnd);
-        let loc = Point { x: rect.left, y: rect.top };
-        self.prior_pos.store (loc);
+        let pos = Point { x: rect.left, y: rect.top };
+        grid.cur_pos.store(pos);
     }
 
     pub fn set_persistent (&self) {
-        self.persist.set();
-        if self.visible.is_set() { self.persist_loc() };
+        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+            grid.is_persist.set();
+            if grid.is_visible.is_set() { self.persist_pos(grid) }
+        }
     }
 
     pub fn hide (&self, force:bool) {
 
-        if self.persist.is_set() && !force { return };
+        let grid = self.get_grid.lock() .map (|gfn| gfn()) .ok();
+
+        if grid .as_ref() .is_some_and (|g| g.is_persist.is_set()) && !force { return };
         // ^^ if we were shown w persist flag, only a force close should hide it
 
-        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
-
         // lets save the qbar window position (if it was persistant) in case it has moved around
-        if self.persist.is_set() { self.persist_loc() }
+        if let Some(g) = grid.as_ref() {
+            if g.is_persist.is_set() { self.persist_pos(g) }
+            g.is_persist.clear();
+            g.is_visible.clear();
+        }
+        self.is_visible.clear();
 
-        self.visible.clear();
-        self.persist.clear();
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
 
         // want to hide and minimze .. (coz due to egui bug, minimized windows stop event-loop but hidden windows dont!)
         // .. but then when we bring it back, it will have to be shown/restored before locating it, which causes flashing
@@ -317,10 +371,6 @@ impl QuickBar {
 
     pub fn show (&self, persist:bool, at_cursor:bool) {
 
-        self.persist.store(persist);
-        self.visible.set();
-        self.refresh_grid.set();
-
         // we're going to hide/unhide manually, as sending Viewport cmd to unset visible appears irreversible (egui bug)
         // .. and on top, hidden egui windows seem to not stop event-loop and therefore consume cpu .. so we'll have to minimze instead
         // .. but if we're just doing minimize, we'd rather also set window size to zero etc to avoid them showing up user actions etc
@@ -328,16 +378,22 @@ impl QuickBar {
         // e.g. windows reposition requires un-minimize to have happened first (not at same time) .. and egui queues up cmds and so on
         // so instead, we'll do most of that w win-api cmds directly which seem more robust and reliable
 
-        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
 
         let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
         let grid_sz = grid.grid_px_sz();
 
+        if grid.enabled.is_clear() { return }
+
+        self.is_visible.set();
+        grid.is_visible.set();
+        grid.is_persist.store(persist);
+        self.refresh_grid.set();
+
         // we'll need scaling to calc the qbar's new position/size
-        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (2.0, |ctx| ctx.pixels_per_point());
+        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
 
         let pos = if !at_cursor {
-            self.prior_pos.load()
+            grid.cur_pos.load()
         } else {
             let mut pos = utils::get_pointer_loc();
             pos.x -= (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
@@ -345,10 +401,21 @@ impl QuickBar {
             // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
             pos
         };
+        self.reposition_qbar (&pos, grid);
+        self.defocus();
+    }
 
+    pub fn reposition_qbar (&self, pos:&Point, grid:&ActionGrid) {
+
+        // we'll need scaling to calc the qbar's new position/size
+        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
+
+        let grid_sz = grid.grid_px_sz();
         let width  = (scaling * grid_sz.width  as f32) as i32;
         let height = (scaling * grid_sz.height as f32) as i32;
         // ^^ manually coz auto dpi-scaling didnt seem to happen for w/h .. (setting thread dpi-aware didnt help)
+
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
 
         // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
         // and to move it to the right location .. (and this must come after un-minimize for the move to work)
@@ -357,31 +424,31 @@ impl QuickBar {
             let _ = SetWindowPos (hwnd.into(), Some(HWND_TOPMOST), pos.x, pos.y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
         }
-        self.defocus();
     }
 
     pub fn handle_invocation (&self) {
-        if self.is_persistent() {
-            self.prior_persist.set();  // mark that we might want this restored upon invoc-clear
-            self.persist_loc();        // store the loc to restore to later
+        let Ok(grid) = self.get_grid.lock().map(|gfn| gfn()) else { return };
+        if grid.is_persist.is_set() {
+            grid.prior_persist.set();    // mark that we might want this restored upon invoc-clear
+            self.persist_pos(grid);     // store the loc to restore to later
         }
         // we simply re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
         self.show (false, true);
     }
     pub fn handle_invocation_clear (&self) {
-        // if we had prior persistent, we move qbar back there, else we hide it
-        if self.prior_persist.is_clear() {
+        // if cur-grid had prior persistent, we move qbar back there, else we hide it
+        let Ok(grid) = self.get_grid.lock().map(|gfn| gfn()) else { return };
+        if grid.prior_persist.is_clear() {
             self.hide(false);
             // ^^ closing w/o force flag means it wont close if persist flag set, e.g by kbd invocation
         } else {
-            self.prior_persist.clear();
+            grid.prior_persist.clear();
             self.show (true, false);
             // ^^ show persistent at stored loc (not at cursor)
         }
     }
 
     pub fn handle_fgnd_change (&self, fgnd_hwnd:Hwnd) {
-        if self.visible.is_clear() { return }
         // we'd like the qb grid to check for updates, so we'll mark a flag, and wake up the ui-event-loop
         if fgnd_hwnd != Hwnd (self.hwnd.load (Ordering::Relaxed)) {
             if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
@@ -481,9 +548,9 @@ impl QuickBar {
                         let cur_grid = get_grid_fn.as_ref()();
                         thread::spawn ( move || {
                             thread::sleep (Duration::from_millis(20));
-                            if cur_grid.start_pos.is_some() {
-                                self.prior_pos.store (cur_grid.start_pos.unwrap());
-                                self.show (true, false);    // persist, but not at cursor
+                            // if the grid for the active window wanted persistence, we'll show it at startup
+                            if cur_grid.is_persist.is_set() {
+                                self.show (true, false);
                             } else {
                                 self.hide(true);
                             }
@@ -516,26 +583,38 @@ impl eframe::App for &QuickBar {
 
         // we also allow dynamically updating the grid based on fgnd context, so we'll want to cache a grid ref for cur painting ..
         // then if the grid changes, we'll pick up the change in the next repaint
-        static mut grid_s : OnceCell <Arc <ActionGrid>> = OnceCell::new();
+        static mut grid_s : OnceCell <&ActionGrid> = OnceCell::new();
         let grid = unsafe {
-            grid_s .get_or_init (||  self.get_grid.lock().expect("grid isnt setup").as_ref()()) .clone()
+            grid_s .get_or_init (|| self.get_grid.lock().unwrap().as_ref()())
         };
         // and if the refresh-grid flag is set (typically due to fgnd change), we'll requery and update to a new grid
         if self.refresh_grid.is_set() { unsafe {
             self.refresh_grid.clear();
             if let Some(grid) = grid_s.get_mut() {
                 let new_grid = self.get_grid.lock().unwrap().as_ref()();
-                if !Arc::ptr_eq (grid, &new_grid) {
-                    if grid.grid_sz != new_grid.grid_sz || grid.cell_sz != new_grid.cell_sz {
-                        self.resize(&new_grid);
+                if !std::ptr::eq (*grid, new_grid) {
+                    if new_grid.enabled.is_set() && new_grid.is_visible.is_set() {
+                        if new_grid.grid_sz != grid.grid_sz || new_grid.cell_sz != grid.cell_sz {
+                            self.resize(new_grid);
+                        }
+                        if new_grid.cur_pos.load() != grid.cur_pos.load() {
+                            self.reposition_qbar (&new_grid.cur_pos.load(), new_grid);
+                        }
+                        if self.is_visible.is_clear() {
+                            self.show (new_grid.is_persist.is_set(), false);
+                        }
+                        // now we'll come back again to pick up this updated mut static
+                        ctx.request_repaint();
+                    } else if self.is_visible.is_set() {
+                        self.hide(true);
                     }
                     *grid = new_grid;
-                    // now we'll come back again to pick up this updated mut static
-                    ctx.request_repaint();
                     return
                 }
             }
         } }
+
+        if self.is_visible.is_clear() { return }
 
         egui::CentralPanel::default()
             .frame ( egui::Frame::none().outer_margin (egui::Margin::same(ActionGrid::OUTER_MARGIN as f32)) )
@@ -576,11 +655,11 @@ impl eframe::App for &QuickBar {
                         let ico_pos = pos2 ( cpos.x + (csz.x - ico.sz_hint.x)/2.0, cpos.y + (csz.y - ico.sz_hint.y)/2.0 );
                         let im_rect = Rect::from_min_size (ico_pos, ico.sz_hint);
                         egui::Image::from_texture (&ico.txh) .paint_at (ui, im_rect);
-                    } else {
+                    }
+                    else if let Some(label) = cur_cell.label.as_ref() {
                         ui.painter() .text (
-                            rect.center(), Align2::CENTER_CENTER, cur_cell.label.clone(),
-                            FontId::new (12.0, FontFamily::Proportional),
-                            Color32::from_rgb (0, 255, 255),    // text in aqua
+                            rect.center(), Align2::CENTER_CENTER,
+                            label.label.clone(), label.font_id.clone(), label.color
                         );
                     }
 

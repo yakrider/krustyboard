@@ -5,7 +5,7 @@ use std::mem;
 use std::mem::size_of;
 
 use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use once_cell::sync::Lazy;
 
 use windows::core::{PSTR, HSTRING, PCWSTR, BOOL};
@@ -43,6 +43,7 @@ impl From <Hwnd> for isize {
 impl From <isize> for Hwnd {
     fn from (hwnd: isize) -> Self { Hwnd(hwnd) }
 }
+
 
 
 // and the atomic version of Hwnd for storage
@@ -90,21 +91,27 @@ impl From <Point> for POINT {
 }
 
 
+
 // and the atomic version of Point for storage
 # [ derive (Debug, Default) ]
-pub struct PointAtomic { x: AtomicI32, y: AtomicI32 }
-// ^^ todo should make this AtomicI64 w x/y conflated to make actually atomic
+pub struct PointAtomic (AtomicU64);
 
 impl PointAtomic {
+    #[inline] fn pack (x:i32, y:i32) -> u64 {
+        ((x as u32 as u64) << 32) | (y as u32 as u64)
+    }
+    #[inline] fn unpack (xy:u64) -> (i32, i32) {
+        ((xy >> 32) as u32 as i32, xy as i32)
+    }
+    pub fn new (pt:Point) -> PointAtomic {
+        PointAtomic ( AtomicU64::new ( Self::pack (pt.x, pt.y) ) )
+    }
     pub fn store (&self, pt: Point) {
-        self.x.store (pt.x, Ordering::Relaxed);
-        self.y.store (pt.y, Ordering::Relaxed);
+        self.0.store ( Self::pack (pt.x, pt.y), Ordering::Relaxed );
     }
     pub fn load (&self) -> Point {
-        Point {
-            x : self.x.load(Ordering::Relaxed),
-            y : self.y.load(Ordering::Relaxed)
-        }
+        let (x, y) = Self::unpack ( self.0.load (Ordering::Relaxed) );
+        Point {x, y}
     }
 }
 impl From <PointAtomic> for Point {
