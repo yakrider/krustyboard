@@ -5,7 +5,6 @@
 
 # Rust Cargo
 */target/
-*/Cargo.lock
 
 # watched triggers
 .trigger

@@ -98,12 +98,12 @@ enum FSC {
     WindowActions,
     DesktopSwitch,
     KbdPointer,
+    WinDusky,
 
     WheelArrows,
     WheelDiff,
 
     GamingOG,
-
 }
 
 impl FSC {
@@ -554,26 +554,43 @@ fn setup_l2 (k:KR) {
     /// action-fn generator type (e.g. to specify for various sel/del/word/fast modes for various l2-keys)
     type AFG = fn(Key) -> AF ;
 
-    fn setup_l2_key (k:KR, key:Key, l2k:Key, dk:Key, wafg:AFG, fafg:AFG, del_via_sel:bool) {
+    #[allow (clippy::too_many_arguments)]
+    fn setup_l2_key ( k:KR, key:Key, l2k:Key, dk:Key, msF_fg:Option<AFG>, msR_fg:Option<AFG>,
+                      del_via_sel:bool, col_mode:bool, msD_msF:bool, msE_msF:bool
+    ) {
 
-        // register nav actions for normal-nav, word-nav, and fast-nav modes
-        k.cm .add_combo ( cg().k(key).m(caps),         ag().k(l2k) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(msF),  ag().af (wafg(l2k)) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(msR),  ag().af (fafg(l2k)) );
-
+        // we'll register nav actions for normal-nav, word-nav, and fast-nav modes
         // selection actions are via wrapping those with shift press-release
-        k.cm .add_combo ( cg().k(key).m(caps).s(msE),         ag().k(l2k).m(shift) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msF),  ag().af (wafg(l2k)) .m(shift) );
+        k.cm .add_combo ( cg().k(key).m(caps),         ag().k(l2k) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(msE),  ag().k(l2k).m(shift) );
 
-        // and since we often seem to want to do these right after col-mode (caps-e-e), we'll support that too
-        // (for the subset that these col-mode actions make sense)
-        if l2k == ExtLeft || l2k == ExtRight || l2k == ExtHome || l2k == ExtEnd {
-            k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl),         ag().k(l2k).m(shift) );
-            k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl).s(msF),  ag().af (wafg(l2k)) .m(shift) );
+        // and since we often seem to want to do these right after col-mode (caps-e-e), we'll support that if specified
+        if col_mode {
+            k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl),   ag().k(l2k).m(shift) );
         }
 
-        //k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msR),  ag().af (fafg(l2k)) .m(shift) );
-        // ^^ we'd rather keep this for other stuff than this 2x selection which basically never gets used
+        // we setup msF actions as word-nav
+        if let Some(msF_fg) = msF_fg {
+            k.cm .add_combo ( cg().k(key).m(caps).s(msF),   ag().af (msF_fg(l2k)) );
+            // and with msE layer with shift for word-sel (if specified)
+            if msE_msF {
+                k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msF),  ag().af (msF_fg(l2k)) .m(shift) );
+                if col_mode {
+                    k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl).s(msF),   ag().af (msF_fg(l2k)) .m(shift) );
+                }
+            }
+        }
+        // we'll also treat msR actions (if specified) as double-speed nav
+        if let Some(msR_fg) = msR_fg {
+            k.cm .add_combo ( cg().k(key).m(caps).s(msR),  ag().af (msR_fg(l2k)) );
+            //if msE_msR {
+            //    k.cm .add_combo ( cg().k(key).m(caps).s(msE).s(msR),  ag().af (msR_fg(l2k)) .m(shift) );
+            //    if col_mode {
+            //        k.cm .add_combo ( cg().k(key).m(caps).s(msE_dbl).s(msR),  ag().af (msR_fg(l2k)) .m(shift) );
+            //    }
+            //}
+            //// ^^ meh, these 2x selection are almost never used .. we'd rather keep the combos free for other uses!
+        }
 
         // delete actions are dependent on whether the delete can be done directly or has to be done via selection then delete
         fn del_sel_afg (del_key:Key, nav_af:AF) -> AF {
@@ -582,18 +599,29 @@ fn setup_l2 (k:KR) {
                 //press_release(del_key);
                 thread::spawn ( move || { thread::sleep (Duration::from_millis(20)); del_key.press_release(); } );
         } ) }
-        let (da, dwa, _dfa) = if del_via_sel {
-            // if deleting via selection, we wrap the del-sel action around the normal nav actions
-            ( del_sel_afg(dk,base_action(l2k)),  del_sel_afg(dk,wafg(l2k)),  del_sel_afg(dk,fafg(l2k)) )
-        } else {
-            // and for direct deletes, we perform the nav-eqv action but with the specified delete-key
-            ( base_action(dk),  ctrl_action(dk),  fast_action(dk) )
-        };
-        k.cm .add_combo ( cg().k(key).m(caps).s(msD),         ag().af(da ) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(msD).s(msF),  ag().af(dwa) );
 
-        //k.cm .add_combo ( cg().k(key).m(caps).s(msD).s(msR),  ag().af(dfa) );
-        // ^^ again, the 2x delete is pointless, we'd rather free it up for other uses
+        // if deleting via selection, we wrap the del-sel action around the normal nav actions
+        // and for direct deletes, we perform the nav-eqv action but with the specified delete-key
+        // (note that col mode is specific to E/Sel and isnt relevant to layer with D/Del)
+
+        let da = if del_via_sel { del_sel_afg (dk, base_action(l2k)) } else { base_action(dk) };
+        k.cm .add_combo ( cg().k(key).m(caps).s(msD),   ag().af(da ) );
+
+        if let Some(msF_fg) = msF_fg {
+            let dwa = if del_via_sel { del_sel_afg (dk, msF_fg(l2k)) } else { ctrl_action(dk) };
+            if msD_msF {
+                k.cm .add_combo ( cg().k(key).m(caps).s(msD).s(msF),   ag().af(dwa) );
+            }
+        }
+
+        //if let Some(msR_fg) = msR_fg {
+        //    let dfa = if del_via_sel { del_sel_afg (dk, msR_fg(l2k)) } else { fast_action(dk) };
+        //    if msD_msR {
+        //        k.cm .add_combo ( cg().k(key).m(caps).s(msD).s(msR),   ag().af(dfa) );
+        //    }
+        //}
+        //// ^^ meh, we'd rather keep these combos free than having pointless combos for 2x-deletes
+
 
         // additionally, we'll overlay qks1 -> ctrl, and msE -> shift on l2 keys (for ergonomics while holding caps down)
         // (shift is on msE instead of qks2, not just coz E is for sel elsewhere, but also 2wsx issues prevent qks1+qks2 layering)
@@ -613,15 +641,24 @@ fn setup_l2 (k:KR) {
 
     }
 
+    type OAFG = Option<AFG>;
+    let (na, ba, ca, fa): (OAFG,OAFG,OAFG,OAFG) = (None, Some(base_action), Some(ctrl_action), Some(fast_action));
+
     // filling out l2/l3 actions
-    setup_l2_key ( k,  J,     ExtLeft,   Backspace,   ctrl_action,   fast_action,   false );
-    setup_l2_key ( k,  K,     ExtRight,  ExtDelete,   ctrl_action,   fast_action,   false );
-    setup_l2_key ( k,  I,     ExtUp,     Backspace,   fast_action,   fast_action,   true  );
-    setup_l2_key ( k,  Comma, ExtDown,   ExtDelete,   fast_action,   fast_action,   true  );
-    setup_l2_key ( k,  H,     ExtHome,   Backspace,   base_action,   base_action,   true  );
-    setup_l2_key ( k,  L,     ExtEnd,    ExtDelete,   base_action,   base_action,   true  );
-    setup_l2_key ( k,  U,     ExtPgUp,   Backspace,   base_action,   base_action,   true  );
-    setup_l2_key ( k,  M,     ExtPgDn,   ExtDelete,   base_action,   base_action,   true  );
+    // ..              key    l2-key     del-key      msF  msR     DvS     Col      DF     EF
+    setup_l2_key ( k,  J,     ExtLeft,   Backspace,   ca,   fa,  false,   true,   true,  true );
+    setup_l2_key ( k,  K,     ExtRight,  ExtDelete,   ca,   fa,  false,   true,   true,  true );
+    setup_l2_key ( k,  I,     ExtUp,     Backspace,   fa,   fa,   true,  false,  false,  true );
+    setup_l2_key ( k,  Comma, ExtDown,   ExtDelete,   fa,   fa,   true,  false,  false,  true );
+
+    // for [Home, End], we'll do base actions for both msF/msR, and enable col mode operation
+    // and for [PgUp, PgDn], we'd rather do no msF/msR (fast) actions and instead keep them free for other use
+    // ..              key    l2-key     del-key      msF  msR     DvS     Col      DF      EF
+    setup_l2_key ( k,  H,     ExtHome,   Backspace,   ba,   ba,   true,   true,   true,   true );
+    setup_l2_key ( k,  L,     ExtEnd,    ExtDelete,   ba,   ba,   true,   true,   true,   true );
+    setup_l2_key ( k,  U,     ExtPgUp,   Backspace,   na,   na,   true,  false,  false,  false );
+    setup_l2_key ( k,  M,     ExtPgDn,   ExtDelete,   na,   na,   true,  false,  false,  false );
+
 
     // and finally to round out the l2 keys, we'll add some non-nav word actions on Space key in (msE/msD/msF)-modes
     // (word selection action is a composite of move-to-word-end then select-to-word-beginning)
@@ -1172,16 +1209,13 @@ fn setup_win_key_combos (k:KR) {
     // win-i should start irfanview
     k.cm .add_combo ( cg().k(I).no_rpt().m(lwin),  ag().af(action(start_irfanview)) );
 
-    // win-n can open browser window
-    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af (action (start_chrome)) );
-    //k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),  ag().af (action (start_firefox)) );
-
-    // and caps-win-n can then open an incognito browser window
-    k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af(action(start_chrome_incognito)) );
-    //k.cm .add_combo ( cg().k(N).no_rpt().m(caps).m(lwin),  ag().af(action(start_firefox_incognito)) );
+    // given muscle memory confusions, we'll just use both win-n, caps-win-n for incognito browser, and win-b for regular
+    k.cm .add_combo ( cg().k(B).no_rpt().m(lwin),          ag().af (action (start_chrome)) );
+    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),          ag().af(action(start_chrome_incognito)) );
+    k.cm .add_combo ( cg().k(N).no_rpt().m(lwin).m(caps),  ag().af(action(start_chrome_incognito)) );
 
     // win-caps-b for bard .. hah we'll see
-    //k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
+    //k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_pIHH1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
     // and win-caps-c for claude
     //k.cm .add_combo ( cg().k(C).no_rpt().m(lwin).m(caps),  ag().af (action_p1 (start_chrome_app, "fmpnliohjhemenmnlpbfagaolkdacoja")) );
 
@@ -1504,6 +1538,10 @@ fn setup_misc_standalone_combos (k:KR) {
     // we do shift-del often enough that we'll set caps-shift-tilde to do shift-del
     k.cm .add_combo ( cg().k(Backquote).m(caps).m(lshift),  ag().k(ExtDelete).m(shift) );
 
+    // getting ring-finger pain from too many '-' bullets and '_' underscores .. gonna try something for now
+    k.cm .add_combo ( cg().k(M).m(caps).s(msF),  ag().k(Minus) );
+    k.cm .add_combo ( cg().k(U).m(caps).s(msF),  ag().k(Minus).m(shift) );
+
     //k.cm .add_combo ( cg().k(Backquote).m(lalt),    ag().k(Backquote) );
     // ^^ we'll set alt-tilde to give ctrl-tab instead as more ergo alternative, and tying in w alt-tab
     k.cm .add_combo ( cg().k(Backquote).m(lalt),  ag().k(Tab).m(lctrl) );
@@ -1525,8 +1563,11 @@ fn setup_misc_standalone_combos (k:KR) {
     k.cm .add_combo ( cg().k(G).m(caps_dbl),  gamgee_ag.clone() );
     // but we'll also support caps-gg for easier ergonomics (where ctrl-g on first press is harmless)
     k.cm .add_combo ( cg().k(G).dbl().m(caps),  gamgee_ag.clone() );
-    // and we'll add caps-d-g too going by what was done for qbar invocation (cc-a, c-aa, c-d-a)
-    k.cm .add_combo ( cg().k(G).m(caps).s(msD),  gamgee_ag.clone() );
+    // and we'll add caps-d-g too going by what was done for qbar invocation (cc-a, c-aa, c-q-a)
+    k.cm .add_combo ( cg().k(G).m(caps).s(qks),  gamgee_ag.clone() );
+
+    // caps-F-B can do WinDusky toggle (via win-alt-I) .. just wanted something simpler during dev
+    //k.cm .add_combo ( cg().k(B).m(caps).s(msF),  ag().k(I).m(win).m(alt) );
 
 }
 
@@ -1832,6 +1873,7 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     let switche_direct__music     =  SwitchePipeCmd::sw_exe_af (&MUSIC_EXES);
     let switche_direct__calc      =  SwitchePipeCmd::sw_exe_af (&CALC_EXES);
     let switche_direct__notepadpp =  SwitchePipeCmd::sw_exe_af (&["notepad++.exe".into()]);
+    let switche_direct__explorer  =  SwitchePipeCmd::sw_exe_af (&["explorer.exe".into()]);
 
     //let switche_direct__claude        = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Claude", true);
     let switche_direct__tabs_outliner   = SwitchePipeCmd::sw_exe_title_af ("chrome.exe", "Tabs Outliner", false);
@@ -1867,6 +1909,7 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     setup_direct_switch ( M,      & switche_direct__music           );   // M -> winamp (music)
     setup_direct_switch ( C,      & switche_direct__calc            );   // C -> Calculator
     setup_direct_switch ( N,      & switche_direct__notepadpp       );   // N -> Notepad++
+    setup_direct_switch ( E,      & switche_direct__explorer        );   // E -> Explorer
     setup_direct_switch ( T,      & switche_direct__tabs_outliner   );   // O -> TabsOutliner (chrome)
     setup_direct_switch ( K,      & switche_direct__kbd_evs_printer );   // K -> kbd-events-printer (chrome)
 
@@ -2165,6 +2208,25 @@ fn setup_wheel_arrows_lfsc (k:KR) {
 
 }
 
+fn setup_win_dusky_sfsc (k:KR) {
+    // fsc : caps-f-b --> toggle dusky .. j/k cycle through effects
+    let fsc = FSC::WinDusky.ch();
+    k.cm .register_combo_sticky_first_stroke ( fsc,  cg() .k(B).no_rpt() .m(caps).s(msF) );
+
+    // we'll make the fsc trigger itself do the toggling as well
+    //k.cm .add_combo ( cg().k(B).m(caps).s(msF),  ag().k(I).m(win).m(alt) );
+    // ^^ nah this makes us be unable to cycle w/o toggling .. we'd rather press again to toggle
+
+    // and lets have that (along with I for invert) do the same during fsc too
+    k.cm .add_combo ( cg().k(B).m(caps).fsc(fsc),  ag().k(I).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(I).m(caps).fsc(fsc),  ag().k(I).m(win).m(alt) );
+
+    // j/k can cycle effects fwd/bkwd
+    k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  ag().k(Comma ).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  ag().k(Period).m(win).m(alt) );
+
+}
+
 
 
 fn setup_ide_diff_nav_lfsc (k:KR) {
@@ -2223,10 +2285,12 @@ fn setup_ide_diff_nav_lfsc (k:KR) {
 
 
 fn setup_IDE_combos (k:KR) {
+
     // helper fn for sequential actions
     fn compose_seq_actions (af_a:AF, af_b:AF) -> AF {
         Arc::new ( move || { af_a(); af_b(); } )
     }
+
     /// Setting up two-stroke-combos for IDE use .. (not krusty two-stroke combos .. IDEs internal two-stroke combos)
     // sadly though, intellij doesnt not suppress default action on the second-stroke-hotkey even when it follows the first-stroke ..
     // .. meaning, its only useful if neither the first-stroke, nor the second-stroke are ever used as direct hotkeys ..
@@ -2281,10 +2345,18 @@ fn setup_IDE_combos (k:KR) {
     let move_stmt_up    =  ag().k(I    ).m(alt).m(ctrl).m(shift);
     let move_stmt_dn    =  ag().k(Comma).m(alt).m(ctrl).m(shift);
 
+    let move_code_elem_left  = ag().k(J).m(alt).m(ctrl).m(shift);
+    let move_code_elem_right = ag().k(K).m(alt).m(ctrl).m(shift);
+
     let show_file_git_diff   =  ag().k(D).m(ctrl).m(alt).m(shift);
     let toggle_diff_preview  =  ag().af (ide_two_stroke_combo (F13, F18));
 
     let toggle_statusbar  =  ag().af (ide_two_stroke_combo (F13, F21));
+    let optimize_imports  =  ag().af (ide_two_stroke_combo (F13, F22));
+    let copilot_chat      =  ag().af (ide_two_stroke_combo (F13, F23));
+    let gemini_chat       =  ag().af (ide_two_stroke_combo (F13, F24));
+
+    let gemini_generate  =  ag().k(G).m(alt).m(ctrl).m(shift);
 
     //let tab_nav_left  = ag().k(PageUp  ).m(ctrl);
     //let tab_nav_right = ag().k(PageDown).m(ctrl);
@@ -2351,6 +2423,9 @@ fn setup_IDE_combos (k:KR) {
     k.cm .add_combo ( cg().k(I    ).m(caps).s(msE).s(msR),  move_line_up );
     k.cm .add_combo ( cg().k(Comma).m(caps).s(msE).s(msR),  move_line_dn );
 
+    k.cm .add_combo ( cg().k(J).m(caps).s(msE).s(msR),  move_code_elem_left  );
+    k.cm .add_combo ( cg().k(K).m(caps).s(msE).s(msR),  move_code_elem_right );
+
     k.cm .add_combo ( cg().k(I    ).m(caps).s(qks3).s(msR),  move_stmt_up );
     k.cm .add_combo ( cg().k(Comma).m(caps).s(qks3).s(msR),  move_stmt_dn );
 
@@ -2365,13 +2440,20 @@ fn setup_IDE_combos (k:KR) {
     k.cm .add_combo ( cg().k(Numrow_8).m(caps).s(msE),  ag().k(Insert) );         // insert-mode toggle
     k.cm .add_combo ( cg().k(Slash   ).m(caps).s(msE),  ag().k(Slash).m(ctrl) );  // block-comment
 
+    k.cm .add_combo ( cg().k(M).m(caps).s(msR),  gemini_chat );
+    k.cm .add_combo ( cg().k(U).m(caps).s(msR),  copilot_chat );
+    k.cm .add_combo ( cg().k(O).m(caps).s(msR),  optimize_imports );
+
+    k.cm .add_combo ( cg().k(N).m(caps).s(msR),  gemini_generate );
 
 
     // w github copilot, we set ctrl-right (via caps-f-k) picks up the next word, which works nicely w regular l2 ..
     // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
+    //
     // so instead, we'll layer that on lalt instead (and use alt-end for activation instead)
     //k.cm .add_combo ( cg().k(K).m(caps).m(lalt).c(intellij_fgnd()),  ag().k(End).m(alt) );
     // ^^ nah, that conflicts w the natural l2 alt-left, alt-right, which we also make use of in IDE already for last loc nav
+    //
     // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via ctrl-alt-end)
     //k.cm .add_combo ( cg().k(L).m(caps).m(lalt).c(intellij_fgnd()),  ag().k(End).m(alt).m(ctrl) );
     //k.cm .add_combo ( cg().k(L).m(caps).m(lalt),  ag().k(Tab).mkg_nw() ); // no guard as alt is down, but w caps, so itll be inactive
@@ -2476,8 +2558,8 @@ fn setup_IDE_combos (k:KR) {
             win_get_ide_dialog_hwnds() .into_iter() .for_each ( |hwnd| { win_close (hwnd) } );
         } );
     }
-    k.cm .add_combo ( cg().k(Numrow_0).m(lalt)        .c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_toggle)) );
-    k.cm .add_combo ( cg().k(Numrow_0).m(lalt).m(caps).c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_clear )) );
+    k.cm .add_combo ( cg().k(Numrow_9).m(lalt)        .c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_clear )) );
+    k.cm .add_combo ( cg().k(Numrow_9).m(lalt).m(caps).c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_toggle)) );
 
 }
 
@@ -2855,6 +2937,8 @@ pub fn setup_krusty_board (k:KR) {
     setup_kbd_pointer_sfsc (k);
 
     setup_wheel_arrows_lfsc (k);
+
+    setup_win_dusky_sfsc (k);
 
     setup_ide_diff_nav_lfsc (k);
 

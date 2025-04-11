@@ -1,23 +1,31 @@
+#![allow(non_camel_case_types)]
 
 use strum_macros::EnumIter;
 
 
 /// Enum for all the Keyboard Keys
-#[allow(non_camel_case_types)]
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 pub enum KbdKey {
+
     MouseLeftBtn,
     MouseRightBtn,
+    Cancel,
     MouseMiddleBtn,
     MouseX1Btn,
     MouseX2Btn,
+
     Backspace,
     Tab,
+
     Clear,
     Enter,
+
     Shift,
     Ctrl,
     Alt,
+    Pause,
+    CapsLock,
+
     Escape,
     Space,
     PageUp,
@@ -28,8 +36,15 @@ pub enum KbdKey {
     Up,
     Right,
     Down,
+
+    Select,
+    Print,
+    Execute,
+    Snapshot,
     Insert,
     Delete,
+    Help,
+
     Numrow_0,
     Numrow_1,
     Numrow_2,
@@ -40,6 +55,7 @@ pub enum KbdKey {
     Numrow_7,
     Numrow_8,
     Numrow_9,
+
     A,
     B,
     C,
@@ -66,10 +82,12 @@ pub enum KbdKey {
     X,
     Y,
     Z,
+
     LWin,
     RWin,
     Apps,
     Sleep,
+
     Numpad_0,
     Numpad_1,
     Numpad_2,
@@ -80,12 +98,14 @@ pub enum KbdKey {
     Numpad_7,
     Numpad_8,
     Numpad_9,
+
     Numpad_Multiply,
     Numpad_Add,
     Numpad_Separator,
     Numpad_Minus,
     Numpad_Decimal,
     Numpad_Divide,
+
     F1,
     F2,
     F3,
@@ -110,18 +130,25 @@ pub enum KbdKey {
     F22,
     F23,
     F24,
+
     NumLock,
     ScrollLock,
-    CapsLock,
+
     LShift,
     RShift,
     LCtrl,
     RCtrl,
     LAlt,
     RAlt,
+
     BrowserBack,
     BrowserForward,
     BrowserRefresh,
+    BrowserStop,
+    BrowserSearch,
+    BrowserFavorites,
+    BrowserHome,
+
     VolumeMute,
     VolumeDown,
     VolumeUp,
@@ -129,6 +156,11 @@ pub enum KbdKey {
     MediaPrevTrack,
     MediaStop,
     MediaPlayPause,
+    MediaLaunchMail,
+    MediaLaunchSelect,
+    MediaLaunchApp1,
+    MediaLaunchApp2,
+
     Semicolon,
     Equal,
     Comma,
@@ -140,6 +172,16 @@ pub enum KbdKey {
     RBracket,
     Backslash,
     Quote,
+
+    Attn,
+    CrSel,
+    ExSel,
+    EraseEOF,
+    Play,
+    Zoom,
+    NoName,
+    Pa1,
+    OemClear,
 
     // the following are extended keys (with e0 prefixed scan code) .. supposed to work regardless of Shift state
     // todo: these really shouldnt be here, as these are scan-codes, not v-codes .. we gotta split these up
@@ -161,35 +203,55 @@ pub enum KbdKey {
 
 
 
+
+
 impl From<KbdKey> for u64 {
-    // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes?redirectedfrom=MSDN
+    // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
     fn from(key: KbdKey) -> u64 {
         use self::KbdKey::*;
+
         match key {
-            MouseLeftBtn => 0x01,
-            MouseRightBtn => 0x02,
+
+            MouseLeftBtn   => 0x01,
+            MouseRightBtn  => 0x02,
+            Cancel         => 0x03,
             MouseMiddleBtn => 0x04,
-            MouseX1Btn => 0x05,
-            MouseX2Btn => 0x06,
+            MouseX1Btn     => 0x05,
+            MouseX2Btn     => 0x06,
+
             Backspace => 0x08,
-            Tab => 0x09,
+            Tab       => 0x09,
+
             Clear => 0x0C,
             Enter => 0x0D,
-            Shift => 0x10,
-            Ctrl => 0x11,
-            Alt => 0x12,
-            Escape => 0x1B,
-            Space => 0x20,
-            PageUp => 0x21,
+
+            Shift    => 0x10,
+            Ctrl     => 0x11,
+            Alt      => 0x12,
+            Pause    => 0x13,
+            CapsLock => 0x14,
+
+            // several IME keys around here
+
+            Escape   => 0x1B,
+            Space    => 0x20,
+            PageUp   => 0x21,
             PageDown => 0x22,
-            End => 0x23,
-            Home => 0x24,
-            Left => 0x25,
-            Up => 0x26,
-            Right => 0x27,
-            Down => 0x28,
-            Insert => 0x2D,
-            Delete => 0x2E,
+            End      => 0x23,
+            Home     => 0x24,
+            Left     => 0x25,
+            Up       => 0x26,
+            Right    => 0x27,
+            Down     => 0x28,
+
+            Select   => 0x29,
+            Print    => 0x2A,
+            Execute  => 0x2B,
+            Snapshot => 0x2C,
+            Insert   => 0x2D,
+            Delete   => 0x2E,
+            Help     => 0x2F,
+
             Numrow_0 => 0x30,
             Numrow_1 => 0x31,
             Numrow_2 => 0x32,
@@ -200,6 +262,7 @@ impl From<KbdKey> for u64 {
             Numrow_7 => 0x37,
             Numrow_8 => 0x38,
             Numrow_9 => 0x39,
+
             A => 0x41,
             B => 0x42,
             C => 0x43,
@@ -226,10 +289,12 @@ impl From<KbdKey> for u64 {
             X => 0x58,
             Y => 0x59,
             Z => 0x5A,
-            LWin => 0x5B,
-            RWin => 0x5C,
-            Apps => 0x5D,
+
+            LWin  => 0x5B,
+            RWin  => 0x5C,
+            Apps  => 0x5D,
             Sleep => 0x5F,
+
             Numpad_0 => 0x60,
             Numpad_1 => 0x61,
             Numpad_2 => 0x62,
@@ -240,12 +305,14 @@ impl From<KbdKey> for u64 {
             Numpad_7 => 0x67,
             Numpad_8 => 0x68,
             Numpad_9 => 0x69,
-            Numpad_Multiply => 0x6A,
-            Numpad_Add => 0x6B,
+
+            Numpad_Multiply  => 0x6A,
+            Numpad_Add       => 0x6B,
             Numpad_Separator => 0x6C,
-            Numpad_Minus => 0x6D,
-            Numpad_Decimal => 0x6E,
-            Numpad_Divide => 0x6F,
+            Numpad_Minus     => 0x6D,
+            Numpad_Decimal   => 0x6E,
+            Numpad_Divide    => 0x6F,
+
             F1 => 0x70,
             F2 => 0x71,
             F3 => 0x72,
@@ -270,74 +337,109 @@ impl From<KbdKey> for u64 {
             F22 => 0x85,
             F23 => 0x86,
             F24 => 0x87,
-            NumLock => 0x90,
+
+            NumLock    => 0x90,
             ScrollLock => 0x91,
-            CapsLock => 0x14,
+
             LShift => 0xA0,
             RShift => 0xA1,
-            LCtrl => 0xA2,
-            RCtrl => 0xA3,
-            LAlt => 0xA4,
-            RAlt => 0xA5,
-            BrowserBack => 0xA6,
-            BrowserForward => 0xA7,
-            BrowserRefresh => 0xA8,
-            VolumeMute => 0xAD,
-            VolumeDown => 0xAE,
-            VolumeUp => 0xAF,
-            MediaNextTrack => 0xB0,
-            MediaPrevTrack => 0xB1,
-            MediaStop => 0xB2,
-            MediaPlayPause => 0xB3,
-            Semicolon => 0xBA,
-            Equal => 0xBB,
-            Comma => 0xBC,
-            Minus => 0xBD,
-            Period => 0xBE,
-            Slash => 0xBF,
-            Backquote => 0xC0,
-            LBracket => 0xDB,
-            Backslash => 0xDC,
-            RBracket => 0xDD,
-            Quote => 0xDE,
+            LCtrl  => 0xA2,
+            RCtrl  => 0xA3,
+            LAlt   => 0xA4,
+            RAlt   => 0xA5,
 
-            ExtHome => 0xE047,
-            ExtUp => 0xE048,
-            ExtPgUp => 0xE049,
-            ExtLeft => 0xE04B,
-            ExtRight => 0xE04D,
-            ExtEnd => 0xE04F,
-            ExtDown => 0xE050,
-            ExtPgDn => 0xE051,
+            BrowserBack      => 0xA6,
+            BrowserForward   => 0xA7,
+            BrowserRefresh   => 0xA8,
+            BrowserStop      => 0xA9,
+            BrowserSearch    => 0xAA,
+            BrowserFavorites => 0xAB,
+            BrowserHome      => 0xAC,
+
+            VolumeMute        => 0xAD,
+            VolumeDown        => 0xAE,
+            VolumeUp          => 0xAF,
+            MediaNextTrack    => 0xB0,
+            MediaPrevTrack    => 0xB1,
+            MediaStop         => 0xB2,
+            MediaPlayPause    => 0xB3,
+            MediaLaunchMail   => 0xB4,
+            MediaLaunchSelect => 0xB5,
+            MediaLaunchApp1   => 0xB6,
+            MediaLaunchApp2   => 0xB7,
+
+            Semicolon  => 0xBA,
+            Equal      => 0xBB,
+            Comma      => 0xBC,
+            Minus      => 0xBD,
+            Period     => 0xBE,
+            Slash      => 0xBF,
+            Backquote  => 0xC0,
+            LBracket   => 0xDB,
+            Backslash  => 0xDC,
+            RBracket   => 0xDD,
+            Quote      => 0xDE,
+
+            Attn     => 0xF6,
+            CrSel    => 0xF7,
+            ExSel    => 0xF8,
+            EraseEOF => 0xF9,
+            Play     => 0xFA,
+            Zoom     => 0xFB,
+            NoName   => 0xFC,
+            Pa1      => 0xFD,
+            OemClear => 0xFE,
+
+            ExtHome   => 0xE047,
+            ExtUp     => 0xE048,
+            ExtPgUp   => 0xE049,
+            ExtLeft   => 0xE04B,
+            ExtRight  => 0xE04D,
+            ExtEnd    => 0xE04F,
+            ExtDown   => 0xE050,
+            ExtPgDn   => 0xE051,
             ExtInsert => 0xE052,
             ExtDelete => 0xE053,
 
-            //RAlt => 0xE038,
-            //RCtrl => 0xE01D,
+            //RCtrl  => 0xE01D,
             //RShift => 0xE036,
+            //RAlt   => 0xE038,
 
             OtherKey(code) => code,
         }
     }
 }
 
+
+
+
+
 impl From<u64> for KbdKey {
     // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes?redirectedfrom=MSDN
+
     fn from(code: u64) -> KbdKey {
         use self::KbdKey::*;
+
         match code {
+
             0x01 => MouseLeftBtn,
             0x02 => MouseRightBtn,
             0x04 => MouseMiddleBtn,
             0x05 => MouseX1Btn,
             0x06 => MouseX2Btn,
+
             0x08 => Backspace,
             0x09 => Tab,
+
             0x0C => Clear,
             0x0D => Enter,
+
             0x10 => Shift,
             0x11 => Ctrl,
             0x12 => Alt,
+            0x13 => Pause,
+            0x14 => CapsLock,
+
             0x1B => Escape,
             0x20 => Space,
             0x21 => PageUp,
@@ -348,8 +450,14 @@ impl From<u64> for KbdKey {
             0x26 => Up,
             0x27 => Right,
             0x28 => Down,
+
+            0x29 => Select,
+            0x2A => Print,
+            0x2B => Execute,
             0x2D => Insert,
             0x2E => Delete,
+            0x2F => Help,
+
             0x30 => Numrow_0,
             0x31 => Numrow_1,
             0x32 => Numrow_2,
@@ -360,6 +468,7 @@ impl From<u64> for KbdKey {
             0x37 => Numrow_7,
             0x38 => Numrow_8,
             0x39 => Numrow_9,
+
             0x41 => A,
             0x42 => B,
             0x43 => C,
@@ -386,10 +495,12 @@ impl From<u64> for KbdKey {
             0x58 => X,
             0x59 => Y,
             0x5A => Z,
+
             0x5B => LWin,
             0x5C => RWin,
             0x5D => Apps,
             0x5F => Sleep,
+
             0x60 => Numpad_0,
             0x61 => Numpad_1,
             0x62 => Numpad_2,
@@ -400,12 +511,14 @@ impl From<u64> for KbdKey {
             0x67 => Numpad_7,
             0x68 => Numpad_8,
             0x69 => Numpad_9,
+
             0x6A => Numpad_Multiply,
             0x6B => Numpad_Add,
             0x6C => Numpad_Separator,
             0x6D => Numpad_Minus,
             0x6E => Numpad_Decimal,
             0x6F => Numpad_Divide,
+
             0x70 => F1,
             0x71 => F2,
             0x72 => F3,
@@ -430,18 +543,25 @@ impl From<u64> for KbdKey {
             0x85 => F22,
             0x86 => F23,
             0x87 => F24,
+
             0x90 => NumLock,
             0x91 => ScrollLock,
-            0x14 => CapsLock,
+
             0xA0 => LShift,
             0xA1 => RShift,
             0xA2 => LCtrl,
             0xA3 => RCtrl,
             0xA4 => LAlt,
             0xA5 => RAlt,
+
             0xA6 => BrowserBack,
             0xA7 => BrowserForward,
             0xA8 => BrowserRefresh,
+            0xA9 => BrowserStop,
+            0xAA => BrowserSearch,
+            0xAB => BrowserFavorites,
+            0xAC => BrowserHome,
+
             0xAD => VolumeMute,
             0xAE => VolumeDown,
             0xAF => VolumeUp,
@@ -449,6 +569,11 @@ impl From<u64> for KbdKey {
             0xB1 => MediaPrevTrack,
             0xB2 => MediaStop,
             0xB3 => MediaPlayPause,
+            0xB4 => MediaLaunchMail,
+            0xB5 => MediaLaunchSelect,
+            0xB6 => MediaLaunchApp1,
+            0xB7 => MediaLaunchApp2,
+
             0xBA => Semicolon,
             0xBB => Equal,
             0xBC => Comma,
@@ -460,6 +585,16 @@ impl From<u64> for KbdKey {
             0xDC => Backslash,
             0xDD => RBracket,
             0xDE => Quote,
+
+            0xF6 => Attn,
+            0xF7 => CrSel,
+            0xF8 => ExSel,
+            0xF9 => EraseEOF,
+            0xFA => Play,
+            0xFB => Zoom,
+            0xFC => NoName,
+            0xFD => Pa1,
+            0xFE => OemClear,
 
             0xE047 => ExtHome,
             0xE048 => ExtUp,
@@ -487,10 +622,17 @@ impl From<u64> for KbdKey {
 }
 
 
+
+
+
 impl KbdKey {
+
+
     pub fn get_char(&self) -> Option<char> {
         use self::KbdKey::*;
+
         match self {
+
             A => Some('a'),
             B => Some('b'),
             C => Some('c'),
@@ -517,6 +659,7 @@ impl KbdKey {
             X => Some('x'),
             Y => Some('y'),
             Z => Some('z'),
+
             Numpad_0 => Some('0'),
             Numpad_1 => Some('1'),
             Numpad_2 => Some('2'),
@@ -537,24 +680,31 @@ impl KbdKey {
             Numrow_7 => Some('7'),
             Numrow_8 => Some('8'),
             Numrow_9 => Some('9'),
+
             Backslash => Some('\\'),
-            Slash => Some('/'),
-            Comma => Some(','),
-            Period => Some('.'),
-            Minus => Some('-'),
-            Quote => Some('"'),
+            Slash     => Some('/'),
+            Comma     => Some(','),
+            Period    => Some('.'),
+            Minus     => Some('-'),
+            Quote     => Some('"'),
             Semicolon => Some(';'),
-            LBracket => Some('['),
-            RBracket => Some(']'),
-            Equal => Some('='),
+            LBracket  => Some('['),
+            RBracket  => Some(']'),
+            Equal     => Some('='),
+
             _ => None,
         }
     }
 
+
+
     pub fn from_char(c: char) -> Option<KbdKey> {
         use self::KbdKey::*;
+
         match c {
+
             ' ' => Some(Space),
+
             'A' | 'a' => Some(A),
             'B' | 'b' => Some(B),
             'C' | 'c' => Some(C),
@@ -581,6 +731,7 @@ impl KbdKey {
             'X' | 'x' => Some(X),
             'Y' | 'y' => Some(Y),
             'Z' | 'z' => Some(Z),
+
             '0' | ')' => Some(Numrow_0),
             '1' | '!' => Some(Numrow_1),
             '2' | '@' => Some(Numrow_2),
@@ -591,6 +742,7 @@ impl KbdKey {
             '7' | '&' => Some(Numrow_7),
             '8' | '*' => Some(Numrow_8),
             '9' | '(' => Some(Numrow_9),
+
             '`' | '~' => Some(Backquote),
             '/' | '?' => Some(Slash),
             ',' | '<' => Some(Comma),
@@ -600,8 +752,10 @@ impl KbdKey {
             '[' | '{' => Some(LBracket),
             ']' | '}' => Some(RBracket),
             '=' | '+' => Some(Equal),
+
             '\\' | '|' => Some(Backslash),
             '\'' | '"' => Some(Quote),
+
             _ => None,
         }
     }

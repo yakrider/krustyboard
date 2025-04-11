@@ -490,11 +490,12 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : Some (Label::new ("MinBack")),
         icon  : icons.min_back.clone(),
-        on_wheel_bkwd   : af_min_back.clone(),    // min-and-back
-        on_wheel_frwd   : af_min_back.clone(),    // min-and-back
-        on_press        : af_min_back.clone(),    // min-and-back
-        on_hover_start  : af_hov_start,           // mark to hide upon rbtn-rel
-        on_hover_end    : af_hov_end,             // un-mark hide upon rbtn-rel
+        on_press        : af_min_back.clone(),                    // min-and-back
+        on_rbtn_press   : ag().k(I     ).m(alt).m(win).gen_af(),  // dusky - toggle overlay
+        on_wheel_bkwd   : ag().k(Period).m(alt).m(win).gen_af(),  // dusky - next effect
+        on_wheel_frwd   : ag().k(Comma ).m(alt).m(win).gen_af(),  // dusky - prev effect
+        on_hover_start  : af_hov_start,                           // mark to hide upon rbtn-rel
+        on_hover_end    : af_hov_end,                             // un-mark hide upon rbtn-rel
         ..Default::default()
     };
     static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -589,10 +590,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     /// __** y-axis percent toggle for TradingView **__
     let cell = ActionCell {
         label : Some (Label::new("%").sz(18)),
-        icon  : None,
-        indicator: None,
-        on_wheel_bkwd: ag().k(P).m(lalt).gen_af(),
-        on_wheel_frwd: ag().k(P).m(lalt).gen_af(),
+        on_wheel_bkwd : ag().k(P).m(lalt).gen_af(),
+        on_wheel_frwd : ag().k(P).m(lalt).gen_af(),
+        on_press      : ag().k(P).m(lalt).gen_af(),
         ..Default::default()
     };
     static _tv_y_toggle : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -686,7 +686,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     );
     let label = "TradingView".into();
     let grid_sz = GridDims::new (3, 4);
-    let cur_pos =  Arc::new ( PointAtomic::new ( Point { x: 2500, y: 160 } ) );
+    let cur_pos =  Arc::new ( PointAtomic::new ( Point { x: 2500, y: 4 } ) );
     let trading_view = _trading_view.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
     } );
