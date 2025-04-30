@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -6,8 +5,7 @@ use serde_json;
 
 use windows::core::HSTRING;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
-use windows::Win32::Storage::FileSystem::{CreateFileW, WriteFile, FILE_GENERIC_WRITE, FILE_SHARE_WRITE, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES};
+use windows::Win32::Storage::FileSystem::{CreateFileW, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_WRITE, FILE_SHARE_WRITE, OPEN_EXISTING};
 
 use crate::AF;
 
@@ -53,7 +51,7 @@ impl SwitchePipeCmd {
 
         // we'll try and give away fgnd setting privileges
         // todo: here we'll give it up widely, but could limit it to only the sw process (but we'd have to find/query its pid first)
-        let _ = AllowSetForegroundWindow (ASFW_ANY);
+        crate::utils::win_allow_fgnd_all();
 
         // then we'll try and send the cmd
         let cmd_json = serde_json::to_string(&self).unwrap();

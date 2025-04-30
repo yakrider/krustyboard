@@ -361,12 +361,12 @@ impl CombosMap {
     // However, if any fsc-stage executed either a direct-match or wildcard-match, then the rest of the fsc stages are ignored
     // And similarly, within each fsc-stage itself, if any cond-combo execs, its wildcard search is also skipped
     //
-    fn process_combo_afs (&'static self, cvs:&Vec<ComboValue>, ev:&Event) -> ProcCVsResult {
+    fn process_combo_afs (&'static self, cvs:&Vec<ComboValue>, ev:&Event, fgnd:&FgndInfo) -> ProcCVsResult {
         let mut proc_res = ProcCVsResult::default();
         for cv in cvs {
             if let Some(cond) = cv.cond.as_ref() {
                 // all conditional combos that are satisfied can be run
-                if cond (self.ks, ev) {
+                if cond (self.ks, ev, fgnd) {
                     // but we should only mark cond-matched if we did actually exec a cond matched cv
                     proc_res.cond_execd |= self.exec_combo_value (cv, ev);
                     proc_res.combo_execd |= proc_res.cond_execd;
@@ -380,14 +380,14 @@ impl CombosMap {
     }
 
     // Exact Combo Matching : we try directly looking up a combo and executing it
-    fn try_proc_combo_afs (&'static self, combo:&Combo, ev:&Event) -> ProcCVsResult {
+    fn try_proc_combo_afs (&'static self, combo:&Combo, ev:&Event, fgnd:&FgndInfo) -> ProcCVsResult {
         //let pcm = self.combos_map.borrow();
         // ^^ the borrow would be fine too, but there's really no need for any guarding as we dont do any writes at runtime ..
         // .. hence we might as well directly read from the map and avoid the (minor) atomic borrow-check overhead
         let pcm  = unsafe { & *self.combos_map.as_ptr() };
         let mut proc_res = ProcCVsResult::default();
         if let Some(cvs) = pcm.get(combo) {
-            proc_res = self.process_combo_afs (cvs, ev);
+            proc_res = self.process_combo_afs (cvs, ev, fgnd);
         }
         proc_res
     }
@@ -401,7 +401,7 @@ impl CombosMap {
     // - so for wc proc, we check cur wc-map-key in wc-table, if found, we search through the wc combos under that wcmk for wc-match w cur combo
     // - then if we found a cur-combo matching wc-combo, we use its wc-stripped version to lookup the actual combos_map for the combo-values!
     //
-    fn try_proc_wildcard_combo_afs (&'static self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event) -> ProcCVsResult {
+    fn try_proc_wildcard_combo_afs (&'static self, wcmk:WcCombosMapKey, combo:&Combo, ev:&Event, fgnd:&FgndInfo) -> ProcCVsResult {
         let cwm = unsafe { & *self.wildcard_combos.as_ptr() };
         let mut proc_res = ProcCVsResult::default();
         if let Some(cs) = cwm.get(&wcmk) {    // get list of wildcard combos (if any) for this particular combo-maps-key
@@ -409,7 +409,7 @@ impl CombosMap {
                 // found a match in wc-combos table, now gotta lookup into actual combo table w its wc-stripped version as key
                 // (the wc-stripped-match != cur-combo below is because then we'd have already found/execd it earlier w/o wc-matching)
                 if *wcsc != *combo {
-                    let cur_proc_res = self.try_proc_combo_afs (wcsc, ev);
+                    let cur_proc_res = self.try_proc_combo_afs (wcsc, ev, fgnd);
                     proc_res.cond_execd  |= cur_proc_res.cond_execd;
                     proc_res.combo_execd |= cur_proc_res.combo_execd;
                 }
@@ -423,17 +423,17 @@ impl CombosMap {
     // - Next we'll try to match wildcard combos (for the same fsc state .. i.e [sticky, latched, no-fsc])
     // - Note that under any fsc category, wildcard-combos can run even after direct-match combos have been matched and ran
     // - However, if a conditional combo matched and was execd, then searching for wildcards is no longer performed!
-    fn try_proc_fsc_combo (&'static self, combo:&Combo, ev:&Event, fsc:ComboHash) -> bool {
+    fn try_proc_fsc_combo (&'static self, combo:&Combo, ev:&Event, fgnd:&FgndInfo, fsc:ComboHash) -> bool {
 
         let combo = Combo::gen_fsc_combo (combo, fsc);
-        let proc_res = self.try_proc_combo_afs (&combo, ev);
+        let proc_res = self.try_proc_combo_afs (&combo, ev, fgnd);
 
         // if we matched an executed a conditional combo, then we bail early
         if proc_res.cond_execd { return true }
 
         // otherwise, even if we did ran something non-conditional, we still let possible wildcard matches run
         let wcmk = WcCombosMapKey::new (combo.bmk, fsc);
-        let wc_proc_res = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev);
+        let wc_proc_res = self.try_proc_wildcard_combo_afs (wcmk, &combo, ev, fgnd);
 
         proc_res.combo_execd || wc_proc_res.combo_execd
     }
@@ -447,7 +447,8 @@ impl CombosMap {
 
         let combo = Combo::gen_cur_combo (bmk, self.ks);
 
-        //println! ("{:?}   {:?}",combo, ks.sticky_first_stroke.get());
+        // we'll also grab the cur fgnd info to pass along throughout the process
+        let fgnd = WinEventsListener::instance() .fgnd_info .read().unwrap() .clone();
 
         // Combo-processing order w respect to first-stroke-combos [sticky-fsc, latching-fsc, no-fsc] :
         // - We first try to match sticky-fscs (if a sticky-fsc cur active) .. (separately for direct-match, and wild-card match)
@@ -456,11 +457,11 @@ impl CombosMap {
         // (Note that this order means that sfsc combos override lfsc combos, and there can be no layering of sfsc on lfsc etc)
         // (At each of these stages, if we already found and executed a combo, we return as we dont want to fallback to lower categories)
 
-        if !self.ks.sticky_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, self.ks.sticky_first_stroke.get()) { return }
+        if !self.ks.sticky_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, &fgnd, self.ks.sticky_first_stroke.get()) { return }
 
-        if !self.ks.latching_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, self.ks.latching_first_stroke.get()) { return }
+        if !self.ks.latching_first_stroke.is_empty() && self.try_proc_fsc_combo (&combo, ev, &fgnd, self.ks.latching_first_stroke.get()) { return }
 
-        if self.try_proc_fsc_combo (&combo, ev, ComboHash::default()) { return }
+        if self.try_proc_fsc_combo (&combo, ev, &fgnd, ComboHash::default()) { return }
 
 
         // - finally if no lookups (w/ and w/o wildcards) found anything to run, we'll try fallback action gen and processing

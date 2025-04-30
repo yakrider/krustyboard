@@ -191,6 +191,10 @@ pub fn win_set_fgnd (hwnd:Hwnd) { unsafe {
     let _ = SetForegroundWindow (hwnd.into());
 } }
 
+pub fn win_allow_fgnd_all () { unsafe {
+    let _ = AllowSetForegroundWindow (ASFW_ANY);
+} }
+
 /// Of note, GetWindows only returns z-top, z-next etc of windows of SAME CLASS.
 /// So, this cant be used to get regular z-next when querying with topmost hwnd etc
 pub fn win_get_class_hwnd__z_next (hwnd:Hwnd) -> Option<Hwnd> { unsafe {

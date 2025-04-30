@@ -85,7 +85,7 @@ fn load_icons (ctx: &Context) -> Icons {
 
 pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
-    use { KbdKey::*, ModKey::*};
+    use {KbdKey::*, ModKey::*};
 
     let (kr, ks) = ( Krusty::instance(), KrustyState::instance() );
 
@@ -218,7 +218,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         // (^^ we're putting this on release (cf click) coz clicks come out at release anyway, except if held too long, theres nothing)
         let select = ag().k(Space).m(lctrl).mkg_nw().gen_af();    // again ctrl-alt-space is the most harmless (cf Enter)
         Arc::new ( move || {
-            if check_switche_fgnd(kr.wel) {
+            if kr.wel.fg_eval (check_switche_fgnd) {
                 if ks.mod_keys.lalt.active.is_set() {       // if Alt is active we're prob still in qbar sw cell
                     select();                               // so first disarm
                     ks.mod_keys.lalt.ensure_inactive();     // then release Alt
@@ -487,15 +487,18 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             kr.qbar.cur_grid_set_prior_persist (pers_flag_cache.is_set())
         }
     } );
+    fn wrap_allow_fgnd (af:AF) -> AF {
+        Arc::new ( move || { win_allow_fgnd_all(); af(); } )
+    }
     let cell = ActionCell {
         label : Some (Label::new ("MinBack")),
         icon  : icons.min_back.clone(),
-        on_press        : af_min_back.clone(),                    // min-and-back
-        on_rbtn_press   : ag().k(I     ).m(alt).m(win).gen_af(),  // dusky - toggle overlay
-        on_wheel_bkwd   : ag().k(Period).m(alt).m(win).gen_af(),  // dusky - next effect
-        on_wheel_frwd   : ag().k(Comma ).m(alt).m(win).gen_af(),  // dusky - prev effect
-        on_hover_start  : af_hov_start,                           // mark to hide upon rbtn-rel
-        on_hover_end    : af_hov_end,                             // un-mark hide upon rbtn-rel
+        on_press        : af_min_back.clone(),  // min-and-back
+        on_hover_end    : af_hov_end,           // un-mark hide upon rbtn-rel
+        on_hover_start  : af_hov_start,         // mark to hide upon rbtn-rel
+        on_rbtn_press   : wrap_allow_fgnd (ag().k(I     ).m(alt).m(win).gen_af()),  // dusky - toggle overlay
+        on_wheel_bkwd   : wrap_allow_fgnd (ag().k(Period).m(alt).m(win).gen_af()),  // dusky - next effect
+        on_wheel_frwd   : wrap_allow_fgnd (ag().k(Comma ).m(alt).m(win).gen_af()),  // dusky - prev effect
         ..Default::default()
     };
     static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -509,9 +512,10 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let cell = ActionCell {
         label : Some (Label::new ("Diff")),
         icon  : icons.diff.clone(),
-        on_wheel_bkwd : ag().k(ExtDown).m(ctrl).m(alt).gen_af(),   // next diff
-        on_wheel_frwd : ag().k(ExtUp  ).m(ctrl).m(alt).gen_af(),   // prev diff
-        on_press      : ag().k(ExtRight).m(ctrl).m(alt).gen_af(),  // accept left -> right
+        on_wheel_bkwd : ag().k(ExtDown ).m(ctrl).m(alt).gen_af(),   // next diff
+        on_wheel_frwd : ag().k(ExtUp   ).m(ctrl).m(alt).gen_af(),   // prev diff
+        on_press      : ag().k(ExtRight).m(ctrl).m(alt).gen_af(),   // accept left  -> right
+        on_rbtn_press : ag().k(ExtLeft ).m(ctrl).m(alt).gen_af(),   // accept right -> left
         ..Default::default()
     };
     static _diff : OnceCell < Arc < ActionCell>> = OnceCell::new();
@@ -699,22 +703,40 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     //} );
 
     // finally we can build the grid provider itself
-    Box::new ( move || {  //dbg_grids();
-        if check_intellij_fgnd (kr.wel) {
-            return ide
+    Box::new ( move || {
+        use ExeGroups::*;
+
+        let fi = kr.wel .fgnd_info .read().unwrap();
+
+        // Lets filter out common windows classes .. menus, dialogs, task-switcher, icon-titles
+        // .. ^^ naah its pointless for now .. but we'll keep it commented in case comes in handy later
+        //if let Some (g) = match fi.class.as_str() {
+        //    //"#32768" | "#32770" | "#32771" | "#32772" => Some (disabled),
+        //    _ => None,
+        //} { return g };
+
+
+        // next we'll check exe groups
+        let exe_grp = ExeGroups::check (fi.exe.as_str());
+
+        // but first lets cover cases that need title lookup
+        if exe_grp == Browser && fi.title.contains("TradingView") {
+            return trading_view
         }
-        if check_browser_fgnd (kr.wel) {
-            if check_title_contains (kr.wel, "TradingView") {
-                return trading_view
-            }
-            return web
-        }
-        if check_switche_fgnd (kr.wel) {
-            // we specifically disable for switche, coz if sw is general and general is on but say ide is off ..
-            // .. then qbar hwnd coming up unhidden (coz of sw fgnd) would interfere w sw release-activation etc
-            return disabled
-        }
+
+        // and finally the generic exe based groups
+        // Note that we specifically disable for switche, coz if sw is general and general is on but say ide is off ..
+        // .. then qbar hwnd coming up unhidden (coz of sw fgnd) would interfere w sw release-activation etc
+        if let Some (g) = match ExeGroups::check(fi.exe.as_str()) {
+            Switche => Some (disabled),
+            Browser => Some (web),
+            IDE     => Some (ide),
+            _ => None,
+        } { return g };
+
+        // else, we just keep the base grid up
         base
+
     } )
 
 

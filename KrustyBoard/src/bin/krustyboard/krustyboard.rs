@@ -117,43 +117,23 @@ impl FSC {
 
 
 
-fn check_browser_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and (|fi| BROWSER_EXES.contains (&fi.exe))
-}
-fn _check_chrome_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read().unwrap().exe == "chrome.exe"
-}
-fn check_intellij_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and (|fi| IDE_EXES.contains (&fi.exe))
-}
-fn check_switche_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read().unwrap().exe == "Switche.exe"
-}
-fn check_alt_tab_fgnd (wel:&WinEventsListener) -> bool {
-    wel.fgnd_info.read() .is_ok_and ( |fi| {
-        fi.class == "XamlExplorerHostIslandWindow" || fi.class == "MultitaskingViewFrame"
-} ) }
+fn check_ide_fgnd     (fg: &FgndInfo) -> bool { ExeGroups::check (&fg.exe) == ExeGroups::IDE }
+fn check_browser_fgnd (fg: &FgndInfo) -> bool { ExeGroups::check (&fg.exe) == ExeGroups::Browser }
+fn check_switche_fgnd (fg: &FgndInfo) -> bool { ExeGroups::check (&fg.exe) == ExeGroups::Switche }
+fn check_alt_tab_fgnd (fg: &FgndInfo) -> bool { ExeGroups::check (&fg.exe) == ExeGroups::AltTab }
 
-fn check_title_contains (wel:&WinEventsListener, title_frag: &str) -> bool {
-    wel.fgnd_info.read() .is_ok_and (|fi| fi.title.contains(title_frag))
-}
+#[allow (dead_code)]
+fn check_title_contains (fg: &FgndInfo, title_frag: &str) -> bool { fg.title .contains (title_frag) }
 
-/// the idea here is to clone the listener Arc once during cond-creation, to avoid calling instance() repeatedly during runtime
-fn win_evs_cond <WFN> (wfn:WFN) -> ComboCond
-    where WFN : Fn(&WinEventsListener) -> bool + Send + Sync + 'static
-{
-    let wel = WinEventsListener::instance();   // get a 'static ref that can be moved to spawned thread
-    Arc::new ( move |_,_| { wfn(wel) } )
-}
-#[allow (dead_code)] fn intellij_fgnd()  -> ComboCond { win_evs_cond ( check_intellij_fgnd ) }
-#[allow (dead_code)] fn browser_fgnd()   -> ComboCond { win_evs_cond ( check_browser_fgnd ) }
-#[allow (dead_code)] fn switche_fgnd()   -> ComboCond { win_evs_cond ( check_switche_fgnd ) }
-#[allow (dead_code)] fn alt_tab_fgnd()   -> ComboCond { win_evs_cond ( check_alt_tab_fgnd ) }
+#[allow (dead_code)] fn ide_fgnd()     -> ComboCond { fg_cond ( check_ide_fgnd ) }
+#[allow (dead_code)] fn browser_fgnd() -> ComboCond { fg_cond ( check_browser_fgnd ) }
+#[allow (dead_code)] fn switche_fgnd() -> ComboCond { fg_cond ( check_switche_fgnd ) }
+#[allow (dead_code)] fn alt_tab_fgnd() -> ComboCond { fg_cond ( check_alt_tab_fgnd ) }
 
-#[allow (dead_code)] fn intellij_not_fgnd()  -> ComboCond { win_evs_cond ( |wel| !check_intellij_fgnd (wel) ) }
-#[allow (dead_code)] fn browser_not_fgnd()   -> ComboCond { win_evs_cond ( |wel| !check_browser_fgnd (wel) ) }
-#[allow (dead_code)] fn switche_not_fgnd()   -> ComboCond { win_evs_cond ( |wel| !check_switche_fgnd (wel) ) }
-#[allow (dead_code)] fn alt_tab_not_fgnd()   -> ComboCond { win_evs_cond ( |wel| !check_alt_tab_fgnd (wel) ) }
+#[allow (dead_code)] fn ide_not_fgnd()     -> ComboCond { fg_cond ( |fg| !check_ide_fgnd (fg) ) }
+#[allow (dead_code)] fn browser_not_fgnd() -> ComboCond { fg_cond ( |fg| !check_browser_fgnd (fg) ) }
+#[allow (dead_code)] fn switche_not_fgnd() -> ComboCond { fg_cond ( |fg| !check_switche_fgnd (fg) ) }
+#[allow (dead_code)] fn alt_tab_not_fgnd() -> ComboCond { fg_cond ( |fg| !check_alt_tab_fgnd (fg) ) }
 
 
 
@@ -704,7 +684,7 @@ fn setup_mouse_left_btn (k:KR) {
     k.cm .add_combo ( cg().mbtn(LeftButton).m(caps),  ag().af (gen_af_caps_mngd_lbtn(k.ks)) );
 
     /// and to also provide ctrl-drag on caps press after drag-start, we'll put a combo directly on caps-down too!
-    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.lbtn.down.is_set() && ks.mod_keys.lwin.down.is_clear());
+    let cc = ks_cond (|ks| ks.mouse.lbtn.down.is_set() && ks.mod_keys.lwin.down.is_clear());
     // ^^ the lwin conditional is to exclude the window-move/resize w lwin-lbtn-drag
     let af = Arc::new (move || k.ks.mod_keys.lctrl.ensure_active() );
     k.cm .add_combo ( cg().k(CapsLock) .c(cc),  ag().af(af) );
@@ -740,7 +720,7 @@ fn setup_mouse_left_btn (k:KR) {
             k.ks.win_groups.add_to_group (wg, hwnd);
             jiggle_window(hwnd);
         } );
-        let cc : ComboCond = Arc::new (move |ks,_| ks.mouse.lbtn.dbl_tap.is_set());
+        let cc = ks_cond (|ks| ks.mouse.lbtn.dbl_tap.is_set());
         k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s) .c(cc),  ag().af(add_af) );
         // also, on single-click we should capture dat to allow group window drag
         let wsd_af = gen_af_win_snap_dat (k.ks, Some(wg));
@@ -758,7 +738,7 @@ fn setup_mouse_left_btn (k:KR) {
     fn gen_af_win_tog_max (ks:KSR) -> AF { Arc::new ( move || {
         win_toggle_maximize (ks.win_snap_dat.read().unwrap().hwnd)
     } ) }
-    let cc : ComboCond = Arc::new (move |ks,_| ks.mouse.lbtn.dbl_tap.is_set());
+    let cc = ks_cond (|ks| ks.mouse.lbtn.dbl_tap.is_set());
     k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin) .c(cc),  ag().af (gen_af_win_tog_max(k.ks)) );
 
 
@@ -795,7 +775,7 @@ fn setup_mouse_right_btn (k:KR) {
     let sw_snap_af = SwitchePipeCmd::SnapListRefresh.send_af();
     let rbtn_press_af = Arc::new ( move || {
         // if we've already got switche up, or are trying to do tab-switching, we'd rather clear pending than set it!
-        if check_switche_fgnd(k.wel) || k.ks.mod_keys.caps.down.is_set() {
+        if k.wel.fg_eval (check_switche_fgnd) || k.ks.mod_keys.caps.down.is_set() {
             k.ks.mouse.rbtn.pending.clear();
             return
         }
@@ -888,7 +868,7 @@ fn setup_middle_and_xbtn_combos (k:KR) {
         fn gen_xbtn_base_press_af (k:KR) -> AF {
             Arc::new ( move || {
                 // if we're actively doing alt-tab, we completely ignore this
-                if check_switche_fgnd(k.wel) {
+                if k.wel.fg_eval (check_switche_fgnd) {
                     return
                 }
                 // else we want to use rbtn held x2 for tab-switching ..
@@ -908,7 +888,7 @@ fn setup_middle_and_xbtn_combos (k:KR) {
         fn gen_xbtn_base_rel_af (k:KR, mbs: &'static MouseBtnState) -> AF {
             // lets define a common fn first
             fn handle_mbtn_eqv_rel (k:KR, mbs: &MouseBtnState) {
-                if check_switche_fgnd(k.wel) {
+                if k.wel.fg_eval (check_switche_fgnd) {
                     // if we're actively doing alt-tab, we shouldnt butt-in
                 } else if k.ks.in_right_btn_scroll_state.is_set() {
                     k.ks.in_right_btn_scroll_state.clear();
@@ -1611,9 +1591,8 @@ fn setup_switche_alt_tab (k:KR) {
 
 
     // we'll separately setup wheel behavior when switche is in fgnd (other conditionals for rbtn-wheel, x2-wheel etc are elsewhere)
-    let wel = k.wel;
-    let cc : ComboCond = Arc::new ( |ks,_ev| {
-        check_switche_fgnd(wel) && !ks.mouse.rbtn.down.is_set() && !ks.sticky_first_stroke.check_match (FSC::X2_Wheel.ch())
+    let cc : ComboCond = Arc::new ( |ks, _ev, fg| {
+        check_switche_fgnd(fg) && !ks.mouse.rbtn.down.is_set() && !ks.sticky_first_stroke.check_match (FSC::X2_Wheel.ch())
     } );
 
     // regular or alt- wheel can send shift-up/down for non-block-lim nav .. this makes wheel work outside switche window
@@ -1627,10 +1606,9 @@ fn setup_switche_alt_tab (k:KR) {
 
 
     // while at it, lets also add some minimal wheel support for when actual native alt-tab is active
-    let cc : ComboCond = Arc::new ( |_ks,_ev| check_alt_tab_fgnd(wel) );
     //k.cm .add_combo ( cg().whl().bkwd(),  ag().k(Tab) )
-    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()),           ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
-    setup_frwd_bkwd_whl ( k, |wg| wg.c(cc.clone()) .m(lalt),  ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(alt_tab_fgnd()),           ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
+    setup_frwd_bkwd_whl ( k, |wg| wg.c(alt_tab_fgnd()) .m(lalt),  ExtRight, ExtLeft,  |ag,p| ag.k(p).mkg_nw() );
 
 
     // for alt-escape, we want to override the default send-to-back behavior, as it has issues detailed in notes ..
@@ -1640,6 +1618,7 @@ fn setup_switche_alt_tab (k:KR) {
     // so for alt-esc we'll send special switche cmd that will activate the next non-minimized window .. (and also send cur to back)
     // .. if switche is fgnd, it'll directly process the Esc itself (to hide its window) .. so nothing to do
     // .. if switche NOT fgnd, we'll switch to next window in switche and send cur to back
+    let wel = k.wel;
     let switche_next_non_minimized_af = ag().k(F20).m(alt).m(shift).gen_af();
     let alt_esc_action = Arc::new ( move || {
         let hwnd_to_back = wel.fgnd_info.read().unwrap().hwnd;   // cache before switche changes fgnd
@@ -1669,7 +1648,7 @@ fn setup_switch_windows_w_caps_sfsc (k:KR) {
         // F1 would be easier for invocation, but won't turn on the armed-indicator
         // .. so we'll simulate actual alt-tab itself .. (with its various complications)
         // if we're already active (e.g after disarming caps-release activation) we'll need to Esc out of it (avoids unintended release)
-        if check_switche_fgnd(k.wel) { Escape.press_release() }
+        if k.wel.fg_eval(check_switche_fgnd) { Escape.press_release() }
         // now if we had ctrl active, e.g. caps-[clicked/drag/scroll], we'll need to wrap alt-tab with ctrl release and re-press afterwards
         if k.ks.mod_keys.lctrl.active.is_set() {
             LCtrl.release(); alt_tab_af(); LCtrl.press();
@@ -1743,11 +1722,11 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
     // .. however, it's been working quite robustly so far just simulating alt-tab in complex manner below, so not bothering with it yet
     // .. (but this reminder is here so if something breaks or needs update etc, prob would be much easier to switch to pipe-comm instead)
 
-    let cc : ComboCond = Arc::new ( |ks,_ev| {
+    let cc = ks_cond (|ks| {
         // rbtn-wheel is for window-switching, but we want to leave x2-rbtn-wheel for tab switching!
         // (note that caps during rbtn-scroll is handled separately below)
         ks.mouse.rbtn.down.is_set() &&
-            ( check_switche_fgnd (k.wel) ||
+            ( k.wel.fg_eval(check_switche_fgnd) ||
                 ( !ks.mouse.x2btn.down.is_set() &&
                     !ks.sticky_first_stroke.check_match (FSC::X2_Wheel.ch()) &&
                     !ks.sticky_first_stroke.check_match (FSC::QuickBar.ch())
@@ -1757,7 +1736,7 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
         let whl_key = if dir_is_bkwd { ExtDown } else { ExtUp };
         Arc::new ( move || {
             k.ks.mouse.rbtn.pending.clear();
-            if k.ks.in_right_btn_scroll_state.is_set() && check_switche_fgnd(k.wel) {
+            if k.ks.in_right_btn_scroll_state.is_set() && k.wel.fg_eval(check_switche_fgnd) {
                 // this is special case where we're already actively in rbtn-scroll w switche fgnd
                 // .. so we want to just nav up/dn .. (but regular up/dn do block-lim, so need shift to do no-block-lim nav)
                 LShift.press(); whl_key.press_release(); LShift.release();
@@ -1781,7 +1760,7 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
                 // ^^ for robustness, looks like we need a delay at least around 100ms
                 // and then we simply move two-steps back, as at first invocation, we'd want to be one-back from current (i.e at bottom)
                 // .. (and if because this is delayed, another fast wheel-up managed to get through before fgnd .. meh its still harmless)
-                if check_switche_fgnd(k.wel) {
+                if k.wel.fg_eval(check_switche_fgnd) {
                     // we'll guard for sw fgnd so we dont send spurious keys to random window if sw is not yet fgnd
                     LShift.press();  ExtUp.press_release(); ExtUp.press_release(); LShift.release();
                 }
@@ -1792,7 +1771,7 @@ fn setup_switch_windows_rbtn_scroll (k:KR) {
 
 
     // for caps-rbtn-scrolls .. only if rbtn-alt-tab already active .. (coz from afresh, we use that for ctrl-tab)
-    let cc : ComboCond = Arc::new (|ks,_ev| ks.mouse.rbtn.down.is_set() && check_switche_fgnd(k.wel));
+    let cc = combo_cond (|ks,_ev,fg| ks.mouse.rbtn.down.is_set() && check_switche_fgnd(fg));
 
     // and for these we simply want regular switche nav (block-limited)
     setup_frwd_bkwd_whl ( k, |wg| wg .m(caps) .c(cc.clone()),   ExtDown, ExtUp,   |ag,p| ag.k(p).mkg_nw() );
@@ -2038,7 +2017,7 @@ fn setup_ctrl_tab_sfsc (k:KR) {
         } )
     };
     //k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc),  ag().af(ide_persistent_switcher) );
-    k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc) .c(intellij_fgnd()),  ag().af(ide_persistent_switcher) );
+    k.cm .add_combo ( cg().k(Space).m(caps).fsc(fsc) .c(ide_fgnd()),  ag().af(ide_persistent_switcher) );
 
 }
 
@@ -2054,10 +2033,10 @@ fn setup_caps_rbtn_mbtn_ctrl_tab (k:KR) {
     // .. (instead of the typical expectation of defining combos w the fscs specified in them)
 
     let wel = k.wel;
-    let cc : ComboCond = Arc::new ( |ks,_ev| {
+    let cc = ks_cond (|ks| {
         // we need rbtn down but dont want to overlay ctrl-tab if we're already doing alt-tab
         ks.mouse.rbtn.down.is_set()
-            && !check_switche_fgnd (wel)
+            && !wel.fg_eval(check_switche_fgnd)
             && ( ks.mod_keys.caps.down.is_set()
                 || ks.mouse.x2btn.down.is_set()
                 || ks.sticky_first_stroke.check_match (FSC::X2_Wheel.ch()))
@@ -2224,6 +2203,20 @@ fn setup_win_dusky_sfsc (k:KR) {
     // j/k can cycle effects fwd/bkwd
     k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  ag().k(Comma ).m(win).m(alt) );
     k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  ag().k(Period).m(win).m(alt) );
+
+    // and the same for the actual dusky native [<, >] hotkeys
+    k.cm .add_combo ( cg().k(Comma ).m(caps).fsc(fsc),  ag().k(Comma ).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Period).m(caps).fsc(fsc),  ag().k(Period).m(win).m(alt) );
+
+    // 9/0/- can do the clearing of overlay, overrides, or both
+    k.cm .add_combo ( cg().k(Numrow_9).m(caps).fsc(fsc),  ag().k(F12   ).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Numrow_0).m(caps).fsc(fsc),  ag().k(Insert).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Minus   ).m(caps).fsc(fsc),  ag().k(Delete).m(win).m(alt) );
+
+    // plus the saem for the dusky native [End,Insert,Delete] hotkeys
+    k.cm .add_combo ( cg().k(F12   ).m(caps).fsc(fsc),  ag().k(F12   ).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Insert).m(caps).fsc(fsc),  ag().k(Insert).m(win).m(alt) );
+    k.cm .add_combo ( cg().k(Delete).m(caps).fsc(fsc),  ag().k(Delete).m(win).m(alt) );
 
 }
 
@@ -2451,11 +2444,11 @@ fn setup_IDE_combos (k:KR) {
     // however, caps-l (for end) doesnt have ctrl-end for caps-f-l (as that would do things like pgup/pgdn typically) ..
     //
     // so instead, we'll layer that on lalt instead (and use alt-end for activation instead)
-    //k.cm .add_combo ( cg().k(K).m(caps).m(lalt).c(intellij_fgnd()),  ag().k(End).m(alt) );
+    //k.cm .add_combo ( cg().k(K).m(caps).m(lalt).c(ide_fgnd()),  ag().k(End).m(alt) );
     // ^^ nah, that conflicts w the natural l2 alt-left, alt-right, which we also make use of in IDE already for last loc nav
     //
     // at which point, we might as well use at least the alt-layered L for taking the whole multiline suggestion (via ctrl-alt-end)
-    //k.cm .add_combo ( cg().k(L).m(caps).m(lalt).c(intellij_fgnd()),  ag().k(End).m(alt).m(ctrl) );
+    //k.cm .add_combo ( cg().k(L).m(caps).m(lalt).c(ide_fgnd()),  ag().k(End).m(alt).m(ctrl) );
     //k.cm .add_combo ( cg().k(L).m(caps).m(lalt),  ag().k(Tab).mkg_nw() ); // no guard as alt is down, but w caps, so itll be inactive
     //
     // instead, we'll just use alt-k for next-line and alt-l for full multiline suggestion (along w tab too)
@@ -2504,13 +2497,13 @@ fn setup_IDE_combos (k:KR) {
         } )  // ^^ format needs some bit of time before we esc selection
     };
 
-    k.cm .add_combo ( cg() .k(F2) .c(intellij_fgnd()),                   ag().af (line_to_repl) );
-    k.cm .add_combo ( cg() .k(F2) .c(intellij_fgnd()) .m(caps).m(ralt),  ag().af (page_to_repl.clone()) );
-    k.cm .add_combo ( cg() .k(I ) .c(intellij_fgnd()) .m(caps).s(qks ),  ag().af (page_to_repl) );
-    k.cm .add_combo ( cg() .k(F ) .c(intellij_fgnd()) .m(caps).s(qks ),  ag().af (format_page) );
+    k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()),                   ag().af (line_to_repl) );
+    k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()) .m(caps).m(ralt),  ag().af (page_to_repl.clone()) );
+    k.cm .add_combo ( cg() .k(I ) .c(ide_fgnd()) .m(caps).s(qks ),  ag().af (page_to_repl) );
+    k.cm .add_combo ( cg() .k(F ) .c(ide_fgnd()) .m(caps).s(qks ),  ag().af (format_page) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
-    k.cm .add_combo ( cg() .k(F2) .c(intellij_fgnd()) .m(caps),  sel_send.clone() );
+    k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()) .m(caps),  sel_send.clone() );
 
 
     // caps-q-h to directly open search in the find window (rather than in the search overlay)
@@ -2558,8 +2551,8 @@ fn setup_IDE_combos (k:KR) {
             win_get_ide_dialog_hwnds() .into_iter() .for_each ( |hwnd| { win_close (hwnd) } );
         } );
     }
-    k.cm .add_combo ( cg().k(Numrow_9).m(lalt)        .c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_clear )) );
-    k.cm .add_combo ( cg().k(Numrow_9).m(lalt).m(caps).c(intellij_fgnd()),  ag().af (Arc::new (ide_float_tools_toggle)) );
+    k.cm .add_combo ( cg().k(Numrow_9).m(lalt)        .c(ide_fgnd()),  ag().af (Arc::new (ide_float_tools_clear )) );
+    k.cm .add_combo ( cg().k(Numrow_9).m(lalt).m(caps).c(ide_fgnd()),  ag().af (Arc::new (ide_float_tools_toggle)) );
 
 }
 
@@ -2606,9 +2599,7 @@ fn setup_one_note_combos (k:KR) {
     fn s (ms:usize) {
         thread::sleep (Duration::from_millis (ms as _))
     }
-    fn one_note_fgnd() -> ComboCond {
-        win_evs_cond ( |wel| wel.fgnd_info.read().unwrap().exe == "ONENOTE.EXE" )
-    }
+    let one_note_fgnd = || fg_cond (|fg| fg.exe == "ONENOTE.EXE");
     let pen = {
         let (sel_mode, draw_mode) = (sel_mode.clone(), draw_mode.clone());
         Arc::new ( move || { sel_mode(); s(20); draw_mode(); } )
@@ -2627,10 +2618,7 @@ fn setup_one_note_combos (k:KR) {
         k.ks.mouse.rbtn.active.set();
         RightButton.press();
     } );
-    let cc : ComboCond = Arc::new ( |_ks,_ev| {
-        //k.wel.fgnd_info.read() .is_ok_and (|fi| fi.exe == "Inkodo.exe")
-        k.wel.fgnd_info.read() .is_ok_and (|fi| fi.exe == "ApplicationFrameHost.exe" && fi.title.contains("Inkodo"))
-    });
+    let cc = fg_cond (|fg| fg.exe == "ApplicationFrameHost.exe" && fg.title.contains("Inkodo"));
     k.cm .add_combo ( cg().mbtn(RightButton) .c(cc),  ag().af (rbtn_press_af) );
 
 
@@ -2658,24 +2646,21 @@ fn setup_gaming_combos (k:KR) {
         let (a,b,c,d) = (gen_pointed_v2(xo,y,ko), gen_pointed_v2(xo+xd,y,ko), gen_pointed_v2(xo+2*xd,y,ko), gen_pointed_v2(xo+3*xd,y,ko));
         thread::spawn ( move || { a(); s(50); b(); s(50); c(); s(50); d(); } );
     } ) };
-    fn pc() -> ComboCond { Arc::new ( move |_,_| {
-        let fi = WinEventsListener::instance(); let fi = fi.fgnd_info.read().unwrap();
-        fi.exe == "chrome.exe" && fi.title.contains("Random")
-    } ) }
+    let pc = || fg_cond (|fg| fg.exe == "chrome.exe" && fg.title.contains("Random"));
 
     // fsc : caps-qw-C -> og macro mode .. (latching)
     let fsc = FSC::GamingOG.ch();
     k.cm .register_combo_latching_first_stroke ( fsc,  cg() .k(C).no_rpt() .m(caps) .fsc(FSC::LatchInit.ch()) );
 
-    k.cm .add_combo ( cg().k(Left  ).fsc(fsc).c(pc()),   ag().af (gen_pointed_v2 ( xo +     xd, y, Some(Escape))) );
-    k.cm .add_combo ( cg().k(Right ).fsc(fsc).c(pc()),   ag().af (gen_pointed_v2 ( xo + 3 * xd, y, Some(Escape))) );
-    k.cm .add_combo ( cg().k(Down  ).fsc(fsc).c(pc()),   ag().af (gen_pointed_v2 ( xo + 2 * xd, y, Some(Escape))) );
-    //k.cm .add_combo ( cg().k(Slash ).fsc(fsc).c(pc()), ag().af (gen_pointed_v2 ( xo         , y, Some(Escape))) );
-    k.cm .add_combo ( cg().k(Up    ).fsc(fsc).c(pc()),           ag().af ( pointed_3 ) );
-    k.cm .add_combo ( cg().k(Left  ).fsc(fsc).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo +     xd, y, None)) );
-    k.cm .add_combo ( cg().k(Right ).fsc(fsc).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo + 3 * xd, y, None)) );
-    k.cm .add_combo ( cg().k(Down  ).fsc(fsc).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo + 2 * xd, y, None)) );
-    k.cm .add_combo ( cg().k(Slash ).fsc(fsc).c(pc()).m(caps),   ag().af (gen_pointed_v2 ( xo         , y, None)) );
+    k.cm .add_combo ( cg().k(Left  ) .fsc(fsc) .c(pc()),   ag().af (gen_pointed_v2 ( xo +     xd, y, Some(Escape))) );
+    k.cm .add_combo ( cg().k(Right ) .fsc(fsc) .c(pc()),   ag().af (gen_pointed_v2 ( xo + 3 * xd, y, Some(Escape))) );
+    k.cm .add_combo ( cg().k(Down  ) .fsc(fsc) .c(pc()),   ag().af (gen_pointed_v2 ( xo + 2 * xd, y, Some(Escape))) );
+  //k.cm .add_combo ( cg().k(Slash ) .fsc(fsc) .c(pc()),   ag().af (gen_pointed_v2 ( xo         , y, Some(Escape))) );
+    k.cm .add_combo ( cg().k(Up    ) .fsc(fsc) .c(pc()),            ag().af ( pointed_3 ) );
+    k.cm .add_combo ( cg().k(Left  ) .fsc(fsc) .c(pc()) .m(caps),   ag().af (gen_pointed_v2 ( xo +     xd, y, None)) );
+    k.cm .add_combo ( cg().k(Right ) .fsc(fsc) .c(pc()) .m(caps),   ag().af (gen_pointed_v2 ( xo + 3 * xd, y, None)) );
+    k.cm .add_combo ( cg().k(Down  ) .fsc(fsc) .c(pc()) .m(caps),   ag().af (gen_pointed_v2 ( xo + 2 * xd, y, None)) );
+    k.cm .add_combo ( cg().k(Slash ) .fsc(fsc) .c(pc()) .m(caps),   ag().af (gen_pointed_v2 ( xo         , y, None)) );
 
     fn og_clear() -> AF { Arc::new ( || { thread::spawn ( || {
         for i in 0 .. 4 {
@@ -2720,7 +2705,7 @@ fn setup_quick_bar (k:KR) {
     let (fsc_pre, fsc) = (FSC::QuickBarPre.ch(), FSC::QuickBar.ch());
 
     // first we'll set up the first-step (lbtn-down)
-    let pre_cond : ComboCond = Arc::new ( |ks,_ev| {
+    let pre_cond = ks_cond (|ks| {
         ks.mouse.lbtn.down.is_set() &&
             // hmm !check_switche_fgnd(wel) &&
             !ks.sticky_first_stroke.check_match(FSC::X2_Wheel.ch())
@@ -2730,7 +2715,7 @@ fn setup_quick_bar (k:KR) {
 
 
     // next, we can setup the second step (lbtn-dn -> rbtn-dn)
-    let cond : ComboCond = Arc::new ( |ks,_ev| {
+    let cond = ks_cond (|ks| {
         ks.mouse.rbtn.down.is_set() && !ks.sticky_first_stroke.check_match(FSC::X2_Wheel.ch())
     } );
     let cond = || cond.clone();
@@ -2758,9 +2743,9 @@ fn setup_quick_bar (k:KR) {
     k.cm.add_combo ( cg().k(A).m(caps_dbl),     ag().af (Arc::new (move || k.qbar.toggle())) );
     // we'll also setup caps-a-a for ergonomics (can be useful where the first ctrl-a is harmless)
     k.cm.add_combo ( cg().k(A).dbl().m(caps),   ag().af (Arc::new (move || k.qbar.toggle())) );
-    // and we'll overload yet another invocation on caps-d with a/o .. we'll see if it sees use
-    k.cm.add_combo ( cg().k(A).m(caps).s(msD),  ag().af (Arc::new (move || k.qbar.toggle())) );
-    k.cm.add_combo ( cg().k(O).m(caps).s(msD),  ag().af (Arc::new (move || k.qbar.toggle())) );
+    // and we'll overload yet another invocation on caps-q with a/o .. we'll see if it sees use
+    k.cm.add_combo ( cg().k(A).m(caps).s(qks),  ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(O).m(caps).s(qks),  ag().af (Arc::new (move || k.qbar.toggle())) );
     // ^^ we could have tried to have this also enter the fsc state .. (with a bit of manual toggle management here)
     // However, we've decided NOT to do that, as not doing so means the quick-bar persists over [caps/mod]-rel etc clearing fscs
     // Further, since we only care about wheel actions in this fsc, and w/o alt/ctrl, they work decently from regular fallback

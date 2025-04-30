@@ -30,8 +30,38 @@ pub struct Combo {
 
 
 
+
 /// ComboCond is an arc wrapped fn that should return true if the combo's trigger pre-condition is satisfied
-pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event) -> bool + Send + Sync + 'static >;
+pub type ComboCond = Arc < dyn Fn (&KrustyState, &Event, &FgndInfo) -> bool + Send + Sync + 'static >;
+
+
+/// helper fn to generate a ComboCond
+pub fn combo_cond <CCFN> (ccfn:CCFN) -> ComboCond
+    where CCFN : Fn (&KrustyState, &Event, &FgndInfo) -> bool + Send + Sync + 'static
+{
+    Arc::new ( move |ks, ev, fg| { ccfn (ks, ev, fg) } )
+}
+
+/// helper fn to generate a ComboCond for fgnd check condition
+pub fn fg_cond <FGFN> (fgfn:FGFN) -> ComboCond
+    where FGFN : Fn (&FgndInfo) -> bool + Send + Sync + 'static
+{
+    Arc::new ( move |_ks, _ev, fg| { fgfn (fg) } )
+}
+
+/// helper fn to generate a ComboCond for ks check condition
+pub fn ks_cond <KSFN> (ksfn:KSFN) -> ComboCond
+    where KSFN : Fn (&KrustyState) -> bool + Send + Sync + 'static
+{
+    Arc::new ( move |ks, _ev, _fg| { ksfn (ks) } )
+}
+
+/// helper fn to generate a ComboCond for event check condition
+pub fn ev_cond <EVFN> (evfn:EVFN) -> ComboCond
+    where EVFN : Fn (&Event) -> bool + Send + Sync + 'static
+{
+    Arc::new ( move |_ks, ev, _fg| { evfn (ev) } )
+}
 
 
 

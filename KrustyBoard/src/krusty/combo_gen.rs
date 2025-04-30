@@ -193,7 +193,7 @@ impl <S> ComboGen<S>
             self.dat.cond = Some(cond);
         } else {
             let cond_old = self.dat.cond.take().unwrap();
-            self.dat.cond = Some ( Arc::new ( move |ks,e| cond_old(ks,e) && cond(ks,e) ) );
+            self.dat.cond = Some ( Arc::new ( move |ks,ev,fg| cond_old(ks,ev,fg) && cond(ks,ev,fg) ) );
         }
         self
     }

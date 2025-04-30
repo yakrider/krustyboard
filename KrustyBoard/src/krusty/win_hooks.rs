@@ -15,13 +15,13 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, EVENT_SYSTEM_FOR
 use crate::*;
 
 
-#[derive(Debug, Default)]
+#[derive (Debug, Default, Clone)]
 pub struct FgndInfo {
     pub hwnd  : Hwnd,
-    pub title : String,
-    pub class : String,
     pub pid   : u32,
     pub exe   : String,
+    pub title : String,
+    pub class : String,
 }
 
 pub struct WinEventsListener {
@@ -117,7 +117,9 @@ impl WinEventsListener {
     }
     fn proc_win_report__fgnd_hwnd (&'static self, hwnd:Hwnd) {
         //println! ("@{:?} fgnd: {:?}", self._stamp(), hwnd);
-        spawn ( move || { self.update_fgnd_info(hwnd) } );
+        if utils::check_window_visible(hwnd) {
+            spawn ( move || { self.update_fgnd_info(hwnd) } );
+        }
     }
 
     fn update_fgnd_info_title (&'static self, hwnd:Hwnd) {
@@ -129,13 +131,12 @@ impl WinEventsListener {
         if hwnd == Hwnd (self.self_hwnd.load(Ordering::Relaxed)) {
             return
         }
-        let fi_new = FgndInfo {
-            hwnd,
-            title : utils::get_win_title (hwnd),
-            class : utils::get_win_class_by_hwnd (hwnd),
-            pid   : utils::get_pid_by_hwnd (hwnd),
-            exe   : utils::get_exe_by_pid (utils::get_pid_by_hwnd (hwnd)) .unwrap_or("".into()),
-        };
+        let pid   = utils::get_pid_by_hwnd(hwnd);
+        let exe   = utils::get_exe_by_pid (pid) .unwrap_or("".into());
+        let title = utils::get_win_title (hwnd);
+        let class = utils::get_win_class_by_hwnd (hwnd);
+
+        let fi_new = FgndInfo { hwnd, pid, exe, title, class };
         //println! ("fgnd: {:?}, exe: {:?}", hwnd, &fi_new.exe);
 
         // we'll then push out an event on fgnd change for whoever wants to set bindings to it
@@ -143,6 +144,12 @@ impl WinEventsListener {
 
         // and update our fgnd-info cache
         *self.fgnd_info.write().unwrap() = fi_new;
+    }
+
+    pub fn fg_eval <FGFN> (&'static self, fgfn: FGFN) -> bool
+        where FGFN : Fn (&FgndInfo) -> bool + Send + Sync + 'static
+    {
+        fgfn (&self.fgnd_info.read().unwrap())
     }
 
 

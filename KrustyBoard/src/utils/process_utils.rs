@@ -41,6 +41,46 @@ pub static CALC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
 );
 
 
+
+// we'll also set up known exe groups for efficient matching at runtime from fgnd-info
+#[derive (Default, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ExeGroups {
+    #[default] Other = 0,
+    Browser,
+    IDE,
+    Music,
+    Calc,
+    AltTab,
+    Switche,
+    Krusty,
+    Dusky,
+}
+
+impl ExeGroups {
+    pub fn check (exe: &str) -> Self {
+        use ExeGroups::*;
+        match exe {
+            "chrome.exe" | "firefox.exe" | "msedge.exe" | "brave.exe" =>
+                Browser,
+            "idea64.exe" | "rustrover64.exe" | "goland64.exe" | "rider64.exe" | "clion64.exe" | "pycharm64.exe" | "webstorm64.exe" =>
+                IDE,
+            "winamp.exe" | "MusicBee.exe" =>
+                Music,
+            "qalculate.exe" | "qcalculate.exe" | "CalculatorApp.exe" =>
+                Calc,
+            "XamlExplorerHostIslandWindow.exe" | "MultitaskingViewFrame.exe" =>
+                AltTab,
+
+            "Switche.exe"     => Switche,
+            "krustyboard.exe" => Krusty,
+            "WinDusky.exe"    => Dusky,
+
+            _ =>  Other,
+        }
+    }
+}
+
+
 /* reminder - re UAC elevation when starting processes while running krusy elevated (as we often want to do)
     - processes started here directly when krusty is running elevated also start with elevated priveleges ..
     - (which we ofc would like to avoid as much as possible) ..
