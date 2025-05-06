@@ -490,13 +490,18 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     fn wrap_allow_fgnd (af:AF) -> AF {
         Arc::new ( move || { win_allow_fgnd_all(); af(); } )
     }
+    let af_dusky_tog_eff  = ag().k(I).m(alt).m(win).gen_af();
+    let af_dusky_tog_mode = ag().k(I).m(alt).m(win).m(shift).gen_af();
+    let af_rbtn = Arc::new ( move || {
+        if ks.mod_keys.some_shift_down() { af_dusky_tog_mode() } else { af_dusky_tog_eff() }
+    } );
     let cell = ActionCell {
         label : Some (Label::new ("MinBack")),
         icon  : icons.min_back.clone(),
         on_press        : af_min_back.clone(),  // min-and-back
         on_hover_end    : af_hov_end,           // un-mark hide upon rbtn-rel
         on_hover_start  : af_hov_start,         // mark to hide upon rbtn-rel
-        on_rbtn_press   : wrap_allow_fgnd (ag().k(I     ).m(alt).m(win).gen_af()),  // dusky - toggle overlay
+        on_rbtn_press   : wrap_allow_fgnd (af_rbtn),   // dusky - toggle effect, or w/ shift, toggle fullscreen mode
         on_wheel_bkwd   : wrap_allow_fgnd (ag().k(Period).m(alt).m(win).gen_af()),  // dusky - next effect
         on_wheel_frwd   : wrap_allow_fgnd (ag().k(Comma ).m(alt).m(win).gen_af()),  // dusky - prev effect
         ..Default::default()

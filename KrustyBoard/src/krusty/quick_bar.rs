@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use once_cell::sync::{Lazy, OnceCell};
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
-use egui::{Align2, Context, FontFamily, FontId, PointerButton, TextureHandle, ViewportBuilder};
+use egui::{Align2, Context, FontFamily, FontId, PointerButton, StrokeKind, TextureHandle, ViewportBuilder};
 use tao::rwh_06::{HasWindowHandle, RawWindowHandle};
 
 use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, HWND_TOPMOST, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_NOZORDER, SWP_NOMOVE, SWP_ASYNCWINDOWPOS, HWND_BOTTOM};
@@ -41,6 +41,11 @@ pub struct Label {
     pub label   : Arc<String>,
     pub color   : Color32,
     pub font_id : FontId,
+}
+impl std::fmt::Debug for Label {
+    fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.label)
+    }
 }
 
 impl Label {
@@ -380,7 +385,6 @@ impl QuickBar {
 
 
         let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
-        let grid_sz = grid.grid_px_sz();
 
         if grid.enabled.is_clear() { return }
 
@@ -389,15 +393,14 @@ impl QuickBar {
         grid.is_persist.store(persist);
         self.refresh_grid.set();
 
-        // we'll need scaling to calc the qbar's new position/size
-        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
+        let px_sz = self.get_scaled_grid_px_sz (grid);
 
         let pos = if !at_cursor {
             grid.cur_pos.load()
         } else {
             let mut pos = utils::get_pointer_loc();
-            pos.x -= (grid_sz.width  as i32 as f32 * scaling / 2.0) as i32;
-            pos.y -= (grid_sz.height as i32 as f32 * scaling / 2.0) as i32 - 4;
+            pos.x -= px_sz.width  as i32 / 2;
+            pos.y -= (px_sz.height as i32 / 2) - 4;
             // ^^ exact centering lands on grid border, so we'll add slight vertical displacement
             pos
         };
@@ -407,6 +410,21 @@ impl QuickBar {
 
     pub fn reposition_qbar (&self, pos:&Point, grid:&ActionGrid) {
 
+        let px_sz = self.get_scaled_grid_px_sz (grid);
+        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
+
+        // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
+        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
+        unsafe {
+            let _ = ShowWindow (hwnd.into(), SW_RESTORE);
+            let _ = SetWindowPos (
+                hwnd.into(), Some(HWND_TOPMOST), pos.x, pos.y, px_sz.width as _, px_sz.height as _, SWP_SHOWWINDOW | SWP_NOACTIVATE
+            );
+            // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
+        }
+    }
+
+    pub fn get_scaled_grid_px_sz (&self, grid:&ActionGrid) -> CellDims {
         // we'll need scaling to calc the qbar's new position/size
         let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
 
@@ -415,15 +433,7 @@ impl QuickBar {
         let height = (scaling * grid_sz.height as f32) as i32;
         // ^^ manually coz auto dpi-scaling didnt seem to happen for w/h .. (setting thread dpi-aware didnt help)
 
-        let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
-
-        // we'll want to restore/unhide window .. (but not activate it as we'd rather it not immediately consume kbd events)
-        // and to move it to the right location .. (and this must come after un-minimize for the move to work)
-        unsafe {
-            let _ = ShowWindow (hwnd.into(), SW_RESTORE);
-            let _ = SetWindowPos (hwnd.into(), Some(HWND_TOPMOST), pos.x, pos.y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-            // ^^ and this is since we couldnt put it off-screen, we resized to 0, so now have to restore size too
-        }
+        CellDims::new (width as u32, height as u32)
     }
 
     pub fn handle_invocation (&self) {
@@ -597,15 +607,24 @@ impl eframe::App for &QuickBar {
                         if new_grid.grid_sz != grid.grid_sz || new_grid.cell_sz != grid.cell_sz {
                             self.resize(new_grid);
                         }
-                        if new_grid.cur_pos.load() != grid.cur_pos.load() {
+                        let (grid_pos, grid_dims) = (new_grid.cur_pos.load(), self.get_scaled_grid_px_sz(new_grid));
+                        if grid_pos != grid.cur_pos.load() {
                             self.reposition_qbar (&new_grid.cur_pos.load(), new_grid);
                         }
                         if self.is_visible.is_clear() {
                             self.show (new_grid.is_persist.is_set(), false);
                         }
+                        // additionally, egui has issues ignoring pointer till next pointer motion after app switching etc
+                        // so we'll try and jiggle cursor here if such is the case
+                        let mouse_pos = utils::get_pointer_loc();
+                        if mouse_pos.x >= grid_pos.x  &&  mouse_pos.x <= grid_pos.x + grid_dims.width as i32  &&
+                            mouse_pos.y >= grid_pos.y  &&  mouse_pos.y <= grid_pos.y + grid_dims.height as i32
+                        {
+                            jiggle_cursor (1, 1, 1, 50)
+                        }
                         // now we'll come back again to pick up this updated mut static
                         ctx.request_repaint();
-                    } else if self.is_visible.is_set() {
+                    } else if self.is_visible.is_set() { println!("hide from update");
                         self.hide(true);
                     }
                     *grid = new_grid;
@@ -614,10 +633,19 @@ impl eframe::App for &QuickBar {
             }
         } }
 
-        if self.is_visible.is_clear() { return }
+        if self.is_visible.is_clear() {
+            // we can exit early, but we'll clear up and notify any active hov-cell if that might have had hover
+            unsafe {
+                if let Some(last_hc) = hov_cell.as_ref() {
+                    last_hc.hover_end_fn();
+                }
+                hov_cell = None;
+            }
+            return
+        }
 
         egui::CentralPanel::default()
-            .frame ( egui::Frame::none().outer_margin (egui::Margin::same(ActionGrid::OUTER_MARGIN as f32)) )
+            .frame ( egui::Frame::NONE.outer_margin (egui::Margin::same(ActionGrid::OUTER_MARGIN as i8)) )
             .show ( ctx, |ui|
         {
             // now we can setup the grid
@@ -648,7 +676,7 @@ impl eframe::App for &QuickBar {
                     );
                     //ui.painter().rect_filled ( rect, 0.0, Color32::from_gray(20) );
 
-                    ui.painter().rect_stroke ( rect, 0.0, egui::Stroke::new (0.5, Color32::from_gray(100)) );
+                    ui.painter() .rect_stroke ( rect, 0.0, egui::Stroke::new (0.5, Color32::from_gray(100)), StrokeKind::Outside );
                     // ^^ adds the border between cells that makeup the grid
 
                     if let Some(ico) = cur_cell.icon.as_ref() {
@@ -723,30 +751,36 @@ impl eframe::App for &QuickBar {
                 self.defocus();
             }
 
+            fn act_on <F> (qbar: &QuickBar, cell: Option<&Arc<ActionCell>>, action: F)
+                where F : Fn (&ActionCell)
+            {
+                qbar.defocus();
+                if let Some (ac) = cell {
+                    action (ac);
+                } else {
+                    println! ("~~ WARNING ~~ : Quickbar user action received, but no active ActionCell !!");
+                }
+            }
+
+
             // for any btn action, we want to immediately give focus back, and send up any applicable event
             if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Primary)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.press_fn() }
+                act_on (self, cur_hc, |ac| ac.press_fn());
             }
             if ui.input (|inp| inp.pointer.button_released (PointerButton::Primary)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.release_fn() }
+                act_on (self, cur_hc, |ac| ac.release_fn());
             }
             if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Secondary)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.rbtn_press_fn() }
+                act_on (self, cur_hc, |ac| ac.rbtn_press_fn());
             }
             if ui.input (|inp| inp.pointer.button_released (PointerButton::Secondary)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.rbtn_release_fn() }
+                act_on (self, cur_hc, |ac| ac.rbtn_release_fn());
             }
             if ui.input (|inp| inp.pointer.button_pressed (PointerButton::Middle)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.mbtn_press_fn() }
+                act_on (self, cur_hc, |ac| ac.mbtn_press_fn());
             }
             if ui.input (|inp| inp.pointer.button_released (PointerButton::Middle)) {
-                self.defocus();
-                if let Some(ac) = cur_hc { ac.mbtn_release_fn() }
+                act_on (self, cur_hc, |ac| ac.mbtn_release_fn());
             }
 
             // if we were in a cell, we'll also check for wheel

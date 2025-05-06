@@ -56,7 +56,7 @@ fn get_krusty_icon() -> Icon {
     } .to_string();
     use base64::Engine;
     let icon_data = base64::engine::general_purpose::STANDARD.decode(&icon_str).unwrap();
-    let icon = image::io::Reader::with_format (std::io::Cursor::new(icon_data), ImageFormat::Png).decode().unwrap();
+    let icon = image::ImageReader::with_format (std::io::Cursor::new(icon_data), ImageFormat::Png).decode().unwrap();
     Icon::from_rgba (icon.into_bytes(), 44, 44).unwrap()
 }
 

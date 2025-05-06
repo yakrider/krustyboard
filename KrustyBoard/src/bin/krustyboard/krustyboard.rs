@@ -1413,6 +1413,10 @@ fn setup_win_groups (k:KR) {
     // and since Esc is hard to press w caps-win, we'll let Q do the same too
     k.cm .add_combo ( cg().k(Q).m(lwin).m(caps),       ag().af (gen_cancel_win_mouse_action (Q, k.ks)) );
 
+    // and since we've lumped most regular win-esc w these too (min-back), we'll add the counterpart here as well
+    // for win-win-esc, we'll do a simple minimize instead .. helps w on-top windows as min-back destroys their 'on-top' state
+    k.cm .add_combo ( cg().k(Escape).m(lwin_dbl),   ag().af (action (win_fgnd_min)) .mkg_w() );
+
 }
 
 
@@ -2116,6 +2120,8 @@ fn setup_window_action_sfsc (k:KR) {
     // regardless, since max/vertmax toggles are pretty frequent, we'll for now retain their direct combos too
     k.cm .add_combo ( cg().k(U).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_vertmax)) );
     k.cm .add_combo ( cg().k(M).m(caps).m(lwin),  ag().af (action (win_fgnd_toggle_max)) );
+
+    // also note that there are additional non-fsc win-combos like win-esc or win-win-esc defined along with window-grps setups
 
 }
 

@@ -105,12 +105,12 @@ pub fn update_dbl_tap (ev:&Event, dbl_flag:&Flag) -> bool {
 
 
 /// jiggle the cursor for a short duration as visual reminder of some state change etc
-fn jiggle_cursor (n:isize) {
+pub fn jiggle_cursor (n:isize, dx:i32, dy:i32, ms:u64) {
     thread::spawn ( move || {
         for _ in 0 .. n {
-            MousePointer::move_rel(5,5);
-            thread::sleep (Duration::from_millis(50));
-            MousePointer::move_rel(-5,-5);
+            MousePointer::move_rel (dx, dy);
+            thread::sleep (Duration::from_millis(ms));
+            MousePointer::move_rel (-1*dx, -1*dy);
         }
     } );
 }
@@ -135,7 +135,7 @@ pub fn blip_cursor (n:isize) {
     if cursors.is_enabled() {
         flash_cursor(n)
     } else {
-        jiggle_cursor(n)
+        jiggle_cursor(n,5,5,50)
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "krustyboard"
-version = "1.4.5"
+version = "1.4.6"
 authors = ["yakrider <yakrider@gmail.com>"]
 description = "Keyboard Remapping to support layer-2 and layer-3 functionality."
 documentation = "https://docs.rs/krustyboard"
@@ -39,19 +39,19 @@ async-trait = "0.1"
 futures = "0.3"
 rand = "0.8"
 itertools = "0.12"
-rustc-hash = "1"
+rustc-hash = "2"
 derive_deref = "1"
 base64 = "0.21"
-tray-icon = "0.19"
-tao = "0.30"
+tray-icon = "0.20"
+tao = "0.33"
 global-hotkey = "0.6"
-colored = "2"
+colored = "3"
 include_dir = "0.7.4"
-winit = "0.30.8"
-eframe = "0.30.0"
-egui = "0.30.0"
-egui_extras = { version = "0.30.0", features = ["all_loaders", "image"] }
-image = { version = "0.24", features = ["png"] }
+winit = "0.30"
+eframe = "0.31.0"
+egui = "0.31.0"
+egui_extras = { version = "0.31.0", features = ["all_loaders", "image"] }
+image = { version = "0.25", features = ["png"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 

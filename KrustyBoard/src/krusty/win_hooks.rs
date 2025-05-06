@@ -136,14 +136,17 @@ impl WinEventsListener {
         let title = utils::get_win_title (hwnd);
         let class = utils::get_win_class_by_hwnd (hwnd);
 
-        let fi_new = FgndInfo { hwnd, pid, exe, title, class };
+        let info = FgndInfo { hwnd, pid, exe, title, class };
         //println! ("fgnd: {:?}, exe: {:?}", hwnd, &fi_new.exe);
 
+        // lets also exclude dusky overlays
+        if info.class .contains ("WinDusky Overlay Host") { return }
+
         // we'll then push out an event on fgnd change for whoever wants to set bindings to it
-        self.iproc .inject_fgnd_event (fi_new.hwnd);
+        self.iproc .inject_fgnd_event (info.hwnd);
 
         // and update our fgnd-info cache
-        *self.fgnd_info.write().unwrap() = fi_new;
+        *self.fgnd_info.write().unwrap() = info;
     }
 
     pub fn fg_eval <FGFN> (&'static self, fgfn: FGFN) -> bool
