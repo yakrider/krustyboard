@@ -1,0 +1,38 @@
+
+[package]
+name = "kbd-evs"
+version = "0.1.0"
+edition = "2021"
+
+
+[[bin]]
+name = "kbd-evs"
+path = "src/kbd_evs.rs"
+
+
+[package.metadata.winres]
+OriginalFilename = "kbd-evs.exe"
+ProductName = "Keyboard Events Printer"
+
+
+[build-dependencies]
+winres = "0.1"
+
+
+[dependencies]
+
+chrono = "0.4"
+colored = "3.0"
+crossbeam-channel = "0.5"
+thiserror = "2.0"
+
+
+[dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+]
+
