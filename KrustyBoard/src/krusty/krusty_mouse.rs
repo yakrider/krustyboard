@@ -31,8 +31,8 @@ pub struct MouseBtnState {
 }
 
 // since debounced action-functions need to pass the events through, cant use Fn() AF, so we'll define a DBAF
-/// Debounced-Arc/Action-Function Fn(InputEvent) representation that can be passed around to debounce wrapper
-//pub type DBAF  = Arc <dyn Fn(InputEvent) + Send + Sync + 'static> ;
+// /// Debounced-Arc/Action-Function Fn(InputEvent) representation that can be passed around to debounce wrapper
+// pub type DBAF  = Arc <dyn Fn(InputEvent) + Send + Sync + 'static> ;
 
 
 impl MouseBtnState {
@@ -400,7 +400,7 @@ fn handle_lwin_mouse_drag (x:i32, y:i32, ks:KSR) {
     // .. so there could be some lag, but should be quick enough that we can work with ks states as we currently see it
     // NOTE also that we already set the thread dpi-aware when initing the events-queue thread itself
     if ks.mouse.lbtn.down.is_set() && ks.mouse.lbtn.consumed.is_clear() {
-        if ks.mod_keys.caps.down.is_set() && ks.mode_states.some_qks_mode_active.is_clear() {
+        if ks.mod_keys.caps.down.is_set() && ks.mode_states.some_q1234_mode_active.is_clear() {
             handle_pointer_window_resize_spaced (x, y, ks)
         } else {
             handle_pointer_window_drag_spaced (x, y, ks)

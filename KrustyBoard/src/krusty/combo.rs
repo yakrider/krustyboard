@@ -9,9 +9,9 @@ use crate::*;
 
 
 // Combo-States-Bits accounting :
-// expected ordering .. [caps, mks-left, mks-right, ms*, qks*, caps-dbl, mks-dbl-left, mks-dbl-right, ms*-dbl, qks*-dbl]
+// expected ordering .. [caps, mks-left, mks-right, ms*, caps-dbl, mks-dbl-left, mks-dbl-right, ms*-dbl]
 // mod-keys ordering .. [Alt, Ctrl, Shift, Win]
-// mode-states ordering .. [ msE, msD, msF, msR,  qks, qks1, qks2, qks3, qks4]
+// mode-states ordering .. [ msE, msD, msF, msR,  msQ, ms1, ms2, ms3, ms4]
 // adds up to .. (1 + 4*2 + 4 + 5) * 2  =  18*2  =  36
 // debug printout sample : [C.AčSW.AčSW.EDFR.Q1234.C.AčSW.AčSW.EDFR.Q1234]
 // (note that l/r unspecified keys (ctrl/alt/shift/win) get mapped out to l/r/lr expansions, so mod-key-bits only need the l/r bits)

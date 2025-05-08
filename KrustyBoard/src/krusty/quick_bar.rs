@@ -1,4 +1,4 @@
-#![allow (non_upper_case_globals)]
+#![allow (non_upper_case_globals, static_mut_refs)]
 
 use std::thread;
 use std::time::Duration;

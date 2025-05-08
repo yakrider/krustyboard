@@ -110,7 +110,7 @@ pub fn jiggle_cursor (n:isize, dx:i32, dy:i32, ms:u64) {
         for _ in 0 .. n {
             MousePointer::move_rel (dx, dy);
             thread::sleep (Duration::from_millis(ms));
-            MousePointer::move_rel (-1*dx, -1*dy);
+            MousePointer::move_rel (-dx, -dy);
         }
     } );
 }

@@ -75,7 +75,7 @@ pub struct _ComboGen {
     pub mod_key_no_consume : bool,
 
     /// The mode-ken consume flag marks that key-repeats on mode-keys in this combo should be suppressed until they are released. <br>
-    /// (This is useful to  avoid stragglers .. e.g say Alt-qks1-wheel for brightness, if alt is released first, we dont want '1's spamming out). <br>
+    /// (This is useful to  avoid stragglers .. e.g say Alt-ms1-wheel for brightness, if alt is released first, we dont want '1's spamming out). <br>
     /// (This is less important for caps-modekey-<?>combos, as modekdy bindings now auto set consumption flag when it is seen w caps).
     pub mode_kdn_no_consume : bool,
 

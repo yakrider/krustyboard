@@ -530,7 +530,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    /// _** Chrome bookmarklets trigger for darkening or brightening of page/image **__
+    // _** Chrome bookmarklets trigger for darkening or brightening of page/image **__
     // note that to make these chrome shortcuts work .. first installed shortkeys extension ..
     // .. then there, set the hotkeys as below, and set them to exec javascript copied directly from bookmarklets
     // .. (directly trying to trigger the bookmarklets didnt work .. oh well)

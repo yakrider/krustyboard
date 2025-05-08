@@ -376,7 +376,7 @@ impl CapsModKey {
 
 
 
-/// impl for key handling for various ModKey_* behaviors
+// impl for key handling for various ModKey_* behaviors
 // note that there's some more common key handling in the UnifModKey itself, esp for physical states ..
 // .. and only variations dealing w managing the external logical 'active' state should be in these
 
@@ -439,7 +439,7 @@ impl KeyHandling for ModKey_Doubled {
 /// key handling for fully managed modkeys .. check comments for details
 impl KeyHandling for ModKey_Managed {
 
-    /// key-down management for the complex 'managed' modkey type
+    // key-down management for the complex 'managed' modkey type
     // NOTE: given that kbds seem to have idiosyncrasies with what scancode vs vk codes they sent, we end up getting out of sync w
     // what keys we let through and what we simulate .. e.g in my machine lshift comes in vk while rshift comes sc and so sending our
     // vk shift doesnt clear it out .. so we've decided to just block everything and send our uniform up/down reports instead!
@@ -585,7 +585,7 @@ impl UnifModKey {
         // ^^ we access this without any guards since this never gets written to at runtime .. (and it is in hotpath)
     }
 
-    /// NOTE re injected events .. we block our own (and ahk) injections at hook level .. so anything here is external
+    // NOTE re injected events .. we block our own (and ahk) injections at hook level .. so anything here is external
     // so we'll want to let them through, only updating our tracking of external state (not our physical state)
 
     fn handle_key_down (&'static self, ev: Event, ks:KSR) -> EvProc_Ds {

@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, MSG, 
 /// So the goal of this module is to switch behavior based on whether this process was started with '-hook-guard'
 /// If not, we dont do anything immediately, and simply allow spawning off a hook guard process later on demand
 /// Else, we simply assume we are the hook-guard and install a dummy LL Keyboard hook and sit on it, never returning!
-
+///
 pub struct HookGuard {
     // we'll hold a job object to assign any hook-guard processes we create (so they get auto cleaned up on exit)
     job : Option <isize>,

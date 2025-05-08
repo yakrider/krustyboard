@@ -17,21 +17,21 @@ pub enum ModeState_T {
     // note below that no_ms can be useful to fill in fns set to take somethhing .. (it is ignored at its not in bitmaps)
     // and in general, [msE, msD, msF, msR] are to be used for l2 [sel, del, word, fast] actions respectively
     no_ms,
-    msE,      msD,       msF,       msR,
-    msE_dbl,  msD_dbl,   msF_dbl,   msR_dbl,
-    qks,      qks1,      qks2,      qks3,      qks4,
-    qks_dbl,  qks1_dbl,  qks2_dbl,  qks3_dbl,  qks4_dbl,
+    msE,      msD,      msF,      msR,
+    msE_dbl,  msD_dbl,  msF_dbl,  msR_dbl,
+    msQ,      ms1,      ms2,      ms3,      ms4,
+    msQ_dbl,  ms1_dbl,  ms2_dbl,  ms3_dbl,  ms4_dbl,
 }
 
 impl ModeState_T {
     pub fn is_l2 (self) -> bool {
         matches! (self,  msE | msD | msF | msR)
     }
-    pub fn is_qks (self) -> bool {
-        matches! (self,  qks | qks1 | qks2 | qks3 | qks4)
+    pub fn is_q1234 (self) -> bool {
+        matches! (self,  msQ | ms1 | ms2 | ms3 | ms4)
     }
     pub fn is_dbl (self) -> bool {
-        matches! (self,  msE_dbl | msD_dbl | msF_dbl | msR_dbl | qks_dbl | qks1_dbl | qks2_dbl | qks3_dbl | qks4_dbl)
+        matches! (self,  msE_dbl | msD_dbl | msF_dbl | msR_dbl | msQ_dbl | ms1_dbl | ms2_dbl | ms3_dbl | ms4_dbl)
     }
 }
 
@@ -67,15 +67,15 @@ pub struct ModeStates {
     pub msR : &'static ModeState,
 
     // quick-keys mode states
-    pub qks  : &'static ModeState,
-    pub qks1 : &'static ModeState,
-    pub qks2 : &'static ModeState,
-    pub qks3 : &'static ModeState,
-    pub qks4 : &'static ModeState,
+    pub msQ : &'static ModeState,
+    pub ms1 : &'static ModeState,
+    pub ms2 : &'static ModeState,
+    pub ms3 : &'static ModeState,
+    pub ms4 : &'static ModeState,
 
     // then the computed flags .. (helps avoid multiple checks at mouse-drag etc)
     pub some_l2_mode_active     : Flag,
-    pub some_qks_mode_active    : Flag,
+    pub some_q1234_mode_active  : Flag,
     pub some_mode_state_active  : Flag,
     pub some_mode_dbl_active    : Flag,
 
@@ -122,7 +122,7 @@ impl ModeState {
         // first we'll prep any supplemental actions specific to different types of mode-state keys
         let mss_cba : AF = {
             if      self.ms_t.is_l2()  { Arc::new ( move || k.ks.mode_states.some_l2_mode_active.set() ) }
-            else if self.ms_t.is_qks() { Arc::new ( move || k.ks.mode_states.some_qks_mode_active.set() ) }
+            else if self.ms_t.is_q1234() { Arc::new ( move || k.ks.mode_states.some_q1234_mode_active.set() ) }
             else { Arc::new ( || { } ) }
         };
         // now we can build the actual binding actions
@@ -165,7 +165,7 @@ impl ModeState {
         // again, first we'll prep any supplemental actions specific to different types of mode-state keys
         let mss_cba : AF = {
             if      self.ms_t.is_l2()  { Arc::new ( move || k.ks.mode_states.refresh_l2_mode_active_flag() ) }
-            else if self.ms_t.is_qks() { Arc::new ( move || k.ks.mode_states.refresh_qks_mode_active_flag() ) }
+            else if self.ms_t.is_q1234() { Arc::new ( move || k.ks.mode_states.refresh_q1234_mode_active_flag() ) }
             else { Arc::new ( || { } ) }
         };
         // then build the actual binding actions
@@ -207,15 +207,15 @@ impl ModeStates {
         // we'll make each of our modestates be 'static references to OnceCell instances ..
         // .. this allows us to pass each modestate into threads or AFs w/o having to make them clone
 
-        static MS_E     : OnceCell<ModeState> = OnceCell::new();   // key :  E
-        static MS_D     : OnceCell<ModeState> = OnceCell::new();   // key :  D
-        static MS_F     : OnceCell<ModeState> = OnceCell::new();   // key :  F
-        static MS_R     : OnceCell<ModeState> = OnceCell::new();   // key :  R
-        static MS_QKS   : OnceCell<ModeState> = OnceCell::new();   // key :  Q
-        static MS_QKS_1 : OnceCell<ModeState> = OnceCell::new();   // key :  1
-        static MS_QKS_2 : OnceCell<ModeState> = OnceCell::new();   // key :  2
-        static MS_QKS_3 : OnceCell<ModeState> = OnceCell::new();   // key :  3
-        static MS_QKS_4 : OnceCell<ModeState> = OnceCell::new();   // key :  4
+        static MS_E : OnceCell<ModeState> = OnceCell::new();   // key :  E
+        static MS_D : OnceCell<ModeState> = OnceCell::new();   // key :  D
+        static MS_F : OnceCell<ModeState> = OnceCell::new();   // key :  F
+        static MS_R : OnceCell<ModeState> = OnceCell::new();   // key :  R
+        static MS_Q : OnceCell<ModeState> = OnceCell::new();   // key :  Q
+        static MS_1 : OnceCell<ModeState> = OnceCell::new();   // key :  1
+        static MS_2 : OnceCell<ModeState> = OnceCell::new();   // key :  2
+        static MS_3 : OnceCell<ModeState> = OnceCell::new();   // key :  3
+        static MS_4 : OnceCell<ModeState> = OnceCell::new();   // key :  4
 
         // further, since ModeStates contains not just these static instances but also flags we populate here,
         // we want to hold an instance of this struct itself to avoid calling instance() here creating separate sets of flags
@@ -226,18 +226,18 @@ impl ModeStates {
             ModeStates {
                 _private : (),
 
-                msE  : MS_E     .get_or_init (|| ModeState::new (msE,  msE_dbl )),
-                msD  : MS_D     .get_or_init (|| ModeState::new (msD,  msD_dbl )),
-                msF  : MS_F     .get_or_init (|| ModeState::new (msF,  msF_dbl )),
-                msR  : MS_R     .get_or_init (|| ModeState::new (msR,  msR_dbl )),
-                qks  : MS_QKS   .get_or_init (|| ModeState::new (qks,  qks_dbl )),
-                qks1 : MS_QKS_1 .get_or_init (|| ModeState::new (qks1, qks1_dbl)),
-                qks2 : MS_QKS_2 .get_or_init (|| ModeState::new (qks2, qks2_dbl)),
-                qks3 : MS_QKS_3 .get_or_init (|| ModeState::new (qks3, qks3_dbl)),
-                qks4 : MS_QKS_4 .get_or_init (|| ModeState::new (qks4, qks4_dbl)),
+                msE : MS_E .get_or_init (|| ModeState::new (msE, msE_dbl)),
+                msD : MS_D .get_or_init (|| ModeState::new (msD, msD_dbl)),
+                msF : MS_F .get_or_init (|| ModeState::new (msF, msF_dbl)),
+                msR : MS_R .get_or_init (|| ModeState::new (msR, msR_dbl)),
+                msQ : MS_Q .get_or_init (|| ModeState::new (msQ, msQ_dbl)),
+                ms1 : MS_1 .get_or_init (|| ModeState::new (ms1, ms1_dbl)),
+                ms2 : MS_2 .get_or_init (|| ModeState::new (ms2, ms2_dbl)),
+                ms3 : MS_3 .get_or_init (|| ModeState::new (ms3, ms3_dbl)),
+                ms4 : MS_4 .get_or_init (|| ModeState::new (ms4, ms4_dbl)),
 
                 some_l2_mode_active    : Flag::default(),
-                some_qks_mode_active   : Flag::default(),
+                some_q1234_mode_active : Flag::default(),
                 some_mode_state_active : Flag::default(),
                 some_mode_dbl_active   : Flag::default(),
             }
@@ -245,10 +245,10 @@ impl ModeStates {
     }
 
 
-    pub fn ordered_mode_states (&'static self) -> [&ModeState; 9] { [
+    pub fn ordered_mode_states (&'static self) -> [&'static ModeState; 9] { [
         // NOTE that the ordering here will be uses to populate the combo bitmap and compare to current combo-mode-states
         self.msE, self.msD,  self.msF,  self.msR,
-        self.qks, self.qks1, self.qks2, self.qks3, self.qks4
+        self.msQ, self.ms1, self.ms2, self.ms3, self.ms4
     ] }
 
 
@@ -260,9 +260,9 @@ impl ModeStates {
     }
 
 
-    pub fn refresh_qks_mode_active_flag (&'static self) {
-        self.some_qks_mode_active.store (
-            self.qks.down.is_set() || self.qks1.down.is_set() || self.qks2.down.is_set() || self.qks3.down.is_set() || self.qks4.down.is_set()
+    pub fn refresh_q1234_mode_active_flag (&'static self) {
+        self.some_q1234_mode_active.store (
+            self.msQ.down.is_set() || self.ms1.down.is_set() || self.ms2.down.is_set() || self.ms3.down.is_set() || self.ms4.down.is_set()
         );
         self.refresh_mode_state_active_flag();
     }
@@ -274,7 +274,7 @@ impl ModeStates {
     }
     pub fn refresh_mode_state_active_flag(&'static self) {
         self.some_mode_state_active.store (
-            self.some_qks_mode_active.is_set() || self.some_l2_mode_active.is_set()
+            self.some_q1234_mode_active.is_set() || self.some_l2_mode_active.is_set()
         );
     }
     pub fn refresh_mode_dbl_active_flag (&'static self) {
@@ -289,7 +289,7 @@ impl ModeStates {
             ms.down.clear(); ms.dbl_tap.clear(); ms.consumed.clear();
         }
         self.some_l2_mode_active.clear();
-        self.some_qks_mode_active.clear();
+        self.some_q1234_mode_active.clear();
         self.some_mode_state_active.clear();
         self.some_mode_dbl_active.clear();
     }

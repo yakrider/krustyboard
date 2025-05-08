@@ -99,7 +99,7 @@ fn handle_pointer_window_drag (xt:i32, yt:i32, ks:KSR) {
         dest.right  - dest.left,
         dest.bottom - dest.top
     );
-    if ks.mode_states.some_qks_mode_active.is_set() { win_grp_move_mirrored (dx + dx_snap, dy + dy_snap, ks) }
+    if ks.mode_states.some_q1234_mode_active.is_set() { win_grp_move_mirrored (dx + dx_snap, dy + dy_snap, ks) }
 }
 
 fn win_grp_move_mirrored (dx:i32, dy:i32, ks:KSR) {     //println!("{:?}",(dx,dy));
@@ -276,7 +276,7 @@ pub fn capture_win_snap_dat (ks:KSR, pointer:Point, hwnd:Hwnd, win_grp: Option<W
     // we'll want to store rects for any group windows to make mirrored moves if in grp mode
     let mut grp_rects : FxHashMap <Hwnd, RECT> = FxHashMap::default();
     if let Some(wg) = win_grp {
-        if ks.mode_states.some_qks_mode_active.is_set() &&  ks.win_groups.grp_contains (wg,hwnd) {
+        if ks.mode_states.some_q1234_mode_active.is_set() &&  ks.win_groups.grp_contains (wg,hwnd) {
             let wgs = FxHashSet::from_iter (ks.win_groups.get_grp_hwnds(wg));
             rects .iter() .for_each ( |(h,r)| {
                 if wgs.contains(h) { let _ = grp_rects.insert(*h,*r); }

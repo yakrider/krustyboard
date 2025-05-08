@@ -32,19 +32,19 @@ pub fn setup_direct_binding_keys (_k:KR) {
 General Principles On Combo Mapping Allocation
     - Caps, if no other contention, will be Ctrl ..  Ralt will be Shift .. Lalt can stay Alt
     - Mode-Key behavior caveats [Q,1,2,3,4,E,D,F,R] :
-        - sadly due to the 2wsx hardware issue,  while qks2 is down, qks[1/3/4] WILL NOT layer on it!
+        - sadly due to the 2wsx hardware issue,  while ms2 is down, ms[1/3/4] WILL NOT layer on it!
         - the mode-keys themselves when with caps/modkey have repeat auto suppressed, and w/ caps they have fallbacks auto suppressed
         - when not w caps/modkey, mode-key consumption is auto marked in combo declarations (will suppress repeats unless otherwise specified)
-    - Qks [q,1,2,3,4] keys :
-        - qks1 (Numrow_1) can be Ctrl eqv when caps is otherwise used up .. combo fallbacks will auto-gen that if nothing defined
-        - qks2, qks3, qks4 are usually for app/ide/context specific setups ..
+    - Qks ms_[q,1,2,3,4] keys :
+        - ms1 (Numrow_1) can be Ctrl eqv when caps is otherwise used up .. combo fallbacks will auto-gen that if nothing defined
+        - ms2, ms3, ms4 are usually for app/ide/context specific setups ..
         - 1/2/3 also overload for vol/brightness w Win/Alt .. F1/F2/F3 for media ctrl w Win
     - Layer-2 mode-state Keys :
         - [E,D,F,R] are for L2 [sel, del, word-fast, 2x-fast] .. and in general E for edit/sel etc, F for faster navs
     - Layer-2 Keys :
         - w/ caps, [J, K, I, Comma, H, L, U, M] will generally be nav keys (left/right, up/down, home/end, pg-up/pg-dn]
         - these will also be primary allocations for those keys, and when w caps etc their own behavior will be secondary
-        - (Note that there's nothing internally special about these .. unlike qks or mode keys whose states get tracked)
+        - (Note that there's nothing internally special about these .. unlike mode keys whose states get tracked)
     - for some keys w multiple allocations, Q can bring up secondary allocations .. (e.g for wheel-to-arrows)
     - mouse wheels should mostly align with these broad strokes .. more details in the mouse-wheel section
     - where applicable, v-wheel should map to up/down nav and h-wheel should map to left/right nav
@@ -310,17 +310,17 @@ fn setup_mode_keys (k:KR) {
         // (note that repeats are suppressed, but first presses would still come in, but mode-keys w caps dont get any fallback proc either)
 
         // and we could do the same for alt/win etc, but we'd rather leave those open and they can be done later when/if such combos are set
-        // (this allows mod-key combos for mode-keys, and we can disable it only for specific cases (e.g. qks1 during vol ctrl etc)
+        // (this allows mod-key combos for mode-keys, and we can disable it only for specific cases (e.g. ms1 during vol ctrl etc)
         //k.cm .add_combo ( cg().k(key).m(lalt).s(ms_t),  ag().af(no_action()).mkg_w() );
         //k.cm .add_combo ( cg().k(key).m(lwin).s(ms_t),  ag().af(no_action()).mkg_w() );
 
         // note that we want to disable mode-keys across most mod-key combos when caps down ..
         // .. and thats painful to do via combos-maps, so we're now instead just disabling them in runtime fallbacks
-        // further, in fallback, we'll also layer base action w mod-keys for these mode-trigger-keys when qks1 down!
+        // further, in fallback, we'll also layer base action w mod-keys for these mode-trigger-keys when ms1 down!
 
         // however, we could at least restore caps-alt-<mode-key> to the expected ctrl-alt by default .. can ofc override these later
         //k.cm .add_combo ( cg().k(key).m(caps).s(ms_t).m(lalt),  ag().k(key).m(ctrl).m(alt) );
-        // ^^ naah, some of these we need to be silent and modify other combos (e.g. qks1), so lets do them individually later
+        // ^^ naah, some of these we need to be silent and modify other combos (e.g. ms1), so lets do them individually later
 
         // aight, so at the very least we can open back up the expected caps-as-ctrl behavior for mode-trigger keys on caps-dbl
         //k.cm .add_combo ( cg().k(key).m(caps_dbl),  ag().k(key).m(ctrl) );
@@ -328,7 +328,7 @@ fn setup_mode_keys (k:KR) {
     }
 
     // setup keys for layer-2 caret nav msE/msD/msF/msR mode states (typically for l2 sel/del/word/fast nav)
-    // note: registering as mode key will set all w/caps actions silent in fallback, along w layering mod-key combos w qks1
+    // note: registering as mode key will set all w/caps actions silent in fallback, along w layering mod-key combos w ms1
     // however, they are all in fallback only, so that behavior will be overridden by any combo registrations!
     // (and just for reminder, in theory we can assign other keys to these modes here w/o much issue)
     register_mode_key ( k, E, msE );
@@ -337,11 +337,11 @@ fn setup_mode_keys (k:KR) {
     register_mode_key ( k, R, msR );
 
     // setup the key for l4 shortcuts mode, but the mechanism is same as for the caret modes
-    register_mode_key ( k, Q,        qks  );
-    register_mode_key ( k, Numrow_1, qks1 );
-    register_mode_key ( k, Numrow_2, qks2 );
-    register_mode_key ( k, Numrow_3, qks3 );
-    register_mode_key ( k, Numrow_4, qks4 );
+    register_mode_key ( k, Q,        msQ );
+    register_mode_key ( k, Numrow_1, ms1 );
+    register_mode_key ( k, Numrow_2, ms2 );
+    register_mode_key ( k, Numrow_3, ms3 );
+    register_mode_key ( k, Numrow_4, ms4 );
 
 
     // we want to overlay some additional combos on some of these w Alt (others that modify other combos should remain silent)
@@ -377,7 +377,7 @@ fn setup_latch_init_sfsc (k:KR) {
 
     // latch-init -> caps-q-w .. (sticky) .. must be pressed rolling (2wsx limitation) .. (cf caps-q for many sticky modes)
     let fsc = FSC::LatchInit.ch();
-    k.cm .register_combo_sticky_first_stroke ( fsc,  cg() .k(W).no_rpt() .m(caps).s(qks) );
+    k.cm .register_combo_sticky_first_stroke ( fsc,  cg() .k(W).no_rpt() .m(caps).s(msQ) );
 
     // note that we've added and removed various co-registrations here in the past, incl caps-caps-Q, caps-caps-L etc ..
     // .. (and can add more if feel the need) .. but for now, we seem to exclusively end up using the caps-qw-<?> above
@@ -392,8 +392,8 @@ fn setup_latching_first_stroke_clear (k:KR) {
     k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps_dbl) );            // caps-caps-o
     k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps_dbl) );            // caps-caps-q
 
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps).s(qks) );         // caps-q-o
-    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps).s(qks_dbl) );     // caps-q-q
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps).s(msQ) );         // caps-q-o
+    k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps).s(msQ_dbl) );     // caps-q-q
 
     k.cm .register_combo_clear_latching_first_stroke ( cg().k(O).no_rpt() .m(caps) .fsc(FSC::LatchInit.ch()) );     // caps-qw-o
     k.cm .register_combo_clear_latching_first_stroke ( cg().k(Q).no_rpt() .m(caps) .fsc(FSC::LatchInit.ch()) );     // caps-qw-q
@@ -414,8 +414,8 @@ fn setup_caps_as_shift_mappings  (k:KR) {
 
     // now for at least some of these, we want to enable caps-q for ctrl (e.g. ctrl +/-)
     for key in [Minus, Equal, Slash] {
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks ),  ag().k(key).m(ctrl) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1),  ag().k(key).m(ctrl) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(msQ),  ag().k(key).m(ctrl) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(ms1),  ag().k(key).m(ctrl) );
     }
 }
 
@@ -436,8 +436,8 @@ fn disable_win_num_combos (k:KR) {
     // win-1,2,3 are separately setup for vol  plus caps-win-1,2,3,4 are used for win-grps
     // .. that leaves just the win-4, which we'll set it here
     // (note that for mode-state keys, we want to disable the _dbl too, as those trigger and fallback separately)
-    k.cm .add_combo ( cg().k(Numrow_4).m(lwin).s(qks4),       ag().af(no_action()) );
-    k.cm .add_combo ( cg().k(Numrow_4).m(lwin).s(qks4_dbl),   ag().af(no_action()) );
+    k.cm .add_combo ( cg().k(Numrow_4).m(lwin).s(ms4),       ag().af(no_action()) );
+    k.cm .add_combo ( cg().k(Numrow_4).m(lwin).s(ms4_dbl),   ag().af(no_action()) );
 }
 
 
@@ -483,12 +483,12 @@ fn setup_caps_dbl_combos (k:KR) {
     // we'll setup Fn<1-12> to output Fn[13-24] so we can use them to program in IDE
     [ (F1, F23), (F2, F24), (F3, F13), (F4,  F14), (F5,  F15), (F6,  F16),
       (F7, F17), (F8, F18), (F9, F19), (F10, F20), (F11, F21), (F12, F22),
-    ] .iter() .for_each ( |(k1,k2)| setup_caps_dbl_ms_key_swap (k, qks, *k1, *k2) );
+    ] .iter() .for_each ( |(k1,k2)| setup_caps_dbl_ms_key_swap (k, msQ, *k1, *k2) );
 
     // we'll do the same for the Numrow_<?> keys to generate Numpad_<?> keys so those too can be generated to configure in IDEs etc
     [ (Numrow_1, Numpad_1), (Numrow_2, Numpad_2), (Numrow_3, Numpad_3), (Numrow_4, Numpad_4), (Numrow_5, Numpad_5), (Numrow_6, Numpad_6),
       (Numrow_7, Numpad_7), (Numrow_8, Numpad_8), (Numrow_9, Numpad_9), (Numrow_0, Numpad_0), (Minus, Numpad_Minus), (Equal, Numpad_Add),
-    ] .iter() .for_each ( |(k1,k2)| setup_caps_dbl_ms_key_swap (k, qks, *k1, *k2) );
+    ] .iter() .for_each ( |(k1,k2)| setup_caps_dbl_ms_key_swap (k, msQ, *k1, *k2) );
 
     // finally, we'll allow outputting the 9 unspecified keys in the virtual-keycodes mapping (this is 'extended' with mode-state-E)
     [ (Numrow_1, OtherKey(0x97)), (Numrow_2, OtherKey(0x98)), (Numrow_3, OtherKey(0x99)),
@@ -508,7 +508,7 @@ fn setup_caps_dbl_combos (k:KR) {
         // first we'll set up the direct full-mk swaps themselves ..
         // (wont need wcsa() etc here coz there's no default/fallback when in combo w mode-states, only w modkeys )
         k.cm .add_combo ( cg().k(key).wcma(),                     ag().af (gen_full_mk_key_swap_af(k, ext_key)) );
-        k.cm .add_combo ( cg().k(key).s(qks).m(caps_dbl).wcma(),  ag().af (gen_full_mk_key_swap_af(k, key)) );
+        k.cm .add_combo ( cg().k(key).s(msQ).m(caps_dbl).wcma(),  ag().af (gen_full_mk_key_swap_af(k, key)) );
         // ^^ these caps-dbl alternatives can be used to generate the orig versions (again, for setup in IDEs etc)
     }
     [ (Left, ExtLeft),   (Right, ExtRight), (Up,     ExtUp),    (Down,     ExtDown),
@@ -528,7 +528,7 @@ fn setup_l2 (k:KR) {
      - e/d do sel/del modes, and those can be freely combined with the f/r word/fast nav modes
      - in del mode, left/home/up/pgup get ExtBackspace, right/end/down/pgdn get ExtDelete
      - in del mode, left/right do direct bksp/del, but others get select then bksp/del
-     - and in general, for l2 alternate outputs, qks1 will layer ctrl, and msE will layer shift (lalt will still do alt)
+     - and in general, for l2 alternate outputs, ms1 will layer ctrl, and msE will layer shift (lalt will still do alt)
      */
 
     /// action-fn generator type (e.g. to specify for various sel/del/word/fast modes for various l2-keys)
@@ -603,15 +603,15 @@ fn setup_l2 (k:KR) {
         //// ^^ meh, we'd rather keep these combos free than having pointless combos for 2x-deletes
 
 
-        // additionally, we'll overlay qks1 -> ctrl, and msE -> shift on l2 keys (for ergonomics while holding caps down)
-        // (shift is on msE instead of qks2, not just coz E is for sel elsewhere, but also 2wsx issues prevent qks1+qks2 layering)
-        //k.cm .add_combo ( cg().k(key).m(caps).s(msE),                ag().k(l2k).m(shift) );   // covered above
-        k.cm .add_combo ( cg().k(key).m(caps).m(lalt),                 ag().k(l2k).m(alt) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1),                 ag().k(l2k).m(ctrl) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1).m(lalt),         ag().k(l2k).m(ctrl).m(alt) );
-        k.cm .add_combo ( cg().k(key).m(caps).m(lalt).s(msE),          ag().k(l2k).m(alt).m(shift) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1).s(msE),          ag().k(l2k).m(ctrl).m(shift) );
-        k.cm .add_combo ( cg().k(key).m(caps).s(qks1).m(lalt).s(msE),  ag().k(l2k).m(ctrl).m(alt).m(shift) );
+        // additionally, we'll overlay ms1 -> ctrl, and msE -> shift on l2 keys (for ergonomics while holding caps down)
+        // (shift is on msE instead of ms2, not just coz E is for sel elsewhere, but also 2wsx issues prevent ms1+ms2 layering)
+        //k.cm .add_combo ( cg().k(key).m(caps).s(msE),               ag().k(l2k).m(shift) );   // covered above
+        k.cm .add_combo ( cg().k(key).m(caps).m(lalt),                ag().k(l2k).m(alt) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(ms1),                 ag().k(l2k).m(ctrl) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(ms1).m(lalt),         ag().k(l2k).m(ctrl).m(alt) );
+        k.cm .add_combo ( cg().k(key).m(caps).m(lalt).s(msE),         ag().k(l2k).m(alt).m(shift) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(ms1).s(msE),          ag().k(l2k).m(ctrl).m(shift) );
+        k.cm .add_combo ( cg().k(key).m(caps).s(ms1).m(lalt).s(msE),  ag().k(l2k).m(ctrl).m(alt).m(shift) );
 
         // finally we'll layer caps-as-ctrl on caps-dbl for these for easy access
         //k.cm .add_combo ( cg().k(key).m(caps_dbl),          ag().k(key).m(ctrl) );
@@ -713,7 +713,7 @@ fn setup_mouse_left_btn (k:KR) {
 
 
     /// for **_ win-groups _** ..
-    // .. caps-lwin-qks<?> + lbtn-dbl-click on window is add that window to the corresponding group
+    // .. caps-lwin-ms<?> + lbtn-dbl-click on window is add that window to the corresponding group
     fn setup_win_grp_action (k:KR, s:ModeState_T, wg:WinGroups_E) {
         let add_af = Arc::new ( move || {
             let hwnd = win_get_hwnd_from_pointer();
@@ -727,10 +727,10 @@ fn setup_mouse_left_btn (k:KR) {
         k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s),           ag().af(wsd_af.clone()) );
         k.cm .add_combo ( cg().mbtn(LeftButton).m(lwin).m(caps).s(s).m(shift),  ag().af(wsd_af) );
     }
-    setup_win_grp_action (k, qks1, wg1);
-    setup_win_grp_action (k, qks2, wg2);
-    setup_win_grp_action (k, qks3, wg3);
-    setup_win_grp_action (k, qks4, wg4);
+    setup_win_grp_action (k, ms1, wg1);
+    setup_win_grp_action (k, ms2, wg2);
+    setup_win_grp_action (k, ms3, wg3);
+    setup_win_grp_action (k, ms4, wg4);
 
 
 
@@ -828,16 +828,16 @@ fn setup_mouse_right_btn (k:KR) {
 
 
 
-    // win-caps-qks? + rbtn-click is used to remove the pointed window from the corresponding win-group
+    // win-caps-ms? + rbtn-click is used to remove the pointed window from the corresponding win-group
     fn gen_af_win_grp_remove (wg:WinGroups_E, ks:KSR) -> AF { Arc::new ( move || {
         let hwnd = win_get_hwnd_from_pointer();
         ks.win_groups.remove_from_group (wg, hwnd);
         jiggle_window(hwnd);
     } ) }
-    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks1),  ag().af (gen_af_win_grp_remove (wg1, k.ks) ) );
-    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks2),  ag().af (gen_af_win_grp_remove (wg2, k.ks) ) );
-    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks3),  ag().af (gen_af_win_grp_remove (wg3, k.ks) ) );
-    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(qks4),  ag().af (gen_af_win_grp_remove (wg4, k.ks) ) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(ms1),  ag().af (gen_af_win_grp_remove (wg1, k.ks) ) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(ms2),  ag().af (gen_af_win_grp_remove (wg2, k.ks) ) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(ms3),  ag().af (gen_af_win_grp_remove (wg3, k.ks) ) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(lwin).m(caps).s(ms4),  ag().af (gen_af_win_grp_remove (wg4, k.ks) ) );
 
 
     // caps-q2-rbtn to search highlighted in chrome (via macro like sets of steps w available chrome hotkeys)
@@ -849,7 +849,7 @@ fn setup_mouse_right_btn (k:KR) {
         ExtDown.press_release(); ExtDown.press_release(); ExtDown.press_release();
         Enter.press_release();
     }
-    k.cm .add_combo ( cg().mbtn(RightButton).m(caps).s(qks2),  ag().af (spawned_action (chrome_search_highlighted)) );
+    k.cm .add_combo ( cg().mbtn(RightButton).m(caps).s(ms2),  ag().af (spawned_action (chrome_search_highlighted)) );
 
 }
 
@@ -1007,7 +1007,7 @@ fn setup_vert_wheel (k:KR) {
 
 
         (now a whole pile to gen up/dn, left/right arrows w layered mods)
-        (note that qks1 combos are special here as for ergo reasons, they can be pressed w/o Q)
+        (note that ms1 combos are special here as for ergo reasons, they can be pressed w/o Q)
         - caps-q-wh      -->  up/dn
         - caps-q-A-wh    -->  alt up/dn
         - caps-q-e-wh    -->  shift up/dn
@@ -1073,37 +1073,37 @@ fn setup_vert_wheel (k:KR) {
     // alt-wheel will do brightness control .. (and we'll separately support alt-tab and swtiche nav)
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt),   -4, 4,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
-    // qks1-alt-wheel (i.e. alt+1+wheel) .. we'll do finer brightness adjustments
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(qks1),   -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
+    // ms1-alt-wheel (i.e. alt+1+wheel) .. we'll do finer brightness adjustments
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).s(ms1),   -1, 1,   |ag,p| ag.af (gen_af_incr_brightness (p)) );
 
     // caps-alt-wheel can do dimming overlay adjustments
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lalt).m(caps),   4, -4,   |ag,p| ag.af (gen_af_incr_overlay (k, p)) );
 
 
     /// setups for **_ Arrow-Up/Down nav _** (in addn to some portions above)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(shift) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ),                  ExtDown, ExtUp,   |ag,key| ag.k(key) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(alt).m(shift) );
 
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1),                  ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(shift) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1),                  ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1).m(lalt),          ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1).s(msE),           ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1).m(lalt).s(msE),   ExtDown, ExtUp,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
 
 
     /// setups for **_ LEFT-RIGHT nav _** (reminscent of h-wheel, useful to nav sidebar trees etc)
     // we'll set Left/Right up on sensible _dbl taps on the mod-keys we use for Up/Down nav combos
     // (we're trying to avoid wildcards on wheel itself, and would rather do this)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl),                  ExtRight, ExtLeft,   |ag,key| ag.k(key) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).s(msE),           ExtRight, ExtLeft,   |ag,key| ag.k(key).m(shift) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks_dbl).m(lalt).s(msE),   ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ_dbl),                  ExtRight, ExtLeft,   |ag,key| ag.k(key) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ_dbl).m(lalt),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ_dbl).s(msE),           ExtRight, ExtLeft,   |ag,key| ag.k(key).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msQ_dbl).m(lalt).s(msE),   ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
 
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl),                 ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt),         ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).s(msE),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(shift) );
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks1_dbl).m(lalt).s(msE),  ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1_dbl),                  ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1_dbl).m(lalt),          ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1_dbl).s(msE),           ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms1_dbl).m(lalt).s(msE),   ExtRight, ExtLeft,   |ag,key| ag.k(key).m(ctrl).m(alt).m(shift) );
 
 
 
@@ -1111,10 +1111,10 @@ fn setup_vert_wheel (k:KR) {
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin),    VolumeDown, VolumeUp,   |ag,key| ag.k(key).mkg_nw() );
 
     /// win-1 wheel .. **_ media next/prev _** ..
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(qks1),   true, false,   |ag,p| ag.af (media_next_action (k.ks, p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(ms1),   true, false,   |ag,p| ag.af (media_next_action (k.ks, p)) );
 
     /// and win-1-1 wheel .. **_ media skip-fwd-bkwd _** ..
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(qks1_dbl),   true, false,   |ag,p| ag.af (media_skips_action (1, k.ks, p)) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(lwin).s(ms1_dbl),   true, false,   |ag,p| ag.af (media_skips_action (1, k.ks, p)) );
 
     /// caps-d-d-wheel, we'll **_ navigate across WINDOWS _** (via switche snapshots)
     // ^^ moved to switche section
@@ -1129,12 +1129,12 @@ fn setup_vert_wheel (k:KR) {
     setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(msR),    (), (),   |ag,_| ag.af (gen_af_fast_scroll (k.ks)) );
 
 
-    /// caps-qks3-wheel .. we'll use for **_ IDE LAST LOCATION NAV _** .. (via Alt Left/Right)
+    /// caps-ms3-wheel .. we'll use for **_ IDE LAST LOCATION NAV _** .. (via Alt Left/Right)
     //  (in theory, we have easy combos for alt-l/r, but this make it tie in better w the edit locs below)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks3),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms3),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt) );
 
     /// and with mode-state-E, we'll do **_ IDE LAST EDIT LOCATION NAV _** .. (via Alt-Shift-Left/Right)
-    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(qks3).s(msE),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
+    setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).s(ms3).s(msE),    ExtRight, ExtLeft,   |ag,key| ag.k(key).m(alt).m(shift) );
 
 }
 
@@ -1246,7 +1246,7 @@ fn setup_win_key_combos (k:KR) {
     k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin),               ag().k(Q).m(win).m(alt) );
     k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).m(shift),      ag().k(Q).m(win).m(alt).m(shift) );
     // and since this is mode-key again, we'll disable the _dbl
-    k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).s(qks_dbl),    ag().af(no_action()) );
+    k.cm .add_combo ( cg().k(Q).no_rpt().m(lwin).s(msQ_dbl),    ag().af(no_action()) );
 
     // caps-win-c being used to launch winmerge diff from last two clipboard entries
     //k.cm .add_combo ( cg().k(C).no_rpt().m(caps).m(lwin),  ag().af (action (start_winmerge_clipboard)) );
@@ -1272,18 +1272,18 @@ fn setup_brightness_vol_media (k:KR) {
 
     // we'll also add these under a brightness fsc .. caps-q-b .. sticky
     let fsc = FSC::Brightness.ch();
-    k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(B).no_rpt().m(caps).s(qks) );
+    k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(B).no_rpt().m(caps).s(msQ) );
     k.cm .add_combo ( cg().k(I    ).m(caps).fsc(fsc),  ag().af (gen_incr_brightness( 1)) );
     k.cm .add_combo ( cg().k(Comma).m(caps).fsc(fsc),  ag().af (gen_incr_brightness(-1)) );
 
     // we'll use win-2/3 as vol down/up .. and alt-2/3 for brightness down/up
-    // .. and we'll set these to have a 'fine-mode' when qks-1 key is held with alt
-    // (note that mode keys (e.g. qks) in combos get auto marked for consumption (so no repeats), specifying 'msc_nc' disables that)
+    // .. and we'll set these to have a 'fine-mode' when ms-1 key is held with alt
+    // (note that mode keys (e.g. msQ) in combos get auto marked for consumption (so no repeats), specifying 'msc_nc' disables that)
     // this one is complicated as we're trying to make the mode-keys themselves do the action (generally not advisable) ..
     // .. plus we want them to continue working when repeatedly tapped triggering accidental dbl_tap .. hence the _dbl below
     // (note that q/1/2/3/4 are qks* keys, so their caps combos (and repeats) are already suppressed at binding level)
     // (re disabling ms_dbl below, those would already have no fallback, but we'll including them to disable low-level repeats too)
-    [qks1, qks2, qks3, qks1_dbl, qks2_dbl, qks3_dbl] .iter().for_each ( |&ms| {
+    [ms1, ms2, ms3, ms1_dbl, ms2_dbl, ms3_dbl] .iter().for_each ( |&ms| {
         k.cm .add_combo ( cg().k(Numrow_1).m(lalt).s(ms),  ag().af (no_action()) );
         k.cm .add_combo ( cg().k(Numrow_1).m(lwin).s(ms),  ag().af (no_action()) );
     } );
@@ -1294,16 +1294,16 @@ fn setup_brightness_vol_media (k:KR) {
         }
     }
     // alt-2 is brightness down, alt-3 is brightness up .. (fine mode when 1 is held)
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lalt, no_ms, gen_incr_brightness(-4));
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lalt, no_ms, gen_incr_brightness( 4));
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lalt, qks1,  gen_incr_brightness(-1));
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lalt, qks1,  gen_incr_brightness( 1));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms2, lalt, no_ms, gen_incr_brightness(-4));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms3, lalt, no_ms, gen_incr_brightness( 4));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms2, lalt, ms1,   gen_incr_brightness(-1));
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms3, lalt, ms1,   gen_incr_brightness( 1));
 
     // win-2 is vol down, win-3 is vol up .. (fine mode does nothing different for volume)
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lwin, no_ms, ag().k(VolumeDown).gen_af());
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lwin, no_ms, ag().k(VolumeUp  ).gen_af());
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks2, lwin, qks1,  ag().k(VolumeDown).gen_af());
-    setup_fine_mode_ms_key (k, k.ks.mode_states.qks3, lwin, qks1,  ag().k(VolumeUp  ).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms2, lwin, no_ms, ag().k(VolumeDown).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms3, lwin, no_ms, ag().k(VolumeUp  ).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms2, lwin, ms1,   ag().k(VolumeDown).gen_af());
+    setup_fine_mode_ms_key (k, k.ks.mode_states.ms3, lwin, ms1,   ag().k(VolumeUp  ).gen_af());
 
     // win-f1 play/pause, caps-f1 toggle mute, base-case: switche-invoke, ralt for actual F1
     // (Note that there also a bunch of F1 and F2 combos in switche sections)
@@ -1341,16 +1341,16 @@ fn setup_brightness_vol_media (k:KR) {
 
     // we'll also setup a media/vol fsc : caps-q-m .. sticky
     let fsc = FSC::MediaVol.ch();
-    k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(M).no_rpt().m(caps).s(qks) );
+    k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(M).no_rpt().m(caps).s(msQ) );
 
-    k.cm .add_combo ( cg().k(I    ).m(caps).wcs(qks).fsc(fsc),  ag().k(VolumeUp  ) );    // vol up
-    k.cm .add_combo ( cg().k(Comma).m(caps).wcs(qks).fsc(fsc),  ag().k(VolumeDown) );    // vol down
-    k.cm .add_combo ( cg().k(M    ).m(caps).wcs(qks).fsc(fsc),  ag().k(VolumeMute) );    // mute
+    k.cm .add_combo ( cg().k(I    ).m(caps).wcs(msQ).fsc(fsc),  ag().k(VolumeUp  ) );    // vol up
+    k.cm .add_combo ( cg().k(Comma).m(caps).wcs(msQ).fsc(fsc),  ag().k(VolumeDown) );    // vol down
+    k.cm .add_combo ( cg().k(M    ).m(caps).wcs(msQ).fsc(fsc),  ag().k(VolumeMute) );    // mute
 
-    k.cm .add_combo ( cg().k(J).m(caps).wcs(qks).fsc(fsc),  ag().af (media_next_action (k.ks, false)) );         // prev
-    k.cm .add_combo ( cg().k(K).m(caps).wcs(qks).fsc(fsc),  ag().af (media_next_action (k.ks, true )) );         // next
-    k.cm .add_combo ( cg().k(H).m(caps).wcs(qks).fsc(fsc),  ag().af (media_skips_action (1, k.ks, false)) );     // skip bkwd
-    k.cm .add_combo ( cg().k(L).m(caps).wcs(qks).fsc(fsc),  ag().af (media_skips_action (1, k.ks, true )) );     // skip fwd
+    k.cm .add_combo ( cg().k(J).m(caps).wcs(msQ).fsc(fsc),  ag().af (media_next_action (k.ks, false)) );         // prev
+    k.cm .add_combo ( cg().k(K).m(caps).wcs(msQ).fsc(fsc),  ag().af (media_next_action (k.ks, true )) );         // next
+    k.cm .add_combo ( cg().k(H).m(caps).wcs(msQ).fsc(fsc),  ag().af (media_skips_action (1, k.ks, false)) );     // skip bkwd
+    k.cm .add_combo ( cg().k(L).m(caps).wcs(msQ).fsc(fsc),  ag().af (media_skips_action (1, k.ks, true )) );     // skip fwd
 
 
     // we'll also set these on a latching fsc (caps-qw)-m for sustained sessions of track trawling w arrow keys
@@ -1367,14 +1367,14 @@ fn setup_brightness_vol_media (k:KR) {
 
 
 fn setup_win_groups (k:KR) {
-    // we'll assign the Numrow_[1/2/3/4] (overloaded with qks1/qks2/qks3/qks4) for win-grp activations
-    // and when those are held down (hence why assigned to qks keys), we'll have T/W etc do actions on those groups
+    // we'll assign the Numrow_[1/2/3/4] (overloaded with ms1/ms2/ms3/ms4) for win-grp activations
+    // and when those are held down (hence why assigned to ms* keys), we'll have T/W etc do actions on those groups
     // (Note that there are also mouse lbtn-dbl-click and rbtn-click combos (defined in mouse sections above) for add/remove to wingroups)
     fn set_win_grp_af_combos <F> (k:KR, key:Option<Key>, f:F)
         where F : Fn (&KrustyState, WinGroups_E) + Clone + Send + Sync + 'static
     {
         fn wgs (wg: WinGroups_E) -> ModeState_T {
-            match wg { wg1 => qks1,  wg2 => qks2,  wg3 => qks3,  wg4 => qks4 }
+            match wg { wg1 => ms1,  wg2 => ms2,  wg3 => ms3,  wg4 => ms4 }
         }
         fn wgk (key:Option<Key>, wg: WinGroups_E) -> Key {
             key .unwrap_or ( match wg { wg1 => Numrow_1,  wg2 => Numrow_2,  wg3 => Numrow_3,  wg4 => Numrow_4 } )
@@ -1466,7 +1466,7 @@ fn setup_space_key (k:KR) {
 
     k.cm .add_combo ( cg().k(Space).m(lalt_dbl),   ag().k(Space).m(alt) );   // dbl-lalt-space -> alt-space (orig action)
 
-    k.cm .add_combo ( cg().k(Space).m(caps).s(qks),         ag().k(Enter).m(ctrl) );    // caps-q-space     -> ctrl-enter
+    k.cm .add_combo ( cg().k(Space).m(caps).s(msQ),         ag().k(Enter).m(ctrl) );    // caps-q-space     -> ctrl-enter
     k.cm .add_combo ( cg().k(Space).m(caps).s(msF_dbl),     ag().k(Enter).m(ctrl) );    // caps-ff-space    -> ctrl-enter
     k.cm .add_combo ( cg().k(Space).m(caps).s(msE).s(msF),  ag().k(Enter).m(ctrl) );    // caps-e-f-space   -> ctrl-enter
 
@@ -1477,8 +1477,8 @@ fn setup_space_key (k:KR) {
 
     // beyond that .. caps-space as ctrl-space, caps-lalt-space as alt-enter for intellij
     // and some actual Space outputs
-    k.cm .add_combo ( cg().k(Space).m(caps).s(qks1),  ag().k(Space).m(ctrl).m(shift) ); // qks1-space       -> ctrl_shift_space for IDE
-    k.cm .add_combo ( cg().k(Space).m(caps).s(qks2),  ag().k(Space).m(ctrl).m(shift) ); // qks1-space       -> ctrl_shift_space for IDE
+    k.cm .add_combo ( cg().k(Space).m(caps).s(ms1),  ag().k(Space).m(ctrl).m(shift) ); // ms1-space       -> ctrl_shift_space for IDE
+    k.cm .add_combo ( cg().k(Space).m(caps).s(ms2),  ag().k(Space).m(ctrl).m(shift) ); // ms1-space       -> ctrl_shift_space for IDE
     //k.cm .add_combo ( cg().k(Space),                  cg().k(Space) );                // space            -> space
     //k.cm .add_combo ( cg().k(Space).m(caps),          cg().k(Space).m(ctrl) );        // caps-space       -> ctrl-space
     // ^^ not necessary as cb compositions default to this, but also useful to see here for reference
@@ -1497,7 +1497,7 @@ fn setup_misc_standalone_combos (k:KR) {
     /// .. so we'll put additional ctrl-s on Alt-s, caps-q-s, caps-f-s, and caps-caps-s for now (we'll see what gets used)
     k.cm .add_combo ( cg().k(S).m(lalt),         ag().k(S).m(ctrl) );
     k.cm .add_combo ( cg().k(S).m(caps_dbl),     ag().k(S).m(ctrl) );
-    k.cm .add_combo ( cg().k(S).m(caps).s(qks),  ag().k(S).m(ctrl) );
+    k.cm .add_combo ( cg().k(S).m(caps).s(msQ),  ag().k(S).m(ctrl) );
     k.cm .add_combo ( cg().k(S).m(caps).s(msF),  ag().k(S).m(ctrl) );   // (must be rolling due to 2wsx)
 
 
@@ -1548,7 +1548,7 @@ fn setup_misc_standalone_combos (k:KR) {
     // but we'll also support caps-gg for easier ergonomics (where ctrl-g on first press is harmless)
     k.cm .add_combo ( cg().k(G).dbl().m(caps),  gamgee_ag.clone() );
     // and we'll add caps-d-g too going by what was done for qbar invocation (cc-a, c-aa, c-q-a)
-    k.cm .add_combo ( cg().k(G).m(caps).s(qks),  gamgee_ag.clone() );
+    k.cm .add_combo ( cg().k(G).m(caps).s(msQ),  gamgee_ag.clone() );
 
     // caps-F-B can do WinDusky toggle (via win-alt-I) .. just wanted something simpler during dev
     //k.cm .add_combo ( cg().k(B).m(caps).s(msF),  ag().k(I).m(win).m(alt) );
@@ -1869,7 +1869,7 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     // we'll set Alt-F2 to bring chrome tabs-outliner (via switche) to keep w the theme of Alt-F<n> keys for task switching
     k.cm .add_combo ( cg().k(F2).m(lalt),      ag().af (switche_direct__tabs_outliner.clone()) );
 
-    // we'll put app-specific direct-switch on lalt-qks1 combos, and on caps-d-s sticky fsc
+    // we'll put app-specific direct-switch on lalt-ms1 combos, and on caps-d-s sticky fsc
     // (note that it must be caps-d-s in that order, as caps-s-d will trigger the caps-s to bring up swithce first)
     let fsc = FSC::SwitcheDirect.ch();
     k.cm .register_combo_sticky_first_stroke ( fsc,  cg().k(S).m(caps).s(msD) );
@@ -1882,7 +1882,7 @@ fn setup_switch_windows_direct_sfsc (k:KR) {
     k.cm .add_combo ( cg().whl().frwd().m(caps).fsc(fsc),   ag().af (SnapListSwitchPrev.send_af()) );
 
     let setup_direct_switch = move |key:Key, af:&AF| {
-        k.cm .add_combo ( cg().k(key).m(lalt).s(qks1),   ag().af(af.clone()) );
+        k.cm .add_combo ( cg().k(key).m(lalt).s(ms1),    ag().af(af.clone()) );
         k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc),  ag().af(af.clone()) );
     };
     setup_direct_switch ( Space,  & switche_direct__z_top           );   // Space -> last-active
@@ -2086,9 +2086,9 @@ fn setup_window_action_sfsc (k:KR) {
         k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 40, dy * 40) )) );
         k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 20, dy * 20) )) );
         // and fine steps
-        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (k.ks, side_t) )) );
-        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 4, dy * 4) )) );
-        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(qks1).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 2, dy * 2) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(ms1).s(msF),   ag().af (Arc::new (move || snap_closest_edge_side (k.ks, side_t) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(ms1),          ag().af (Arc::new (move || win_fgnd_move_rel (dx * 4, dy * 4) )) );
+        k.cm .add_combo ( cg().k(key).m(caps).fsc(fsc).s(ms1).s(msR),   ag().af (Arc::new (move || win_fgnd_stretch (dx * 2, dy * 2) )) );
     };
     setup_win_move_key ( J,     -1,  0,  Left  );
     setup_win_move_key ( K,      1,  0,  Right );
@@ -2138,7 +2138,7 @@ fn setup_kbd_pointer_sfsc (k:KR) {
 
     // fsc : caps-q-P .. sticky
     // we've been registering independent stickies under caps-q-<?> for easier recall, so might as well add that
-    k.cm .register_combo_sticky_first_stroke ( fsc,  cg() .k(P).no_rpt() .m(caps).s(qks) );
+    k.cm .register_combo_sticky_first_stroke ( fsc,  cg() .k(P).no_rpt() .m(caps).s(msQ) );
 
     // fsc : caps-qw-P .. latching
     // we'll also co-register it under common latch-init fsc for latching mode on the same fsc!
@@ -2374,8 +2374,8 @@ fn setup_IDE_combos (k:KR) {
     // ^^ these can be used directly ofc .. mostly here for reference or additional hotkeys
 
 
-    k.cm .add_combo ( cg().k(G).m(caps).s(msE),   show_file_git_diff );
-    k.cm .add_combo ( cg().k(P).m(caps).s(qks3),  toggle_diff_preview );
+    k.cm .add_combo ( cg().k(G).m(caps).s(msE),  show_file_git_diff );
+    k.cm .add_combo ( cg().k(P).m(caps).s(ms3),  toggle_diff_preview );
 
     k.cm .add_combo ( cg().k(B).m(caps_dbl),   toggle_statusbar );
 
@@ -2385,16 +2385,16 @@ fn setup_IDE_combos (k:KR) {
 
     // .. note that there's natural caps-alt-<l2> that does nav among last caret locations (via alt-left/right)
 
-    k.cm .add_combo ( cg().k(K).m(caps).s(qks2),  popup_bookmarks_viewer );
-    k.cm .add_combo ( cg().k(U).m(caps).s(qks2),  caret_bookmark_toggle  );
+    k.cm .add_combo ( cg().k(K).m(caps).s(ms2),  popup_bookmarks_viewer );
+    k.cm .add_combo ( cg().k(U).m(caps).s(ms2),  caret_bookmark_toggle  );
 
     k.cm .add_combo ( cg().k(N).m(caps).s(msF),  popup_quick_nav_bar );
     k.cm .add_combo ( cg().k(O).m(caps).s(msF),  _open_in_other_view_pane );
 
-    k.cm .add_combo ( cg().k(I    ).m(caps).s(qks2),  bookmark_prev );
-    k.cm .add_combo ( cg().k(Comma).m(caps).s(qks2),  bookmark_next );
+    k.cm .add_combo ( cg().k(I    ).m(caps).s(ms2),  bookmark_prev );
+    k.cm .add_combo ( cg().k(Comma).m(caps).s(ms2),  bookmark_next );
 
-    k.cm .add_combo ( cg().k(Comma).m(caps).s(qks),  tools_tabs_dropdown );
+    k.cm .add_combo ( cg().k(Comma).m(caps).s(msQ),  tools_tabs_dropdown );
     // ^^ normal caps-alt-comma will also naturally give alt-down
 
     k.cm .add_combo ( cg().k(Backslash).m(caps).s(msF),  expand_nav_tree.clone() );
@@ -2425,8 +2425,8 @@ fn setup_IDE_combos (k:KR) {
     k.cm .add_combo ( cg().k(J).m(caps).s(msE).s(msR),  move_code_elem_left  );
     k.cm .add_combo ( cg().k(K).m(caps).s(msE).s(msR),  move_code_elem_right );
 
-    k.cm .add_combo ( cg().k(I    ).m(caps).s(qks3).s(msR),  move_stmt_up );
-    k.cm .add_combo ( cg().k(Comma).m(caps).s(qks3).s(msR),  move_stmt_dn );
+    k.cm .add_combo ( cg().k(I    ).m(caps).s(ms3).s(msR),  move_stmt_up );
+    k.cm .add_combo ( cg().k(Comma).m(caps).s(ms3).s(msR),  move_stmt_dn );
 
     k.cm .add_combo ( cg().k(Numrow_9).m(caps).s(msE),  toggle_column_mode );
 
@@ -2505,8 +2505,8 @@ fn setup_IDE_combos (k:KR) {
 
     k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()),                   ag().af (line_to_repl) );
     k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()) .m(caps).m(ralt),  ag().af (page_to_repl.clone()) );
-    k.cm .add_combo ( cg() .k(I ) .c(ide_fgnd()) .m(caps).s(qks ),  ag().af (page_to_repl) );
-    k.cm .add_combo ( cg() .k(F ) .c(ide_fgnd()) .m(caps).s(qks ),  ag().af (format_page) );
+    k.cm .add_combo ( cg() .k(I ) .c(ide_fgnd()) .m(caps).s(msQ),  ag().af (page_to_repl) );
+    k.cm .add_combo ( cg() .k(F ) .c(ide_fgnd()) .m(caps).s(msQ),  ag().af (format_page) );
 
     // and caps-F2 will simply send selection to repl as is (w/o selecting full line etc)
     k.cm .add_combo ( cg() .k(F2) .c(ide_fgnd()) .m(caps),  sel_send.clone() );
@@ -2518,7 +2518,7 @@ fn setup_IDE_combos (k:KR) {
         search_replace.gen_af(),
         ag().k(Enter).m(ctrl).gen_af()
     );
-    k.cm .add_combo ( cg().k(H).m(caps).s(qks),   ag().af (ide_search_in_new_window) );
+    k.cm .add_combo ( cg().k(H).m(caps).s(msQ),   ag().af (ide_search_in_new_window) );
 
 
     // IDE lcq helpers .. we'll put these on two stroke .. s1: Alt-F14 .. s2: Alt-[F24-F21]
@@ -2527,11 +2527,11 @@ fn setup_IDE_combos (k:KR) {
     let lc_submit = ide_two_stroke_combo (F14, F22);   // submit file to lc
     let lc_tests  = ide_two_stroke_combo (F14, F21);   // get additional lc test-cases
 
-    k.cm .add_combo ( cg().k(L       ).s(qks).m(caps),  ag().af (lc_tool) );    // caps-q-l .. lc_tool
-    k.cm .add_combo ( cg().k(Numrow_8).s(qks).m(caps),  ag().af (lc_tests) );   // caps-q-8 .. more lc test-cases
+    k.cm .add_combo ( cg().k(L       ).s(msQ).m(caps),  ag().af (lc_tool) );    // caps-q-l .. lc_tool
+    k.cm .add_combo ( cg().k(Numrow_8).s(msQ).m(caps),  ag().af (lc_tests) );   // caps-q-8 .. more lc test-cases
 
     k.cm .add_combo ( cg().k(Period).m(lalt),         ag().af (console_clearing_af (lc_run)) );     // alt-period .. lc-run
-    k.cm .add_combo ( cg().k(Period).s(qks).m(caps),  ag().af (console_clearing_af (lc_submit)) );  // caps-q-period .. lc-submit
+    k.cm .add_combo ( cg().k(Period).s(msQ).m(caps),  ag().af (console_clearing_af (lc_submit)) );  // caps-q-period .. lc-submit
 
 
     // note there's also some fancy ide-tab-switcher tweaks in ctrl-tab first-stroke-combo block
@@ -2575,11 +2575,11 @@ fn setup_ditto_combos (k:KR) {
     let ditto_quick_paste__third   =  ag().k(Minus   ).m(alt).m(ctrl).m(shift);
     let ditto_quick_paste__fourth  =  ag().k(Equal   ).m(alt).m(ctrl).m(shift);
 
-    /// qks3 shortcuts to **_ paste nth ditto clip _** (configd via alt-ctrl-shift-<key> in ditto)
-    k.cm .add_combo ( cg().k(Numrow_9).m(caps).s(qks3), ditto_quick_paste__first  );
-    k.cm .add_combo ( cg().k(Numrow_0).m(caps).s(qks3), ditto_quick_paste__second );
-    k.cm .add_combo ( cg().k(Minus   ).m(caps).s(qks3), ditto_quick_paste__third  );
-    k.cm .add_combo ( cg().k(Equal   ).m(caps).s(qks3), ditto_quick_paste__fourth );
+    /// ms3 shortcuts to **_ paste nth ditto clip _** (configd via alt-ctrl-shift-<key> in ditto)
+    k.cm .add_combo ( cg().k(Numrow_9).m(caps).s(ms3), ditto_quick_paste__first  );
+    k.cm .add_combo ( cg().k(Numrow_0).m(caps).s(ms3), ditto_quick_paste__second );
+    k.cm .add_combo ( cg().k(Minus   ).m(caps).s(ms3), ditto_quick_paste__third  );
+    k.cm .add_combo ( cg().k(Equal   ).m(caps).s(ms3), ditto_quick_paste__fourth );
 
 }
 
@@ -2610,8 +2610,8 @@ fn setup_one_note_combos (k:KR) {
         let (sel_mode, draw_mode) = (sel_mode.clone(), draw_mode.clone());
         Arc::new ( move || { sel_mode(); s(20); draw_mode(); } )
     };
-    k.cm .add_combo ( cg().k(E).m(caps).s(qks).s(msE_dbl) .c(one_note_fgnd()),   ag().af (eraser) );
-    k.cm .add_combo ( cg().k(D).m(caps).s(qks).s(msD_dbl) .c(one_note_fgnd()),   ag().af (threaded (pen.clone())) );
+    k.cm .add_combo ( cg().k(E).m(caps).s(msQ).s(msE_dbl) .c(one_note_fgnd()),   ag().af (eraser) );
+    k.cm .add_combo ( cg().k(D).m(caps).s(msQ).s(msD_dbl) .c(one_note_fgnd()),   ag().af (threaded (pen.clone())) );
 
 
     // one note has gone weird, not letting customize buttons w/o pro, and therefore unable to add any btn to ui to enable touch-draw !!!
@@ -2750,8 +2750,8 @@ fn setup_quick_bar (k:KR) {
     // we'll also setup caps-a-a for ergonomics (can be useful where the first ctrl-a is harmless)
     k.cm.add_combo ( cg().k(A).dbl().m(caps),   ag().af (Arc::new (move || k.qbar.toggle())) );
     // and we'll overload yet another invocation on caps-q with a/o .. we'll see if it sees use
-    k.cm.add_combo ( cg().k(A).m(caps).s(qks),  ag().af (Arc::new (move || k.qbar.toggle())) );
-    k.cm.add_combo ( cg().k(O).m(caps).s(qks),  ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(A).m(caps).s(msQ),  ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(O).m(caps).s(msQ),  ag().af (Arc::new (move || k.qbar.toggle())) );
     // ^^ we could have tried to have this also enter the fsc state .. (with a bit of manual toggle management here)
     // However, we've decided NOT to do that, as not doing so means the quick-bar persists over [caps/mod]-rel etc clearing fscs
     // Further, since we only care about wheel actions in this fsc, and w/o alt/ctrl, they work decently from regular fallback
@@ -2953,7 +2953,7 @@ pub fn setup_krusty_board (k:KR) {
 
     /// some inlined tests for reminder
     // // - check that wildcard combos trigger even when other directly matching combos have been defined
-    // k.cm .add_combo ( cg().k(F9).m(caps).s(qks3),  ag().k(F19).m(ctrl) );
+    // k.cm .add_combo ( cg().k(F9).m(caps).s(ms3),  ag().k(F19).m(ctrl) );
     // k.cm .add_combo ( cg().k(F9).m(caps).wcsa(),   ag().k(F19).m(alt) );
     // // - check that multiple conditional or non-conditional combos can run, but if cond matches, then non-cond will be ignored
     // k.cm .add_combo ( cg().k(F9).m(caps).c(Arc::new(|_,_| true)),   ag().k(F19).m(alt).m(ctrl) );
@@ -2976,8 +2976,8 @@ pub fn setup_krusty_board (k:KR) {
     // .. even for caps-lalt-<?> defaulting to ctr-alt-<?> most are still free (other than l2, caret, e, f, w, space, f2)
     // .. and almost all F<num> combos with caps, caps-win, caps-lalt, ralt, caps-ralt, even w just lalt
 
-    // and ofc, there's always lots of hotkeys available in qks2, qks3, qks4 etc (and ofc also qks, qks1, though those are used more generically)
-    // (and further, all those can be combined .. eg. qks-msF-combos etc .. incl w mouse-btns, wheel etc)
+    // and ofc, there's always lots of hotkeys available in ms2, ms3, ms4 etc (and ofc also ms, ms1, though those are used more generically)
+    // (and further, all those can be combined .. eg. msq1234-msF-combos etc .. incl w mouse-btns, wheel etc)
 
     // and ofc, now there are a pile of availble options with mode-state _dbl combos, in combination w other [mk, mk_dbl, ms, ms_dbl] keys!
 
