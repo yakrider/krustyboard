@@ -4,8 +4,7 @@ use std::{panic, thread};
 use std::os::raw::c_int;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
-
-use once_cell::sync::{OnceCell};
+use std::sync::OnceLock;
 
 use windows::core::BOOL;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM, GetLastError};
@@ -97,7 +96,7 @@ impl InputProcessor {
     /// (.. and when initializing, starts the mpsc channel for kbd/mouse event actions too)
     pub fn instance () -> &'static InputProcessor {
 
-        static INSTANCE: OnceCell <InputProcessor> = OnceCell::new();
+        static INSTANCE: OnceLock <InputProcessor> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
             // we'll create and spawn out channel for kbd and mouse queued events, and get it started

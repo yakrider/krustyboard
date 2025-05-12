@@ -2,11 +2,9 @@
 
 use std::{
     thread, time,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     sync::atomic::{AtomicI32, Ordering},
 };
-use once_cell::sync::OnceCell;
-
 use crate::{
     *, utils::*,
     EvProp_D::*, ComboProc_D::*, EvCbFn_T::*
@@ -105,16 +103,16 @@ impl Mouse {
     pub fn instance () -> &'static Mouse {
         use crate::{MouseButton::*, MouseWheel::*};
 
-        static VERT_WHEEL  : OnceCell<MouseWheelState> = OnceCell::new();
-        static HORIZ_WHEEL : OnceCell<MouseWheelState> = OnceCell::new();
+        static VERT_WHEEL  : OnceLock <MouseWheelState> = OnceLock::new();
+        static HORIZ_WHEEL : OnceLock <MouseWheelState> = OnceLock::new();
 
-        static LEFT_BTN   : OnceCell<MouseBtnState> = OnceCell::new();
-        static RIGHT_BTN  : OnceCell<MouseBtnState> = OnceCell::new();
-        static MIDDLE_BTN : OnceCell<MouseBtnState> = OnceCell::new();
-        static X1_BTN     : OnceCell<MouseBtnState> = OnceCell::new();
-        static X2_BTN     : OnceCell<MouseBtnState> = OnceCell::new();
+        static LEFT_BTN   : OnceLock <MouseBtnState> = OnceLock::new();
+        static RIGHT_BTN  : OnceLock <MouseBtnState> = OnceLock::new();
+        static MIDDLE_BTN : OnceLock <MouseBtnState> = OnceLock::new();
+        static X1_BTN     : OnceLock <MouseBtnState> = OnceLock::new();
+        static X2_BTN     : OnceLock <MouseBtnState> = OnceLock::new();
 
-        static INSTANCE : OnceCell<Mouse> = OnceCell::new();
+        static INSTANCE : OnceLock <Mouse> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
             Mouse {

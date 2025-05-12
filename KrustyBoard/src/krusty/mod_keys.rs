@@ -3,10 +3,9 @@
 
 use std::time;
 use std::thread;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::fmt::Debug;
 
-use once_cell::sync::OnceCell;
 use strum_macros::EnumIter;
 use atomic_refcell::AtomicRefCell;
 
@@ -196,16 +195,16 @@ impl ModKeys {
 
     pub fn instance() -> &'static ModKeys {
 
-        static UMK_RALT   : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_LWIN   : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_RWIN   : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_LALT   : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_LCTRL  : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_LSHIFT : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_RCTRL  : OnceCell<UnifModKey> = OnceCell::new();
-        static UMK_RSHIFT : OnceCell<UnifModKey> = OnceCell::new();
+        static UMK_RALT   : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_LWIN   : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_RWIN   : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_LALT   : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_LCTRL  : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_LSHIFT : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_RCTRL  : OnceLock <UnifModKey> = OnceLock::new();
+        static UMK_RSHIFT : OnceLock <UnifModKey> = OnceLock::new();
 
-        static INSTANCE : OnceCell<ModKeys> = OnceCell::new();
+        static INSTANCE : OnceLock <ModKeys> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
 
@@ -316,7 +315,7 @@ impl CapsModKey {
 
     pub fn instance () -> &'static CapsModKey {
         // note that since ofc there's only one caps key, we'll set this up as singleton (unlike for the TMKs and SMKs below)
-        static INSTANCE: OnceCell<CapsModKey> = OnceCell::new();
+        static INSTANCE: OnceLock <CapsModKey> = OnceLock::new();
         INSTANCE .get_or_init ( ||
             CapsModKey {
                 _private : (),

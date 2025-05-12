@@ -2,10 +2,9 @@
 
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, LazyLock};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
-use once_cell::sync::{Lazy, OnceCell};
 use eframe::emath::{pos2, Rect, vec2};
 use eframe::epaint::{Color32, Vec2};
 use egui::{Align2, Context, FontFamily, FontId, PointerButton, StrokeKind, TextureHandle, ViewportBuilder};
@@ -259,9 +258,9 @@ impl QuickBar {
 
         // we'll prep a default get-grid fn that returns an empty grid
         // (instead of having the get-gird be option wrapped just for init purposes)
-        static gg_empty : Lazy <ActionGrid> = Lazy::new (ActionGrid::default);
+        static gg_empty : LazyLock <ActionGrid> = LazyLock::new (ActionGrid::default);
 
-        static INSTANCE: OnceCell<QuickBar> = OnceCell::new();
+        static INSTANCE: OnceLock <QuickBar> = OnceLock::new();
         INSTANCE .get_or_init ( ||
             QuickBar {
                 is_visible  : Flag::default(),
@@ -593,7 +592,7 @@ impl eframe::App for &QuickBar {
 
         // we also allow dynamically updating the grid based on fgnd context, so we'll want to cache a grid ref for cur painting ..
         // then if the grid changes, we'll pick up the change in the next repaint
-        static mut grid_s : OnceCell <&ActionGrid> = OnceCell::new();
+        static mut grid_s : OnceLock <&ActionGrid> = OnceLock::new();
         let grid = unsafe {
             grid_s .get_or_init (|| self.get_grid.lock().unwrap().as_ref()())
         };

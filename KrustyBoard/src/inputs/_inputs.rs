@@ -4,6 +4,7 @@
 
 
 use std::{
+    sync::LazyLock,
     thread::sleep,
     time::Duration,
     mem::size_of,
@@ -13,7 +14,6 @@ use strum_macros::EnumIter;
 
 use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
 
 
@@ -42,7 +42,7 @@ pub enum KbdEvent_T {
 
 /// Intended as a temp hack to send (possibly extended) scan-codes instead of virtual-key-codes for left/right modifier-keys.
 /// .. In particular since machines dont seem to be consistent in what they send, and this ensures the L/R key nature is consistent
-static KEY_SWAPS_MAP: Lazy<FxHashMap<KbdKey,u64>> = Lazy::new ( || {
+static KEY_SWAPS_MAP: LazyLock <FxHashMap <KbdKey,u64>> = LazyLock::new ( || {
     [   (KbdKey::RAlt, 0xE038u64), (KbdKey::RCtrl, 0xE01Du64) , (KbdKey::RShift, 0x0036u64),
         (KbdKey::LAlt, 0x0038u64), (KbdKey::LCtrl, 0x001Du64) , (KbdKey::LShift, 0x002Au64)
     ] .into_iter() .collect::<FxHashMap<KbdKey,u64>>()

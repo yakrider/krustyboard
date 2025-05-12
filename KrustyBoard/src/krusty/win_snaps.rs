@@ -1,10 +1,9 @@
 #![ allow (non_snake_case, non_upper_case_globals) ]
 
 
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, RwLock, Mutex, LazyLock};
 use std::{thread, time};
 
-use once_cell::sync::Lazy;
 use rand::Rng;
 use rustc_hash::{FxHashMap, FxHashSet};
 use windows::core::BOOL;
@@ -441,8 +440,8 @@ fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&[Edge], th
 
 // we'll use a static rwlocked vec to store child-windows from callbacks, and a mutex to ensure only one child-windows call is active
 #[allow (clippy::type_complexity)]
-static enum_rects : Lazy <Arc <RwLock <Vec <(Hwnd,RECT)>>>> = Lazy::new (|| Arc::new ( RwLock::new (vec!()) ) );
-static enum_rects_lock : Lazy <Arc <Mutex <()>>> = Lazy::new (|| Arc::new ( Mutex::new(())));
+static enum_rects : LazyLock <Arc <RwLock <Vec <(Hwnd,RECT)>>>> = LazyLock::new (|| Arc::new ( RwLock::new (vec!()) ) );
+static enum_rects_lock : LazyLock <Arc <Mutex <()>>> = LazyLock::new (|| Arc::new ( Mutex::new(())));
 
 
 fn gather_win_rects (wsd_hwnd: Hwnd) -> Vec<(Hwnd, RECT)> { unsafe {

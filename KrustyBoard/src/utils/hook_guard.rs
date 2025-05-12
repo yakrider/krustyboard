@@ -1,9 +1,8 @@
 use std::{env, thread};
 use std::time::Duration;
 use std::process::{Child, Command};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use core::ffi::c_int;
-use once_cell::sync::OnceCell;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject};
@@ -28,7 +27,7 @@ impl HookGuard {
 
     pub fn instance () -> &'static HookGuard {
 
-        static INSTANCE : OnceCell <HookGuard> = OnceCell::new();
+        static INSTANCE : OnceLock <HookGuard> = OnceLock::new();
 
         INSTANCE .get_or_init ( || unsafe {
             // if we got started with "--hook-guard", we install dummy hook and sit checking on it forever

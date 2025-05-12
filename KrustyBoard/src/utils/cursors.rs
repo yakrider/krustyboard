@@ -1,7 +1,6 @@
 
 use std::{thread, time::Duration};
-use once_cell::sync::OnceCell;
-
+use std::sync::OnceLock;
 use windows::core::PCWSTR;
 use windows::Win32::UI::WindowsAndMessaging;
 use windows::Win32::Graphics::Gdi::{
@@ -118,7 +117,7 @@ impl Cursors {
 
     // once this is inited, it can serve as immutable backup of original system cursors
     pub fn instance() -> &'static Cursors {
-        static INSTANCE : OnceCell<Cursors> = OnceCell::new();
+        static INSTANCE : OnceLock <Cursors> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
 

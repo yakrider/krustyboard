@@ -2,10 +2,9 @@
 #![allow(unused)]
 
 
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, Arc, LazyLock};
 use std::ops::BitAnd;
 
-use once_cell::sync::Lazy;
 use image::ImageFormat;
 
 use tao::event::Event;
@@ -35,7 +34,7 @@ pub enum KrustyTauriEvent {
 
 
 #[ allow (non_upper_case_globals) ]
-static tray_events_proxy : Lazy <Arc <Mutex <Option <EventLoopProxy <KrustyTauriEvent>>>>> = Lazy::new (|| Arc::new (Mutex::new (None)));
+static tray_events_proxy : LazyLock <Arc <Mutex <Option <EventLoopProxy <KrustyTauriEvent>>>>> = LazyLock::new (|| Arc::new (Mutex::new (None)));
 
 
 #[ allow (non_snake_case) ]

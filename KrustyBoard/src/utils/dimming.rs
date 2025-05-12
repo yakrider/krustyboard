@@ -1,7 +1,7 @@
 use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::OnceLock;
 use std::thread;
-use once_cell::sync::OnceCell;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -59,7 +59,7 @@ impl DimmingOverlay {
 
     pub fn instance() -> &'static DimmingOverlay {
 
-        static INSTANCE: OnceCell<DimmingOverlay> = OnceCell::new();
+        static INSTANCE: OnceLock <DimmingOverlay> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
 

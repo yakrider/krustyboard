@@ -1,7 +1,6 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock, LazyLock};
 use std::time::Instant;
 
-use once_cell::sync::{Lazy, OnceCell};
 use egui::{Context, Vec2};
 use include_dir::{include_dir, Dir};
 
@@ -101,7 +100,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_press      : ag().k(VolumeMute).gen_af(),    // mute
         ..Default::default()
     };
-    static _volume : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _volume : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let volume = _volume .get_or_init ( move || { Arc::new (cell) } );
     let volume = || volume.clone();
 
@@ -111,11 +110,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // for these we wanted to also bringup now-playing popup on hover etc,
     // but we'd like there to be a small delay-guard to ignore unrelated fast mouse movements over it
     static HOV_GUARD_DUR_MS : u64 = 300;
-    static _hov_dur_guard : Lazy<Flag> = Lazy::new (Flag::default);
+    static _hov_dur_guard : LazyLock<Flag> = LazyLock::new (Flag::default);
     let hov_dur_guard = &_hov_dur_guard;
     let cur_track_popup = ag().k(Numpad_9).m(lctrl).m(lalt).gen_af();
     // .. meh, gonna disable this as the focus changes it causes are just getting annoying
-    static _track_popup_enabled : Lazy<Flag> = Lazy::new (|| Flag::new(false)); // <- disabled
+    static _track_popup_enabled : LazyLock<Flag> = LazyLock::new (|| Flag::new(false)); // <- disabled
     let track_popup_enabled = &_track_popup_enabled;
     let cur_track_popup = if track_popup_enabled.is_set() { cur_track_popup } else { no_action() };
     let ctp = cur_track_popup.clone();
@@ -144,7 +143,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_press       : ag().k(VolumeUp).m(lctrl).m(lshift).gen_af(),  // play / pause
         ..Default::default()
     };
-    static _tracks : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _tracks : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let tracks = _tracks .get_or_init ( move || { Arc::new (cell) } );
     let tracks = || tracks.clone();
 
@@ -167,7 +166,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_press       : next_track.clone(), // next trac
         ..Default::default()
     };
-    static _scrub : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _scrub : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let scrub = _scrub .get_or_init ( move || { Arc::new (cell) } );
     let scrub = || scrub.clone();
 
@@ -182,7 +181,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         // (Note that sending shift-tabs wont work here coz switche hook checks for physical shift down)
 
         // we'll want a guard against re-entrancy as wheel spin can be fast, and our invocation scheme needs delays
-        static stamp: Lazy<Mutex<Instant>> = Lazy::new (|| Mutex::new (Instant::now()));
+        static stamp: LazyLock<Mutex<Instant>> = LazyLock::new (|| Mutex::new (Instant::now()));
         if let Ok (mut t_last) = stamp.lock() {
             if t_last.elapsed().as_millis() > 200 {
                 *t_last = Instant::now();
@@ -237,7 +236,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_release    : sw_release,    // activate switche selection
         ..Default::default()
     };
-    static _switche : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _switche : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let switche = _switche .get_or_init ( move || { Arc::new (cell) } );
     let switche = || switche.clone();
 
@@ -249,9 +248,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // we're going to track whether we've refreshed, and have it clear whenever cursor leaves the cell
     // .. but the switching can trigger grid layout change, which can end/restart hover
     // .. so instead we'll only clear refresh flag if we're hovered out for a bit
-    static _refreshed : Lazy<Flag> = Lazy::new (Flag::default);
+    static _refreshed : LazyLock<Flag> = LazyLock::new (Flag::default);
     let refreshed = &_refreshed;   // &'static that can be moved to threads without cloning
-    static _refr_clr_armed : Lazy<Flag> = Lazy::new (Flag::default);
+    static _refr_clr_armed : LazyLock<Flag> = LazyLock::new (Flag::default);
     let refr_clr_armed = &_refr_clr_armed;
 
     let hov_start = Arc::new ( move || { refr_clr_armed.clear(); } );
@@ -302,7 +301,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_mbtn_press  : ag().k(F4).m(lalt).gen_af(),  // close window
         ..Default::default()
     };
-    static _switche_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _switche_bl : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let switche_bl = _switche_bl .get_or_init ( move || { Arc::new (cell) } );
     let switche_bl = || switche_bl.clone();
 
@@ -340,7 +339,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_release    : tabs_release,              // end ctrl-tab
         ..Default::default()
     };
-    static _tabs : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _tabs : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let tabs = _tabs .get_or_init ( move || { Arc::new (cell ) } );
     let tabs = || tabs.clone();
 
@@ -358,7 +357,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_mbtn_press : ag().k(W).m(lctrl).gen_af(),         // close tab
         ..Default::default()
     };
-    static _tabs_bl : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _tabs_bl : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let tabs_bl = _tabs_bl .get_or_init ( move || { Arc::new (cell) } );
     let tabs_bl = || tabs_bl.clone();
 
@@ -405,7 +404,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_mbtn_click : gamgee_open,            // bringup gamma management utility
         ..Default::default()
     };
-    static _brightness : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _brightness : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let brightness = _brightness .get_or_init ( move || { Arc::new (cell) } );
     let brightness = || brightness.clone();
 
@@ -434,7 +433,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_wheel_frwd : arrow_af(false),
         ..Default::default()
     };
-    static _arrows : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _arrows : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let arrows = _arrows .get_or_init ( move || { Arc::new (cell) } );
     let arrows = || arrows.clone();
 
@@ -456,7 +455,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_rbtn_press : ag().k(Numrow_1).m(alt).m(shift).gen_af(),  // reader-view
         ..Default::default()
     };
-    static _refresh : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _refresh : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let refresh = _refresh .get_or_init ( move || { Arc::new (cell) } );
     let refresh = || refresh.clone();
 
@@ -472,7 +471,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             win_min_and_back(fgi.hwnd)
         }
     } );
-    static _pers_flag_cache : Lazy<Flag> = Lazy::new (Flag::default);
+    static _pers_flag_cache : LazyLock<Flag> = LazyLock::new (Flag::default);
     let pers_flag_cache = &_pers_flag_cache;
     let af_hov_start = Arc::new (move || {
         if ks.mouse.rbtn.down.is_set() {
@@ -506,7 +505,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_wheel_frwd   : wrap_allow_fgnd (ag().k(Comma ).m(alt).m(win).gen_af()),  // dusky - prev effect
         ..Default::default()
     };
-    static _min_back : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _min_back : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let min_back = _min_back .get_or_init ( move || { Arc::new (cell) } );
     let min_back = || min_back.clone();
 
@@ -523,7 +522,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_rbtn_press : ag().k(ExtLeft ).m(ctrl).m(alt).gen_af(),   // accept right -> left
         ..Default::default()
     };
-    static _diff : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _diff : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let diff = _diff .get_or_init ( move || { Arc::new (cell) } );
     let diff = || diff.clone();
 
@@ -574,7 +573,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_mbtn_press : zap_all,
         ..Default::default()
     };
-    static _pg_dark : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _pg_dark : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let pg_dark = _pg_dark .get_or_init ( move || { Arc::new (cell) } );
     let pg_dark = || pg_dark.clone();
 
@@ -590,7 +589,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_mbtn_press : im_zap,
         ..Default::default()
     };
-    static _im_dark : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _im_dark : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let im_dark = _im_dark .get_or_init ( move || { Arc::new (cell) } );
     let im_dark = || im_dark.clone();
 
@@ -604,7 +603,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         on_press      : ag().k(P).m(lalt).gen_af(),
         ..Default::default()
     };
-    static _tv_y_toggle : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _tv_y_toggle : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let tv_y_toggle = _tv_y_toggle .get_or_init ( move || { Arc::new (cell) } );
     let tv_y_toggle = || tv_y_toggle.clone();
 
@@ -613,7 +612,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Empty Action-Cell for placeholder purposes **__
-    static _empty : OnceCell < Arc < ActionCell>> = OnceCell::new();
+    static _empty : OnceLock <Arc <ActionCell>> = OnceLock::new();
     let empty = _empty .get_or_init ( move || { Arc::new (ActionCell::default()) } );
     let empty = || empty.clone();
 
@@ -633,7 +632,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // general use
-    static _base : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    static _base : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
         vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
         vec! ( tabs_bl(),     tabs(),        empty(),     tracks() ),
@@ -647,7 +646,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     } );
 
     // disabled grid .. (e.g. for switche)
-    static _disabled : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    static _disabled : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let disabled = _disabled.get_or_init ( move || {
         Arc::new ( ActionGrid { enabled: Flag::new(false), ..ActionGrid::default() } )
     } );
@@ -655,7 +654,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // ide specific
-    static _ide : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    static _ide : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
         vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
         vec! ( tabs_bl(),     tabs(),        empty(),     tracks() ),
@@ -672,7 +671,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // browser specific
-    static _web : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    static _web : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
         vec! ( switche(),     switche_bl(),  min_back(),  volume() ),
         vec! ( tabs_bl(),     refresh(),     arrows(),    tracks() ),
@@ -687,7 +686,7 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     // TradingView
-    static _trading_view : OnceCell < Arc < ActionGrid>> = OnceCell::new();
+    static _trading_view : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
         vec! ( switche(),     switche_bl(),  min_back(),    volume() ),
         vec! ( tabs_bl(),     refresh(),     tv_y_toggle(), tracks() ),

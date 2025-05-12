@@ -1,8 +1,7 @@
 #![ allow (non_camel_case_types, non_snake_case) ]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use atomic_refcell::AtomicRefCell;
-use once_cell::sync::OnceCell;
 use strum_macros::EnumIter;
 
 use crate::{*, ModeState_T::*};
@@ -204,23 +203,23 @@ impl ModeStates {
 
     pub fn instance() -> &'static ModeStates {
 
-        // we'll make each of our modestates be 'static references to OnceCell instances ..
+        // we'll make each of our modestates be 'static references to OnceLock instances ..
         // .. this allows us to pass each modestate into threads or AFs w/o having to make them clone
 
-        static MS_E : OnceCell<ModeState> = OnceCell::new();   // key :  E
-        static MS_D : OnceCell<ModeState> = OnceCell::new();   // key :  D
-        static MS_F : OnceCell<ModeState> = OnceCell::new();   // key :  F
-        static MS_R : OnceCell<ModeState> = OnceCell::new();   // key :  R
-        static MS_Q : OnceCell<ModeState> = OnceCell::new();   // key :  Q
-        static MS_1 : OnceCell<ModeState> = OnceCell::new();   // key :  1
-        static MS_2 : OnceCell<ModeState> = OnceCell::new();   // key :  2
-        static MS_3 : OnceCell<ModeState> = OnceCell::new();   // key :  3
-        static MS_4 : OnceCell<ModeState> = OnceCell::new();   // key :  4
+        static MS_E : OnceLock <ModeState> = OnceLock::new();   // key :  E
+        static MS_D : OnceLock <ModeState> = OnceLock::new();   // key :  D
+        static MS_F : OnceLock <ModeState> = OnceLock::new();   // key :  F
+        static MS_R : OnceLock <ModeState> = OnceLock::new();   // key :  R
+        static MS_Q : OnceLock <ModeState> = OnceLock::new();   // key :  Q
+        static MS_1 : OnceLock <ModeState> = OnceLock::new();   // key :  1
+        static MS_2 : OnceLock <ModeState> = OnceLock::new();   // key :  2
+        static MS_3 : OnceLock <ModeState> = OnceLock::new();   // key :  3
+        static MS_4 : OnceLock <ModeState> = OnceLock::new();   // key :  4
 
         // further, since ModeStates contains not just these static instances but also flags we populate here,
         // we want to hold an instance of this struct itself to avoid calling instance() here creating separate sets of flags
 
-        static INSTANCE : OnceCell<ModeStates> = OnceCell::new();
+        static INSTANCE : OnceLock <ModeStates> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
             ModeStates {

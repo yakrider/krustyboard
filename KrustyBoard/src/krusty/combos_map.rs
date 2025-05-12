@@ -1,11 +1,10 @@
 #![ allow (non_camel_case_types) ]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{thread, time::Duration};
 
 use atomic_refcell::AtomicRefCell;
 use itertools::Itertools;
-use once_cell::sync::OnceCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
@@ -60,7 +59,7 @@ pub struct CombosMap {
 impl CombosMap {
 
     pub fn instance () -> &'static CombosMap {
-        static INSTANCE: OnceCell<CombosMap> = OnceCell::new();
+        static INSTANCE: OnceLock <CombosMap> = OnceLock::new();
         INSTANCE .get_or_init ( ||
             CombosMap {
                 _private : (),

@@ -19,10 +19,10 @@ pub enum WHKError {
 #[derive(Debug, Clone, Copy)]
 pub enum VKey {
 
-    Back,
+    Backspace,
     Tab,
     Clear,
-    Return,
+    Enter,
 
     Shift,
     Ctrl,
@@ -197,10 +197,10 @@ impl VKey {
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
         match self {
 
-            VKey::Back   => VK_BACK.0,
-            VKey::Tab    => VK_TAB.0,
-            VKey::Clear  => VK_CLEAR.0,
-            VKey::Return => VK_RETURN.0,
+            VKey::Backspace => VK_BACK.0,
+            VKey::Tab       => VK_TAB.0,
+            VKey::Clear     => VK_CLEAR.0,
+            VKey::Enter     => VK_RETURN.0,
 
             VKey::Shift    => VK_SHIFT.0,
             VKey::Ctrl     => VK_CONTROL.0,
@@ -373,10 +373,10 @@ impl VKey {
     pub const fn from_vk_code(vk_code: u16) -> VKey {
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
         match vk_code {
-            _ if vk_code == VK_BACK.0   => VKey::Back,
+            _ if vk_code == VK_BACK.0   => VKey::Backspace,
             _ if vk_code == VK_TAB.0    => VKey::Tab,
             _ if vk_code == VK_CLEAR.0  => VKey::Clear,
-            _ if vk_code == VK_RETURN.0 => VKey::Return,
+            _ if vk_code == VK_RETURN.0 => VKey::Enter ,
 
             _ if vk_code == VK_SHIFT.0   => VKey::Shift,
             _ if vk_code == VK_CONTROL.0 => VKey::Ctrl,
@@ -550,10 +550,10 @@ impl std::fmt::Display for VKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
 
-            VKey::Back   => "Back",
-            VKey::Tab    => "Tab",
-            VKey::Clear  => "Clear",
-            VKey::Return => "Return",
+            VKey::Backspace => "Backspace",
+            VKey::Tab       => "Tab",
+            VKey::Clear     => "Clear",
+            VKey::Enter     => "Enter",
 
             VKey::Shift    => "Shift",
             VKey::Ctrl     => "Ctrl",
@@ -658,7 +658,7 @@ impl std::fmt::Display for VKey {
             VKey::LaunchApp1        => "Launch_App1",
             VKey::LaunchApp2        => "Launch_App2",
 
-            VKey::SemiColon => "Oem_1",
+            VKey::SemiColon => "SemiColon",
             VKey::Equal     => "Equal",
             VKey::Comma     => "Comma",
             VKey::Minus     => "Minus",

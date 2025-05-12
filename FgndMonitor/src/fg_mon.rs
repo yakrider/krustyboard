@@ -18,9 +18,11 @@ use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, EnumWindows, Get
 // --- ANSI Color Codes ---
 // \x1b[38;2;{r;g;b}m for fgnd
 // \x1b[48;2;{r;g;b}m for bkgd
-const RESET_COLOR: &str = "\x1b[0m";
-const COLOR_A: &str = "\x1b[38;2;220;220;180m";
-const COLOR_B: &str  = "\x1b[38;2;180;240;240m";
+const RESET_COLOR : &str = "\x1b[0m";
+const COLOR_A     : &str = "\x1b[38;2;220;220;180m";
+const COLOR_B     : &str = "\x1b[38;2;180;240;240m";
+const COLOR_BG_A  : &str = "\x1b[48;2;00;00;00m";
+const COLOR_BG_B  : &str = "\x1b[48;2;50;50;50m";
 
 
 
@@ -256,11 +258,11 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
 
     const w_z    : usize = 3;
     const w_hwnd : usize = "0x0000000  ".len();
-    const w_fgnd : usize = 4;
+    const w_fgnd : usize = 3;
     const w_top  : usize = 4;
-    const w_elev : usize = 4;
+    const w_elev : usize = 3;
     const w_pos  : usize = "-16000, -16000".len();
-    const w_dim  : usize = "0000 x 0000    ".len();
+    const w_dim  : usize = "0000 x 0000   ".len();
     const w_proc : usize = 25;
     const w_class : usize = 30;
     const w_title : usize = 50;
@@ -269,9 +271,9 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
         // print header and separator
         println!(
             "{:<w_z$} {:<w_hwnd$} {:<w_fgnd$} {:<w_top$} {:<w_elev$} {:<w_pos$} {:<w_dim$} {:<w_proc$} {:<w_class$} {:<w_title$}",
-            "@z", "HWND", "Fgnd", "Top ", "Elev", "      Loc", "     Dims", " Process", " Class", " Title",
+            "@z", "HWND", "Fg", "Top ", "Elv", "      Loc", "     Dims", " Process", " Class", " Title",
             w_z = w_z, w_hwnd = w_hwnd, w_fgnd = w_fgnd, w_top = w_top, w_elev = w_elev,
-            w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class,
+            w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class, w_title = w_title,
         );
         println!(
             "{:-<w_z$} {:-<w_hwnd$} {:-<w_fgnd$} {:-<w_top$} {:-<w_elev$} {:-<w_pos$} {:-<w_dim$} {:-<w_proc$} {:-<w_class$} {:-<w_title$}",
@@ -283,9 +285,9 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
     }
 
     let hwnd_str = format!("0x.{:<8x}", info.hwnd.0 as usize);
-    let fgnd_str = if info.is_fgnd { "Yes" } else { "No" };
-    let top_str  = if info.is_topmost { "Yes" } else { "No" };
-    let elev_str = if info.proc_info.as_ref() .map (|pi| pi.elev) .unwrap_or(false) { "Yes" } else { "No" };
+    let fgnd_str = if info.is_fgnd { "Fg" } else { "" };
+    let top_str  = if info.is_topmost { "Top" } else { "" };
+    let elev_str = if info.proc_info.as_ref() .map (|pi| pi.elev) .unwrap_or(false) { "Elv" } else { "" };
     let x = info.rect.left;
     let y = info.rect.top;
     let width = info.rect.right - info.rect.left;
@@ -308,13 +310,13 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
     let title = trunc (&info.title, w_title);
 
     static is_alt : LazyLock<AtomicBool> = LazyLock::new (AtomicBool::default);
-    let color = if is_alt.fetch_xor(true, Ordering::Relaxed) { COLOR_A } else { COLOR_B };
+    let (fg, bg) = if is_alt.fetch_xor(true, Ordering::Relaxed) { (COLOR_A, COLOR_BG_A) } else { (COLOR_B, COLOR_BG_B) };
 
     println!(
-        "{}{:<w_z$} {:<w_hwnd$} {:<w_fgnd$} {:<w_top$} {:<w_elev$} {:<w_pos$} {:<w_dim$} {:<w_proc$} {:<w_class$} {}{}",
-        color, z_order, hwnd_str, fgnd_str, top_str, elev_str, pos_str, dim_str, proc, class, title, RESET_COLOR,
+        "{}{}{:<w_z$} {:<w_hwnd$} {:<w_fgnd$} {:<w_top$} {:<w_elev$} {:<w_pos$} {:<w_dim$} {:<w_proc$} {:<w_class$} {:<w_title$}{}",
+        bg, fg, z_order, hwnd_str, fgnd_str, top_str, elev_str, pos_str, dim_str, proc, class, title, RESET_COLOR,
         w_z = w_z, w_hwnd = w_hwnd, w_fgnd = w_fgnd, w_top = w_top, w_elev = w_elev,
-        w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class,
+        w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class, w_title = w_title,
     );
 }
 

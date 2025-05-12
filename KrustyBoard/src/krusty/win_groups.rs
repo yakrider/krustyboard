@@ -1,12 +1,11 @@
 #![ allow (non_camel_case_types) ]
 
 
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use derive_deref::Deref;
-use once_cell::sync::OnceCell;
 use rustc_hash::FxHashSet;
 
 use crate::Flag;
@@ -163,10 +162,10 @@ impl WinGroups {
 
     pub fn instance() -> &'static WinGroups {
 
-        static WG_STATES : [OnceCell<WinGroup>; 4] = [
-            OnceCell::new(), OnceCell::new(), OnceCell::new(), OnceCell::new()
+        static WG_STATES : [OnceLock <WinGroup>; 4] = [
+            OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()
         ];
-        static INSTANCE : OnceCell<WinGroups> = OnceCell::new();
+        static INSTANCE : OnceLock <WinGroups> = OnceLock::new();
 
         INSTANCE .get_or_init ( || {
             let grps = WG_STATES .iter() .map (|wg| wg.get_or_init (WinGroup::new))

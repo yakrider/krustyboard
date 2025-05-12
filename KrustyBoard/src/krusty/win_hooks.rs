@@ -2,9 +2,8 @@
 
 
 use std::thread::spawn;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::sync::atomic::{AtomicIsize, Ordering};
-use once_cell::sync::OnceCell;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
@@ -40,7 +39,7 @@ pub struct WinEventsListener {
 impl WinEventsListener {
 
     pub fn instance () -> &'static WinEventsListener {
-        static INSTANCE: OnceCell<WinEventsListener> = OnceCell::new();
+        static INSTANCE: OnceLock <WinEventsListener> = OnceLock::new();
         INSTANCE .get_or_init ( || {
             WinEventsListener {
                 is_hooked : Flag::default(),

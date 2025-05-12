@@ -2,10 +2,8 @@
 
 use std::thread;
 use std::time::{Instant, Duration};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-
-use once_cell::sync::OnceCell;
 
 use crate::*;
 use crate::utils::{Cursors, DimmingOverlay};
@@ -229,7 +227,7 @@ impl KrustyState {
 
     /// Get a 'static ref of the sole instance of the global krusty-state
     pub fn instance () -> &'static KrustyState {
-        static INSTANCE: OnceCell<KrustyState> = OnceCell::new();
+        static INSTANCE: OnceLock <KrustyState> = OnceLock::new();
 
         INSTANCE .get_or_init ( ||
             KrustyState {
@@ -433,7 +431,7 @@ impl Krusty {
 
     /// Get a 'static instance ref of the whole Krusty object (holds the input-processor, krusty-state, the combos-map, quickbar etc)
     pub fn instance() -> &'static Krusty {
-        static INSTANCE : OnceCell <Krusty> = OnceCell::new();
+        static INSTANCE : OnceLock <Krusty> = OnceLock::new();
 
         // Note that the ordering of instantiation doesnt matter (no cyclical dependencies) .. but since we've started grabbing
         // .. some instances at init time (mostly for ease, not from necessity), we're noting them below for reference :

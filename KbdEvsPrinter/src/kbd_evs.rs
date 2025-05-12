@@ -7,7 +7,6 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::sync::LazyLock;
 use std::{mem, thread, time::Instant};
 use std::collections::HashSet;
-use std::time::Duration;
 use windows::Win32::{
     Foundation::{GetLastError, LPARAM, LRESULT, WPARAM},
     UI::Input::KeyboardAndMouse::*,
@@ -32,9 +31,9 @@ struct Mods {
 enum Injected {
     #[default]
     None,
-    Repeat,
-    Krusty, // Injected, Krusty dwExtraInfo
-    Other,  // Injected, unrecogized dwExtraInfo
+    Repeat,   // Determined as repeat from cache comparison
+    Krusty,   // Injected, Krusty dwExtraInfo
+    Other,    // Injected, unrecogized dwExtraInfo
 }
 
 
@@ -49,70 +48,111 @@ struct Event {
 }
 
 
-static EVENT_CHANNEL: LazyLock <(Sender<Event>, Receiver<Event>)> = LazyLock::new (unbounded);
+static EVENT_CHANNEL: LazyLock <(Sender<(Instant,Event)>, Receiver<(Instant,Event)>)> = LazyLock::new (unbounded);
 
 
 static MODIFIER_KEYS: LazyLock <HashSet <VKey>> = LazyLock::new (|| {
     use VKey::*;
     HashSet::from ( [
-        Shift, LShift, RShift, Ctrl, LCtrl, RCtrl, Alt, LAlt, RAlt, LWin, RWin
+        CapsLock, Shift, LShift, RShift, Ctrl, LCtrl, RCtrl, Alt, LAlt, RAlt, LWin, RWin
     ] )
 });
 
 
 
 #[derive (Debug, Clone, Copy, Eq, PartialEq)]
+#[allow (dead_code)]
 enum Cls {
     Key,
+    EvT,
+    Mods,
     Gap,
     Grey,
 }
 
 
 #[derive (Debug, Clone, Copy, Eq, PartialEq)]
+#[allow (dead_code)]
 enum Colors {
-    KeyPress,
-    KeyRelease,
-    ModPress,
-    ModRelease,
-    ModActive,
-    Gap,
     Grey,
-
-    //Highlight,
-    // ^^ unfortunately, on terminals like powershell, at least while using the color-crate, bkg unavoidably brightens fgnd
-    // .. which makes our subdued greys become white .. and no amount of tweaking colors got around that
-    // .. hence, we'll just define highlight colors for each element instead of trying to do full line highlight .. oh well
-
-    KeyPress_hl,
-    ModActive_hl,
-    Gap_hl,
     Grey_hl,
 
+    KeyPress,
+    KeyPress_hl,
+    ModPress,
+
+    KeyRelease,
+    ModRelease,
+
+    EvT,
+    EvT_hl,
+
+    ModActive,
+    ModActive_hl,
+
+    Gap,
+    Gap_hl,
+
+    Highlight_kdn,
+    Highlight_kdn_kr,
 }
 
 
+/*
+- Note that the colors below are designed for a Powershell-7 profile for windows-terminal that disables automatic color adjustment ..
+    otherwise, the terminal tries to enforce contrast levels by brightening colors against bkg-highlight etc
+- Plus, the 'colored' crate used requires $env:COLORTERM = 'truecolor' set, either in pwsh $PROFILE or directly in env-vars etc
+- Powershell-7 profile extract sample intended for use with this utility:
+    {
+        "name": "kbd-evs",
+        "commandline": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoExit -Command kbd-evs",
+        "icon": "D:\\yakdat\\code\\git-repos\\krustyboard\\KbdEvsPrinter\\kbd_evs.ico",
+        "startingDirectory": "%USERPROFILE%",
+        "tabTitle": "kbd-evs .. Keyboard Events Printer"
+        "intenseTextStyle": "all",
+        "adjustIndistinguishableColors": "never",
+        "colorScheme": "Campbell",
+        "elevate": false,
+        "hidden": true,
+        "guid": "{50ac40c1-aefc-482a-8029-74f39149919d}",
+    },
+ */
+
 impl Colors {
+
     fn color(&self) -> CustomColor {
         match self {
-            Colors::KeyPress    => CustomColor::new (120, 200, 100),   // greenish
-            Colors::KeyRelease  => CustomColor::new (180, 140,  40),   // orangeish
-            Colors::ModPress    => CustomColor::new (120, 180, 255),   // bluish
-            Colors::ModRelease  => CustomColor::new (200, 110, 190),   // pinkish
-            Colors::ModActive   => CustomColor::new (170, 140,   0),   // goldish
-            Colors::Gap         => CustomColor::new (120, 150,  70),   // greenish
-            Colors::Grey        => CustomColor::new ( 80,  80,  80),   // grey
+            Colors::Grey     => CustomColor::new (100, 100, 100),   // grey
+            Colors::Grey_hl  => CustomColor::new (140, 140, 140),   // grey
 
-            //Colors::Highlight   => CustomColor::new ( 60,  80,  40),   // greenish bkg highlight
+            Colors::Highlight_kdn_kr => CustomColor::new ( 50,  70,  30),   // greenish bkg highlight
+            Colors::Highlight_kdn    => CustomColor::new ( 60,  40,   0),   // brownish bkg highlight
 
+            Colors::KeyPress     => CustomColor::new (120, 200, 100),   // greenish
             Colors::KeyPress_hl  => CustomColor::new (140, 255, 140),   // greenish
+            Colors::ModPress     => CustomColor::new (120, 180, 255),   // bluish
+
+            Colors::KeyRelease  => CustomColor::new (180, 140,  40),   // orangeish
+            Colors::ModRelease  => CustomColor::new (200, 110, 190),   // pinkish
+
+            Colors::EvT     => Colors::Grey.color(),
+            Colors::EvT_hl  => Colors::Grey_hl.color(),
+
+            Colors::ModActive    => CustomColor::new (170, 140,   0),   // goldish
             Colors::ModActive_hl => CustomColor::new (220, 220,   0),   // yellowish
-            Colors::Gap_hl       => CustomColor::new (160, 190, 110),   // greenish
-            Colors::Grey_hl      => CustomColor::new (180, 180, 180),   // grey
+
+            Colors::Gap     => CustomColor::new (120, 150,  70),   // greenish
+            Colors::Gap_hl  => CustomColor::new (160, 190, 110),   // greenish
+
         }
     }
 }
 
+/* todo
+    - consider adding the time separation and printint horiz lines
+    - consider extending the line a bit more past the gap
+    - consider if the gap can be made more informative on hl lines (unless the line separator makes things more evident already)
+ */
 
 
 
@@ -141,92 +181,110 @@ fn main() {
 
 
 
+fn key_colorized (txt:&str, press:bool, is_mod:bool, hl:bool) -> ColoredString {
+    match (is_mod,  press,   hl) {
+        ( false,  true , false )  =>  txt .custom_color (Colors::KeyPress    .color()),
+        ( false,  true ,  true )  =>  txt .custom_color (Colors::KeyPress_hl .color()) .bold(),
+        ( false,  false,     _ )  =>  txt .custom_color (Colors::KeyRelease  .color()),
+
+        ( true ,  true ,     _ )  =>  txt .custom_color (Colors::ModPress    .color()),
+        ( true ,  false,     _ )  =>  txt .custom_color (Colors::ModRelease  .color()),
+    }
+}
+
 fn mod_colorized (txt:&str, active:bool, hl:bool) -> ColoredString {
+    // note: bold doesnt seem to work on custom-colors (on powershell) .. though dimmed/italic work .. oh well
     match (active, hl) {
         (true,  false) => txt .custom_color (Colors::ModActive    .color()),
         (false, false) => txt .custom_color (Colors::Grey         .color()),
-        //(true,  true)  => txt .custom_color (Colors::ModActive  .color()) .on_custom_color (Colors::Highlight.color()),
-        //(false, true)  => txt .custom_color (Colors::Grey       .color()) .on_custom_color (Colors::Highlight.color()),
         (true,  true)  => txt .custom_color (Colors::ModActive_hl .color()),
         (false, true)  => txt .custom_color (Colors::Grey_hl      .color()),
-
-    }
-}
-fn colorized (txt:&str, cls:Cls, press: bool, is_mod:bool, hl:bool) -> ColoredString {
-    // note: bold doesnt seem to work on custom-colors (on powershell) .. though dimmed/italic work .. oh well
-    match (cls,     is_mod,  press,   hl) {
-        ( Cls::Key,  false,  true , false )  =>  txt .custom_color (Colors::KeyPress    .color()),
-        ( Cls::Key,  false,  true ,  true )  =>  txt .custom_color (Colors::KeyPress_hl .color()),
-        ( Cls::Key,  false,  false,     _ )  =>  txt .custom_color (Colors::KeyRelease  .color()),
-        ( Cls::Key,  true ,  true ,     _ )  =>  txt .custom_color (Colors::ModPress    .color()),
-        ( Cls::Key,  true ,  false,     _ )  =>  txt .custom_color (Colors::ModRelease  .color()),
-        ( Cls::Gap,      _,      _, false )  =>  txt .custom_color (Colors::Gap         .color()),
-        ( Cls::Gap,      _,      _,  true )  =>  txt .custom_color (Colors::Gap_hl      .color()),
-        ( Cls::Grey,     _,      _, false )  =>  txt .custom_color (Colors::Grey        .color()),
-        ( Cls::Grey,     _,      _,  true )  =>  txt .custom_color (Colors::Grey_hl     .color()),
     }
 }
 
+fn colorized (txt:&str, cls:Cls, hl:bool) -> ColoredString {
+    match (cls, hl) {
+        ( Cls::EvT,  false )  =>  txt .custom_color (Colors::EvT    .color()),
+        ( Cls::Gap,  false )  =>  txt .custom_color (Colors::Gap    .color()),
+        ( Cls::Grey, false )  =>  txt .custom_color (Colors::Grey   .color()),
 
+        ( Cls::EvT,  true )  =>  txt .custom_color (Colors::EvT_hl  .color()),
+        ( Cls::Gap,  true )  =>  txt .custom_color (Colors::Gap_hl  .color()),
+        ( Cls::Grey, true )  =>  txt .custom_color (Colors::Grey_hl .color()),
+
+        _  => txt.into(),
+    }
+}
+
+
+fn print_header() {
+    let header = format!(
+        "{:>16} {:<2} {:<1}  {:<3}  {:<3}  {:<4}  {:<5}  {:<6}  {:<12} {:<6}    ",
+        "Key", "Typ", "Inj", "Alt", "Win", "Ctrl", "Shift", "Code", "Timestamp", "Gap"
+    );
+    println! ("{}", header.bold() );
+}
+fn print_spacer() {
+    println! ("{}", "-".repeat(80).dimmed());
+}
 
 
 // This function runs in a separate thread, receiving events from the hook.
-fn print_events (receiver: Receiver<Event>) {
+fn print_events (receiver: Receiver<(Instant,Event)>) {
 
     let mut last_ev = Event::default();
     let mut last_ev_stamp = Instant::now();
     let mut last_was_repeat = false;
 
-    let header = format!(
-        "{:>16} {:<2} {:<1}  {:<3}  {:<3}  {:<4}  {:<5}  {:<6}  {:<12} {:<6}  ",
-        "Key", "Typ", "Inj", "Alt", "Win", "Ctrl", "Shift", "Code", "Timestamp", "Gap"
-    );
-    println! ("{}", header.bold() );
-    println! ("{}", "-".repeat(75).dimmed());
+    print_header();
+    print_spacer();
 
-    for event in receiver {
+    for (stamp, event) in receiver {
 
-        let ev_stamp = Instant::now();
-        let gap_dur = ev_stamp.duration_since(last_ev_stamp);
-        last_ev_stamp = ev_stamp;
-
+        let gap_dur = stamp.duration_since(last_ev_stamp);
         let repeat = event == last_ev;
-        if repeat && last_was_repeat && gap_dur < Duration::from_millis(100) {
+        last_ev = event.clone();
+        if repeat && last_was_repeat {
             continue;
         }
-        last_ev = event.clone();
         last_was_repeat = repeat;
+        if !repeat { last_ev_stamp = stamp; }
 
         let key = VKey::from_vk_code (event.vk_code as u16);
         let is_mod = MODIFIER_KEYS .contains (&key);
-        let hl = event.is_press && !is_mod && event.inj == Injected::Krusty;
+
+        // we'll highlight (in green) krusty sent key-presses, but ignoring modkeys etc
+        let hl_kr  = event.is_press && !is_mod && event.inj == Injected::Krusty;
+
+        // and separately highlight (in brown) actual non-repeat keypresses, i.e no injection, but modkeys ok
+        let hl_kdn = event.is_press && !repeat && event.inj == Injected::None;
 
         let key = format!("{:>16}", key.to_string().chars().take(16).collect::<String>());
-        let key = colorized (&key, Cls::Key, event.is_press, is_mod, hl);
+        let key = key_colorized (&key, event.is_press, is_mod, hl_kr);
 
         let ev_t = if event.is_press { "dn" } else { "up" };
-        let ev_t = colorized (& format! ("{:<2}", ev_t), Cls::Key, event.is_press, is_mod, hl);
+        let ev_t = key_colorized (& format! ("{:<2}", ev_t), event.is_press, is_mod, hl_kr);
 
         let inj = if repeat { Injected::Repeat } else { event.inj };
         let inj = match inj {
             Injected::None   => " ",
             Injected::Repeat => "R",
             Injected::Krusty => "k",
-            Injected::Other  => "i",
+            Injected::Other  => "j",
         };
-        let inj = colorized (& format!("{:<1}", inj), Cls::Grey, false, false, hl);
+        let inj = colorized (& format!("{:<1}", inj), Cls::EvT, hl_kr);
 
-        let code = colorized (& format! ("{:>#06x}", event.vk_code), Cls::Grey, false, false, hl);
+        let code = colorized (& format! ("{:>#06x}", event.vk_code), Cls::Grey, hl_kr);
 
-        let alt   = mod_colorized ( "Alt",   event.mods.alt,   hl );
-        let win   = mod_colorized ( "Win",   event.mods.win,   hl );
-        let ctrl  = mod_colorized ( "Ctrl",  event.mods.ctrl,  hl );
-        let shift = mod_colorized ( "Shift", event.mods.shift, hl );
+        let alt   = mod_colorized ( "Alt",   event.mods.alt,   hl_kr );
+        let win   = mod_colorized ( "Win",   event.mods.win,   hl_kr );
+        let ctrl  = mod_colorized ( "Ctrl",  event.mods.ctrl,  hl_kr );
+        let shift = mod_colorized ( "Shift", event.mods.shift, hl_kr );
 
         // timestamp as HH:MM:SS.mss
         let stamp = Local::now();
         let stamp = stamp .format("%H:%M:%S%.3f").to_string();
-        let stamp = colorized ( & format! ("{:<12}", &*stamp), Cls::Grey, false, false, hl);
+        let stamp = colorized ( & format! ("{:<12}", &*stamp), Cls::Grey, hl_kr);
 
         // Format gap duration as seconds.milliseconds, or blank if very large
         let gap_ms = gap_dur.as_millis();
@@ -235,16 +293,24 @@ fn print_events (receiver: Receiver<Event>) {
         } else {
             format!("{:>6}", "") // Blank if gap is large
         };
-        let gap = colorized (&gap_str, Cls::Gap, false, false, hl);
+        let gap = colorized (&gap_str, Cls::Gap, hl_kr);
+
+        if gap_ms > 20 {
+            print_spacer();
+        }
 
         let line = format! (
-            "{}  {}  {}  {}  {}  {}  {}  {}  {}  {}  ", // spacing should match the header
+            "{}  {}  {}  {}  {}  {}  {}  {}  {}  {}    ", // spacing should match the header
             key, ev_t, inj, alt, win, ctrl, shift, code, stamp, gap
         );
-        //if hl {
-        //    println! ("{}", line.on_custom_color (Colors::Highlight.color()));
-        //} else { println! ("{}",line) }
-        println! ("{}",line);
+        let line = if hl_kr {
+            line.on_custom_color (Colors::Highlight_kdn_kr.color())
+        } else if hl_kdn {
+            line.on_custom_color (Colors::Highlight_kdn.color())
+        } else {
+            line.into()
+        };
+        println! ("{}",line)
     }
 
     println!("Event channel closed. Printer thread exiting.");
@@ -266,6 +332,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let vk_code = hook_struct.vkCode;
         let sc_code = hook_struct.scanCode;
         let flags = hook_struct.flags;
+        let stamp = Instant::now();
         let inj_stamp = hook_struct.dwExtraInfo;
 
         let is_press = match w_param.0 as u32 {
@@ -289,9 +356,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
         };
         // ^^ GetAsyncKeyState is fast enough to not worry about calling here repeatedly
 
-        let event = Event { vk_code, sc_code, is_press, mods, inj };
+        let event = Event { vk_code, sc_code, is_press, mods, inj};
 
-        if let Err(e) = EVENT_CHANNEL.0.send(event) {
+        if let Err(e) = EVENT_CHANNEL.0 .send ((stamp, event)) {
             eprintln! ("[Hook Error] Failed to send event: {}", e);
         }
     }

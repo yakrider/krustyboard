@@ -1,9 +1,9 @@
 
 
 use std::process::Command;
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
-use once_cell::sync::Lazy;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -26,17 +26,17 @@ static GAMGEE_LOC        : &str = r#"C:\yakdl\Downloads\ins-bin\_MONITOR_BRIGHTN
 
 
 // we'll also maintain groupings of exes here for easier list filtering, or sneding switche pipe cmds etc
-pub static BROWSER_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+pub static BROWSER_EXES : LazyLock <Vec <String>> = LazyLock::new ( ||
     ["chrome", "firefox", "msedge", "brave"] .map (String::from) .map (|s| s+".exe") .to_vec()
 );
-pub static IDE_EXES : Lazy<Vec<String>> = Lazy::new ( || [
+pub static IDE_EXES : LazyLock <Vec <String>> = LazyLock::new ( || [
         "idea", "rustrover", "goland", "rider", "clion", "pycharm", "webstorm"
     ] .map (String::from) .map (|s| s+"64.exe") .to_vec()
 );
-pub static MUSIC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+pub static MUSIC_EXES : LazyLock <Vec <String>> = LazyLock::new ( ||
     ["winamp", "MusicBee",] .map (String::from) .map (|s| s+".exe") .to_vec()
 );
-pub static CALC_EXES : Lazy<Vec<String>> = Lazy::new ( ||
+pub static CALC_EXES : LazyLock <Vec <String>> = LazyLock::new ( ||
     ["qalculate", "qcalculate", "CalculatorApp",] .map (String::from) .map (|s| s+".exe") .to_vec()
 );
 
