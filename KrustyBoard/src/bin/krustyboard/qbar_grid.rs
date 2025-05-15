@@ -253,9 +253,13 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     static _refr_clr_armed : LazyLock<Flag> = LazyLock::new (Flag::default);
     let refr_clr_armed = &_refr_clr_armed;
 
-    let hov_start = Arc::new ( move || { refr_clr_armed.clear(); } );
+    let hov_start = Arc::new ( move || {
+        refr_clr_armed.clear();
+        kr.qbar .set_freeze_grid (true);
+    } );
     let hov_end = Arc::new ( move || {
         refr_clr_armed.set();
+        kr.qbar .set_freeze_grid (false);
         thread::spawn ( move || {
             thread::sleep (Duration::from_millis(100));
             if refr_clr_armed.is_set() { refr_clr_armed.clear(); refreshed.clear(); }
@@ -641,13 +645,14 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let label = "base".into();
     let grid_sz = GridDims::new (3, 4);
     let cur_pos = default_pos.clone();
-    let base = _base.get_or_init ( move || {
+    let base : &'static Arc <ActionGrid> = _base.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
     } );
 
-    // disabled grid .. (e.g. for switche)
-    static _disabled : OnceLock <Arc <ActionGrid>> = OnceLock::new();
-    let disabled = _disabled.get_or_init ( move || {
+
+    // disabled grid .. (for cases where we want no grid, but w/o having to toggle the general/base grid)
+    static _disabled_s : OnceLock <Arc <ActionGrid>> = OnceLock::new();
+    let _disabled = _disabled_s.get_or_init ( move || {
         Arc::new ( ActionGrid { enabled: Flag::new(false), ..ActionGrid::default() } )
     } );
 
@@ -701,16 +706,27 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
-    //let grids = [base(), ide(), web(), trading_view()];
+    //let grids = [base(), _disabled, ide(), web(), trading_view()];
     //let dbg_grids = Arc::new ( move || {
-    //    for g in grids.as_ref() { println!("vpp{:?}",(&g.label, g.is_visible.is_set(), g.is_persist.is_set(), g.prior_persist.is_set())) };
+    //    for g in grids.as_ref() {
+    //        println! ("vpp{:?}", (&g.label, g.is_visible.is_set(), g.is_persist.is_set(), g.prior_persist.is_set()))
+    //    };
     //} );
 
+
     // finally we can build the grid provider itself
-    Box::new ( move || {
+
+    #[allow (static_mut_refs)]
+    // ^^ we'll maintain a 'cur-grid' so we can impl 'ignore' aka keep cur grid for some fgnds like switche
+    // .. but this should all be safe as we're only keeping/swapping &'static pointers in there
+    //
+    Box::new ( move || { unsafe {
         use ExeGroups::*;
 
         let fi = kr.wel .fgnd_info .read().unwrap();
+
+        static mut last_grid : OnceLock <&'static Arc <ActionGrid>> = OnceLock::new();
+        let _ = last_grid .get_or_init (|| base);
 
         // Lets filter out common windows classes .. menus, dialogs, task-switcher, icon-titles
         // .. ^^ naah its pointless for now .. but we'll keep it commented in case comes in handy later
@@ -719,29 +735,30 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         //    _ => None,
         //} { return g };
 
-
         // next we'll check exe groups
         let exe_grp = ExeGroups::check (fi.exe.as_str());
 
         // but first lets cover cases that need title lookup
         if exe_grp == Browser && fi.title.contains("TradingView") {
+            if let Some (lg) = last_grid.get_mut() { *lg = trading_view };
             return trading_view
         }
 
         // and finally the generic exe based groups
-        // Note that we specifically disable for switche, coz if sw is general and general is on but say ide is off ..
-        // .. then qbar hwnd coming up unhidden (coz of sw fgnd) would interfere w sw release-activation etc
-        if let Some (g) = match ExeGroups::check(fi.exe.as_str()) {
-            Switche => Some (disabled),
-            Browser => Some (web),
-            IDE     => Some (ide),
-            _ => None,
-        } { return g };
+        // Note that for cases we want to make no changes to grid (e.g. switche or gamgee), we'll return the currently active grid itself
+        // .. for Switche, we want to avoid its auto-hide from triggering due to qbar fgnd changes
+        // .. for gamgee, the btnd wont work well (esp the hide btn) if last fgnd has qbar on, but general qbar is off .. oh well
+        let next_grid = match ExeGroups::check (fi.exe.as_str()) {
+            Switche | Gamgee => last_grid.get().unwrap_or(&base),
+            Browser => web,
+            IDE     => ide,
+            _       => base,
+        };
 
-        // else, we just keep the base grid up
-        base
+        if let Some (lg) = last_grid.get_mut() { *lg = next_grid };
+        next_grid
 
-    } )
+    } } )
 
 
 }

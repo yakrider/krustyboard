@@ -1,21 +1,21 @@
 #![ allow (non_snake_case) ]
 
-use std::ffi::c_void;
-use std::mem;
-use std::mem::size_of;
-
+use std::ffi::{c_void, OsString};
+use std::mem::{size_of, zeroed};
+use std::os::windows::prelude::OsStringExt;
 use std::sync::{Arc, Mutex, RwLock, LazyLock};
 use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 
-use windows::core::{PSTR, HSTRING, PCWSTR, BOOL};
-use windows::Win32::Foundation::{POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, CloseHandle, TRUE, FALSE, COLORREF};
+use windows::core::{HSTRING, PCWSTR, BOOL, PWSTR};
+use windows::Win32::Foundation::{POINT, HWND, LPARAM, RECT, WPARAM, HANDLE, CloseHandle, TRUE, FALSE, COLORREF, MAX_PATH};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED};
 use windows::Win32::Graphics::Gdi::{RDW_INTERNALPAINT, RedrawWindow};
+use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, GetAwarenessFromDpiAwarenessContext, GetDpiAwarenessContextForProcess, GetThreadDpiAwarenessContext, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE};
-use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameA, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetThreadPriority, THREAD_PRIORITY_HIGHEST, GetCurrentThread};
+use windows::Win32::System::SystemServices::{APPCOMMAND_MICROPHONE_VOLUME_MUTE, MAX_CLASS_NAME};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetThreadPriority, THREAD_PRIORITY_HIGHEST, GetCurrentThread, QueryFullProcessImageNameW, OpenProcessToken};
 
 
 
@@ -123,6 +123,18 @@ impl From <PointAtomic> for POINT {
 
 
 
+// RAII guard for the win32 handles
+struct HandleGuard (HANDLE);
+impl Drop for HandleGuard {
+    fn drop (&mut self) {
+        if !self.0.is_invalid() {
+            unsafe { let _ = CloseHandle(self.0); }
+        }
+    }
+}
+
+
+
 
 pub fn win_set_thread_dpi_aware() { unsafe {
     SetThreadDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
@@ -225,7 +237,7 @@ pub fn win_get_window_rect (hwnd:Hwnd) -> RECT { unsafe {
 } }
 pub fn win_get_window_frame (hwnd:Hwnd) -> RECT { unsafe {
     let mut rect = RECT::default();
-    let _ = DwmGetWindowAttribute (hwnd.into(), DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, mem::size_of::<RECT>() as u32);
+    let _ = DwmGetWindowAttribute (hwnd.into(), DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut RECT as *mut c_void, size_of::<RECT>() as u32);
     rect
 } }
 
@@ -452,7 +464,7 @@ pub fn get_fgnd_win_class () -> String { unsafe {
     get_win_class_by_hwnd (GetForegroundWindow().into())
 } }
 pub fn get_win_class_by_hwnd (hwnd:Hwnd) -> String { unsafe {
-    let mut lpstr: [u16; 120] = [0; 120];
+    let mut lpstr: [u16; MAX_CLASS_NAME.0 as usize] = zeroed();
     let len = GetClassNameW (hwnd.into(), &mut lpstr);
     String::from_utf16_lossy(&lpstr[..(len as _)])
 } }
@@ -465,13 +477,12 @@ pub fn get_exe_by_hwnd (hwnd:Hwnd) -> Option<String> {
     get_exe_by_pid ( get_pid_by_hwnd (hwnd))
 }
 pub fn get_exe_by_pid (pid:u32) -> Option<String> { unsafe {
-    let handle = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-    let mut lpstr: [u8; 256] = [0; 256];
-    let mut lpdwsize = 256u32;
-    if handle.is_err() { return None }
-    let _ = QueryFullProcessImageNameA ( HANDLE (handle.as_ref().unwrap().0), PROCESS_NAME_WIN32, PSTR::from_raw(lpstr.as_mut_ptr()), &mut lpdwsize );
-    if let Ok(h) = handle { let _ = CloseHandle(h); }
-    PSTR::from_raw(lpstr.as_mut_ptr()).to_string() .ok() .and_then (|s| s.split("\\").last().map(|s| s.to_string()))
+    let h_proc = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, false, pid) .ok() ?;
+    let _ph_guard = HandleGuard (h_proc);
+    let mut buf: [u16; MAX_PATH as usize] = zeroed();
+    let mut buf_len = buf.len() as u32;
+    QueryFullProcessImageNameW ( h_proc, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut buf_len) .ok()?;
+    OsString::from_wide (&buf[..buf_len as usize]) .to_string_lossy() .rsplit ("\\") .next() .map (|s| s.to_string())
 } }
 
 pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {
@@ -479,6 +490,32 @@ pub fn get_pid_by_hwnd (hwnd:Hwnd) -> u32 { unsafe {
     let _ = GetWindowThreadProcessId (hwnd.into(), Some(&mut pid));
     pid
 } }
+
+
+pub fn check_cur_proc_elevated () -> Option<bool> {
+    check_proc_elevated ( unsafe { GetCurrentProcess() } )
+}
+pub fn check_hwnd_elevated (hwnd: Hwnd) -> Option<bool> { unsafe {
+    let mut pid : u32 = 0;
+    let _thread_id = GetWindowThreadProcessId (hwnd.into(), Some(&mut pid));
+    if pid == 0 { return None }
+    let h_proc = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, false, pid) .ok()?;
+    let _ph_guard = HandleGuard (h_proc);
+    check_proc_elevated (h_proc)
+} }
+pub fn check_proc_elevated (h_proc:HANDLE) -> Option<bool> { unsafe {
+    let mut h_token = HANDLE::default();
+    OpenProcessToken (h_proc, TOKEN_QUERY, &mut h_token) .ok()?;
+    let _token_guard = HandleGuard (h_token);
+    let mut token_info : TOKEN_ELEVATION = TOKEN_ELEVATION::default();
+    let mut token_info_len = size_of::<TOKEN_ELEVATION>() as u32;
+    GetTokenInformation (
+        h_token, TokenElevation, Some(&mut token_info as *mut _ as *mut _),
+        token_info_len, &mut token_info_len
+    ) .ok()?;
+    Some (token_info.TokenIsElevated != 0)
+} }
+
 
 
 pub fn write_win_dbg_string (msg:&str) { unsafe {

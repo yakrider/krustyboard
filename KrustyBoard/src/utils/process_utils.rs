@@ -4,9 +4,7 @@ use std::process::Command;
 use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
 use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
 
 use super::windows_utils::*;
@@ -54,6 +52,7 @@ pub enum ExeGroups {
     Switche,
     Krusty,
     Dusky,
+    Gamgee,
 }
 
 impl ExeGroups {
@@ -74,6 +73,7 @@ impl ExeGroups {
             "Switche.exe"     => Switche,
             "krustyboard.exe" => Krusty,
             "WinDusky.exe"    => Dusky,
+            "Gamgee.exe"      => Gamgee,
 
             _ =>  Other,
         }
@@ -88,22 +88,6 @@ impl ExeGroups {
     - (which seems to manage its own process creation in such a way that the child processes are not elevated .. oh well)
 */
 
-
-
-pub fn check_cur_proc_elevated () -> Option<bool> {
-    check_proc_elevated ( unsafe { GetCurrentProcess() } )
-}
-pub fn check_proc_elevated (h_proc:HANDLE) -> Option<bool> { unsafe {
-    let mut h_token = HANDLE::default();
-    if OpenProcessToken (h_proc, TOKEN_QUERY, &mut h_token) .is_err() { return None };
-    let mut token_info : TOKEN_ELEVATION = TOKEN_ELEVATION::default();
-    let mut token_info_len = size_of::<TOKEN_ELEVATION>() as u32;
-    GetTokenInformation (
-        h_token, TokenElevation, Some(&mut token_info as *mut _ as *mut _),
-        token_info_len, &mut token_info_len
-    ) .ok()?;
-    Some (token_info.TokenIsElevated != 0)
-} }
 
 
 pub fn start_chrome() {

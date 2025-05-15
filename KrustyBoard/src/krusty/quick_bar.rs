@@ -1,4 +1,4 @@
-#![allow (non_upper_case_globals, static_mut_refs)]
+#![allow (non_upper_case_globals)]
 
 use std::thread;
 use std::time::Duration;
@@ -245,8 +245,11 @@ pub struct QuickBar {
     // (this is called at render-time .. we're gonna even forgo option wrapping here)
     get_grid : Arc <Mutex <GetGridFn>>,
 
-    // and finally we'll keep a flag on when the update fn might need to refresh grid (coz fgnd change etc)
+    // we'll keep a flag on when the update fn might need to refresh grid (coz fgnd change etc)
     refresh_grid : Flag,
+
+    // and a flag to temporarily pause refreshes .. (e.g when doing snap window swtiching via qbar cell scrolls)
+    freeze_grid : Flag,
 
 }
 
@@ -272,6 +275,7 @@ impl QuickBar {
                 get_grid_builder : Arc::new ( Mutex::new ( None ) ),
                 get_grid         : Arc::new ( Mutex::new ( Box::new (move || &gg_empty))),
                 refresh_grid     : Flag::default(),
+                freeze_grid      : Flag::default(),
             }
         )
     }
@@ -308,6 +312,10 @@ impl QuickBar {
         if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
             grid.prior_persist.store(v);
         }
+    }
+
+    pub fn set_freeze_grid (&self, v:bool) {
+        self.freeze_grid.store(v);
     }
 
     pub fn request_repaint (&self) {
@@ -437,11 +445,11 @@ impl QuickBar {
 
     pub fn handle_invocation (&self) {
         let Ok(grid) = self.get_grid.lock().map(|gfn| gfn()) else { return };
-        if grid.is_persist.is_set() {
-            grid.prior_persist.set();    // mark that we might want this restored upon invoc-clear
-            self.persist_pos(grid);     // store the loc to restore to later
-        }
-        // we simply re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
+        // we'll cache the persist state into prior_persist so we can check whether to persist upon invoc-clear
+        grid.prior_persist .store (grid.is_persist.is_set());
+        // and if we are to persist, we should update the persist position
+        if grid.is_persist.is_set() { self.persist_pos(grid); }
+        // then we simply re-open/move but w/o persist flag (ofc can click on drag-spot to make it persist)
         self.show (false, true);
     }
     pub fn handle_invocation_clear (&self) {
@@ -451,7 +459,6 @@ impl QuickBar {
             self.hide(false);
             // ^^ closing w/o force flag means it wont close if persist flag set, e.g by kbd invocation
         } else {
-            grid.prior_persist.clear();
             self.show (true, false);
             // ^^ show persistent at stored loc (not at cursor)
         }
@@ -583,6 +590,10 @@ impl QuickBar {
 
 impl eframe::App for &QuickBar {
 
+    #[allow (static_mut_refs)]
+    // ^^ we'll keep static mut refs to active-grid and hovered-cell for change-comparison
+    // .. it should still be safe, as all these are &'static refs, and this fn is only invoked non-re-entrant by a single thread
+    //
     fn update (&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
 
         // we'll simulate 'mouse-leave' on a cell by tracking last-hovered cell and comparing with cur-hc
@@ -597,7 +608,7 @@ impl eframe::App for &QuickBar {
             grid_s .get_or_init (|| self.get_grid.lock().unwrap().as_ref()())
         };
         // and if the refresh-grid flag is set (typically due to fgnd change), we'll requery and update to a new grid
-        if self.refresh_grid.is_set() { unsafe {
+        if self.refresh_grid.is_set() && self.freeze_grid.is_clear() { unsafe {
             self.refresh_grid.clear();
             if let Some(grid) = grid_s.get_mut() {
                 let new_grid = self.get_grid.lock().unwrap().as_ref()();
