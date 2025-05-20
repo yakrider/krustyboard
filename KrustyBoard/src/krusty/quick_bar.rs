@@ -67,8 +67,11 @@ impl Label {
 
 
 /// ActionCells can have an optional pixel indicator that gets drawn at rendering time
-///   if a query to the cell's IndicatorFn (if any) returns true
+/// if a query to the cell's IndicatorFn (if any) returns true
 pub type IndicatorFn = Arc <dyn Fn() -> bool + Send + Sync + 'static>;
+
+/// ActionCells can have optional icons that can be dynamically updated by the cell at render time
+pub type IconFn = Arc <dyn Fn() -> Option <&'static Icon> + Send + Sync + 'static>;
 
 
 
@@ -80,13 +83,15 @@ pub type IndicatorFn = Arc <dyn Fn() -> bool + Send + Sync + 'static>;
 ///
 pub struct ActionCell {
 
-    pub label : Option <Label>,
-    pub icon  : Option <Icon>,
+    pub label   : Option <Label>,
+    pub icon_fn : Option <IconFn>,
 
     pub indicator : Option <IndicatorFn>,
 
-    pub on_wheel_bkwd : AF,
-    pub on_wheel_frwd : AF,
+    pub on_wheel_bkwd  : AF,
+    pub on_wheel_frwd  : AF,
+    pub on_hwheel_bkwd : AF,
+    pub on_hwheel_frwd : AF,
 
     pub on_hover_start : AF,
     pub on_hover_end   : AF,
@@ -108,10 +113,12 @@ pub struct ActionCell {
 impl Default for ActionCell {
     fn default() -> ActionCell { ActionCell {
         label           : None,
-        icon            : None,
+        icon_fn         : None,
         indicator       : None,
         on_wheel_bkwd   : Arc::new (|| {}),
         on_wheel_frwd   : Arc::new (|| {}),
+        on_hwheel_bkwd  : Arc::new (|| {}),
+        on_hwheel_frwd  : Arc::new (|| {}),
         on_hover_start  : Arc::new (|| {}),
         on_hover_end    : Arc::new (|| {}),
         on_press        : Arc::new (|| {}),
@@ -130,6 +137,8 @@ impl ActionCell {
     // we'll just add some syntactic sugar for easy calling
     pub fn wheel_bkwd_fn   (&self)  { (self.on_wheel_bkwd   )() }
     pub fn wheel_frwd_fn   (&self)  { (self.on_wheel_frwd   )() }
+    pub fn hwheel_bkwd_fn  (&self)  { (self.on_hwheel_bkwd  )() }
+    pub fn hwheel_frwd_fn  (&self)  { (self.on_hwheel_frwd  )() }
     pub fn hover_start_fn  (&self)  { (self.on_hover_start  )() }
     pub fn hover_end_fn    (&self)  { (self.on_hover_end    )() }
     pub fn press_fn        (&self)  { (self.on_press        )() }
@@ -538,7 +547,7 @@ impl QuickBar {
 
             let app = || Box::new(self);
             let _ = eframe::run_native (
-                "QuickBar",
+                "Krustyboard QuickBar",
                 options,
                 Box::new ( |cc| {
                     // install image loaders for image support
@@ -689,7 +698,7 @@ impl eframe::App for &QuickBar {
                     ui.painter() .rect_stroke ( rect, 0.0, egui::Stroke::new (0.5, Color32::from_gray(100)), StrokeKind::Outside );
                     // ^^ adds the border between cells that makeup the grid
 
-                    if let Some(ico) = cur_cell.icon.as_ref() {
+                    if let Some(ico) = cur_cell.icon_fn.as_ref() .and_then (|f| f()) {
                         let ico_pos = pos2 ( cpos.x + (csz.x - ico.sz_hint.x)/2.0, cpos.y + (csz.y - ico.sz_hint.y)/2.0 );
                         let im_rect = Rect::from_min_size (ico_pos, ico.sz_hint);
                         egui::Image::from_texture (&ico.txh) .paint_at (ui, im_rect);
@@ -793,20 +802,30 @@ impl eframe::App for &QuickBar {
                 act_on (self, cur_hc, |ac| ac.mbtn_release_fn());
             }
 
+
             // if we were in a cell, we'll also check for wheel
+            // note below we'll keep the input access as small as possible, and trigger any actions outside the closure
+            use std::cmp::Ordering::*;
+
+            // but first some short circuting
             let Some (chc) = cur_hc else { return };
 
-            if ui.input ( |inp| inp.raw_scroll_delta.y.abs() > 0.1 ) {
+            if ui.input (|inp| inp.raw_scroll_delta.y.abs() > 0.1) {
                 // println! ("r_del:{:?} \t s_del:{:?}", ui.input (|inp| inp.raw_scroll_delta.y), ui.input (|inp| inp.scroll_delta.y))
                 // ^^ looks like on mine, raw comes out w 40 for one frame, smooth gets smeared across frames
-                use std::cmp::Ordering::*;
-                ui.input ( |inp| {
-                    match inp.raw_scroll_delta.y.total_cmp(&0.0) {
-                        Greater => chc.wheel_frwd_fn(),
-                        Less    => chc.wheel_bkwd_fn(),
-                        Equal   => { },
-                    }
-                } );
+                match ui.input (|inp| inp.raw_scroll_delta.y .total_cmp (&0.0)) {
+                    Greater => chc.wheel_frwd_fn(),
+                    Less    => chc.wheel_bkwd_fn(),
+                    Equal   => { },
+                };
+            }
+            // we'd typically ignore horiz wheel, but egui auto translates shift-vwheel to hwheel .. so we'll catch this too
+            if ui.input (|inp| inp.raw_scroll_delta.x.abs() > 0.1) {
+                match ui.input (|inp| inp.raw_scroll_delta.x .total_cmp (&0.0)) {
+                    Greater => chc.hwheel_frwd_fn(),
+                    Less    => chc.hwheel_bkwd_fn(),
+                    Equal   => { },
+                };
             }
 
         } );

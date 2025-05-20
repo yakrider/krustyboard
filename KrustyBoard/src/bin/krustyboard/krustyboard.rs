@@ -152,13 +152,13 @@ fn gen_af_incr_overlay (kr:KR, step:i32) -> AF {
     } )
 }
 
-// skips work by alt-ctrl-volUp (needs to guard win-inactive since its on win-combo)
+// skips work by alt-ctrl-volUp
+// (wont need to gaurd win-inactive as single-win is suppressed, but we'll guard shift)
 fn media_skips_action (n_skips:u32, ks:KSR, fwd_not_bkwd:bool) -> AF {
     let action_key = if fwd_not_bkwd {VolumeUp} else {VolumeDown};
-    //ks.mod_keys.lwin.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
-    ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
+    ks.mod_keys.lshift.inactive_action ( ks.mod_keys.lalt.active_action ( ks.mod_keys.lctrl.active_action (
         Arc::new ( move || { (0 .. n_skips) .for_each (|_| { action_key.press_release() }) } )
-    ) )
+    ) ) )
 }
 
 // media next/prev work via alt-shift-vol-up/dn as configured in musicbee etc
