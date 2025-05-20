@@ -4,7 +4,10 @@
 
 use std::sync::{Mutex, Arc, LazyLock};
 use std::ops::BitAnd;
-
+use std::os::windows::process::CommandExt;
+use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use image::ImageFormat;
 
 use tao::event::Event;
@@ -15,7 +18,7 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-
+use windows::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS};
 use crate::{InputProcessor, KrustyState, utils};
 
 
@@ -83,16 +86,18 @@ pub fn start_system_tray_monitor() {
      */
 
 
-    let quit    = MenuItem::new ("Quit",    true, None);
     let reload  = MenuItem::new ("Reload",  true, None);
+    let restart = MenuItem::new ("Restart", true, None);
+    let quit    = MenuItem::new ("Quit",    true, None);
 
     let is_elev = utils::check_cur_proc_elevated().unwrap_or_default();
-    let elevated = CheckMenuItem::new ("Elevated", false, is_elev, None);
+    let elev_str = if is_elev {"Elevated"} else {"Not Elevated"};
+    let elevated = CheckMenuItem::new (elev_str, false, is_elev, None);
 
     let suspend = CheckMenuItem::new ("Suspend", true, false, None);
 
     let tray_menu = Menu::new();
-    tray_menu .append_items ( &[ &elevated, &suspend, &reload, &quit ] );
+    tray_menu .append_items ( &[ &elevated, &suspend, &reload, &restart, &quit ] );
 
     let tray_icon = TrayIconBuilder::new()
         .with_menu (Box::new(tray_menu))
@@ -124,7 +129,9 @@ pub fn start_system_tray_monitor() {
     let hotkey_mgr = GlobalHotKeyManager::new().unwrap();
     let unsuspend_hotkey = HotKey::new ( Some (Modifiers::CAPS_LOCK | Modifiers::ALT), Code::Insert );
     // ^^ since tauri modifiers are bitmasks, if we want ALT -AND- SHIFT, we have to specify mask as ALT | SHIFT .. (silly but oh well)
-    let _ = hotkey_mgr.register(unsuspend_hotkey);
+    if let Err(e) = hotkey_mgr.register(unsuspend_hotkey) {
+        println! ("WARNING : Failed to register unsuspend hotkey !!")
+    }
 
     let proxy = event_loop_proxy.clone();
     GlobalHotKeyEvent::set_event_handler ( Some ( move |event:GlobalHotKeyEvent| {
@@ -161,6 +168,9 @@ pub fn start_system_tray_monitor() {
                 if event.id == quit.id() {
                     std::process::exit(0);
                 }
+                else if event.id == restart.id() {
+                    handle_restart_request();
+                }
                 else if event.id == reload.id() {
                     ks.un_suspend_krusty();
                 }
@@ -175,7 +185,6 @@ pub fn start_system_tray_monitor() {
         }
     };
 
-
     // now finally we can kick off the event loop itself .. (from which we will not return!)
     event_loop .run ( move |event, _win_target, control_flow| {
 
@@ -189,3 +198,20 @@ pub fn start_system_tray_monitor() {
     } )
 
 }
+
+
+
+
+fn handle_restart_request () {
+    println! ("Attempting to Restart KrustyBoard !!");
+
+    let mut cmd = Command::new (std::env::current_exe().unwrap());
+    cmd .creation_flags ((DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW).0);
+
+    // we pass a '-r' arg so that on restart we'll wait a bit before trying to re-register hotkeys etc
+    if let Ok (proc) = cmd .arg("-r") .spawn() {
+        println! ("Launched a new Krusty process with pid: {:?}", proc.id());
+    }
+    std::process::exit(0);
+}
+

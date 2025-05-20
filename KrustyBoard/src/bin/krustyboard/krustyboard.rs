@@ -1165,7 +1165,8 @@ fn setup_win_key_combos (k:KR) {
     k.cm .add_combo ( cg().k(L).m(lwin).m(caps),  ag().af (gen_lwin_l_rel_af (k.ks)) );
 
     // win-m by default minimized all windows .. we just want to disable it .. (note that win-d still does show-desktop)
-    k.cm .add_combo ( cg().k(M).m(lwin),  ag().af(no_action()) );
+    //k.cm .add_combo ( cg().k(M).m(lwin),  ag().af(no_action()) );
+    // ^^ win-m now set to open chrome non-incognito (counterpart to win-n for new chrome incognito window)
 
     // win-f can toggle window full-screen .. (the OS default feedback-hub will stay on double-win-f)
     // (note that to avoid accidental trigger, since this is _dbl tracked mode-key, we'll add _dbl too)
@@ -1189,10 +1190,10 @@ fn setup_win_key_combos (k:KR) {
     // win-i should start irfanview
     k.cm .add_combo ( cg().k(I).no_rpt().m(lwin),  ag().af(action(start_irfanview)) );
 
-    // given muscle memory confusions, we'll just use both win-n, caps-win-n for incognito browser, and win-b for regular
-    k.cm .add_combo ( cg().k(B).no_rpt().m(lwin),          ag().af (action (start_chrome)) );
+    // given muscle memory confusions, we'll just use both win-n, caps-win-n for incognito browser, and win-m (next to n) for regular
     k.cm .add_combo ( cg().k(N).no_rpt().m(lwin),          ag().af(action(start_chrome_incognito)) );
     k.cm .add_combo ( cg().k(N).no_rpt().m(lwin).m(caps),  ag().af(action(start_chrome_incognito)) );
+    k.cm .add_combo ( cg().k(M).no_rpt().m(lwin),          ag().af (action (start_chrome)) );
 
     // win-caps-b for bard .. hah we'll see
     //k.cm .add_combo ( cg().k(B).no_rpt().m(lwin).m(caps),  ag().af (action_pIHH1 (start_chrome_app, "nohacooabmgpjcdeajcfjgkpfibiffjf")) );
@@ -1211,14 +1212,17 @@ fn setup_win_key_combos (k:KR) {
     // and win-ctrl-s to actually bring up the windows settings (via default win-i)
     k.cm .add_combo ( cg().k(S).m(caps).m(lwin),  ag().k(I).m(lwin) );
 
-    // and win-a to bring up the launchy popup (which is win-a in practice, but for us would only be dbl-win-a otherwise)
-    // (we've assigned that to win-ctrl-shift-a to not interfere with win-a doing windows-action center by default)
-    //k.cm .add_combo ( cg().k(A).m(lwin),  ag().k(A).m(lwin).m(lctrl).m(lshift) );
-    // ^^ seems to not work w elev switche fgnd .. presumably some global blockage of ctrl-hotkeys
-    k.cm .add_combo ( cg().k(A).m(lwin),  ag().k(A).m(win).m(shift) );
+    // and win-1 to bring up the powertoys launcher popup
+    k.cm .add_combo ( cg().k(Numrow_1).m(lwin),  ag().k(A).m(win).m(shift) );
 
     // we'll setup win-w for closing windows (via alt-f4)
     k.cm .add_combo ( cg().k(W).no_rpt().m(lwin),  ag().k(F4).m(lalt) );
+
+    // win-Z can invoke Gamgee (its native hotkey is set to Win-Shift-Z)
+    // (couldnt do G with win-combos as win-os game bar capture seems to listen to it natively beyond krusty masking)
+    k.cm .add_combo ( cg().k(Z).m(lwin), ag().k(Z).m(win).m(shift) );
+
+    // Note that there's also win-A that toggles quick-bar action-grid .. (in the qbar section further down)
 
     // we'll also setup a shortcut to pull up our taskbar shortcuts folder ...
     // (by focusing on tray btn first, then nav to our toolbar)
@@ -1542,16 +1546,6 @@ fn setup_misc_standalone_combos (k:KR) {
     // quick shortcut to reset system cursors .. mostly useful while impl/testing it
     k.cm .add_combo ( cg().k(C).m(caps_dbl).m(lalt),  ag().af (action (|| Cursors::instance().apply_sys())) );
 
-    // caps-caps-G can invoke the hotkey for Gamgee (Alt-Shift-G)
-    let gamgee_ag = ag().k(G).m(alt).m(shift);
-    k.cm .add_combo ( cg().k(G).m(caps_dbl),  gamgee_ag.clone() );
-    // but we'll also support caps-gg for easier ergonomics (where ctrl-g on first press is harmless)
-    k.cm .add_combo ( cg().k(G).dbl().m(caps),  gamgee_ag.clone() );
-    // and we'll add caps-d-g too going by what was done for qbar invocation (cc-a, c-aa, c-q-a)
-    k.cm .add_combo ( cg().k(G).m(caps).s(msQ),  gamgee_ag.clone() );
-
-    // caps-F-B can do WinDusky toggle (via win-alt-I) .. just wanted something simpler during dev
-    //k.cm .add_combo ( cg().k(B).m(caps).s(msF),  ag().k(I).m(win).m(alt) );
 
 }
 
@@ -2744,17 +2738,30 @@ fn setup_quick_bar (k:KR) {
     k.cm .add_combo ( cg().mbtn(LeftButton).rel() .c(cond()) .fsc(fsc_pre),  ag().af (trigger_af) );
 
 
-    // and we'll setup kbd only combo to toggle quick-bar too .. leaves it persistent, mostly useful for testing
+
+    // and we'll setup kbd only combos to toggle quick-bar too .. leaves it persistent
+    let qbar_toggle = Arc::new (move || k.qbar.toggle());
+    let qbar_toggle = || qbar_toggle.clone();
     // caps-caps-A --> bring up Action Grid
-    k.cm.add_combo ( cg().k(A).m(caps_dbl),     ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(A).m(caps_dbl),     ag().af (qbar_toggle()));
+
     // we'll also setup caps-a-a for ergonomics (can be useful where the first ctrl-a is harmless)
-    k.cm.add_combo ( cg().k(A).dbl().m(caps),   ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(A).dbl().m(caps),   ag().af (qbar_toggle()));
+
     // and we'll overload yet another invocation on caps-q with a/o .. we'll see if it sees use
-    k.cm.add_combo ( cg().k(A).m(caps).s(msQ),  ag().af (Arc::new (move || k.qbar.toggle())) );
-    k.cm.add_combo ( cg().k(O).m(caps).s(msQ),  ag().af (Arc::new (move || k.qbar.toggle())) );
+    k.cm.add_combo ( cg().k(A).m(caps).s(msQ),  ag().af (qbar_toggle()));
+    k.cm.add_combo ( cg().k(O).m(caps).s(msQ),  ag().af (qbar_toggle()));
     // ^^ we could have tried to have this also enter the fsc state .. (with a bit of manual toggle management here)
     // However, we've decided NOT to do that, as not doing so means the quick-bar persists over [caps/mod]-rel etc clearing fscs
     // Further, since we only care about wheel actions in this fsc, and w/o alt/ctrl, they work decently from regular fallback
+
+    // the caps-caps combos seem to be leading to caps-pinky strain .. cant that .. so we'll have alt alternative
+    k.cm .add_combo ( cg().k(A).m(lalt_dbl),   ag().af (qbar_toggle()));
+    k.cm .add_combo ( cg().k(B).m(lalt_dbl),   ag().af (qbar_toggle()));
+    k.cm .add_combo ( cg().k(Q).m(lalt_dbl),   ag().af (qbar_toggle()));
+
+    // even better, we'll just do win-A (A for action-grid)
+    k.cm .add_combo ( cg().k(A).m(lwin),   ag().af (qbar_toggle()));
 
 
     // for cleanup, we'll setup the rbtn-rel to hide the quick-bar and clear out of the state and related flags etc
@@ -3009,6 +3016,11 @@ pub fn setup_krusty_board (k:KR) {
 
 
 pub fn main () {
+
+    // if we were just restarted, we'll use a small delay for the prior instance and its registered hotkeys etc to clear up
+    if std::env::args() .any (|arg| arg == "-r") {
+        thread::sleep (Duration::from_millis(100));
+    }
 
     // if we want to use a hook-guard to fork another process to install a more-recent ll-kbd-hook, must call that first thing!
     // (coz if we're the spawned guard process we dont even want to initialize krusty etc)

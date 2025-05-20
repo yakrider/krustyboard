@@ -3,10 +3,11 @@ use std::time::Duration;
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
 use core::ffi::c_int;
+use std::os::windows::process::CommandExt;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject};
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+use windows::Win32::System::Threading::{OpenProcess, CREATE_NO_WINDOW, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, GetMessageW, MSG, SetWindowsHookExW, WH_KEYBOARD_LL};
 
 
@@ -73,7 +74,9 @@ impl HookGuard {
             if self.guard.lock().unwrap().is_some() { return }
 
             // and now we can launch the guard process w the ll-kbd-hook
-            if let Ok (guard) = Command::new (env::current_exe().unwrap()) .arg("--hook-guard") .spawn() { unsafe {
+            let mut cmd = Command::new (env::current_exe().unwrap());
+            cmd .creation_flags (CREATE_NO_WINDOW.0);
+            if let Ok (guard) = cmd .arg("--hook-guard") .spawn() { unsafe {
                 println! ("Launched a new hook-guard with pid: {:?}", guard.id());
                 // we'll also add this process to our job (so it will be cleaned up if we get killed/exit)
                 let gh = OpenProcess (PROCESS_TERMINATE | PROCESS_SET_QUOTA, false, guard.id());
