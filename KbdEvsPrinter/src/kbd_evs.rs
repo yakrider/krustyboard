@@ -48,6 +48,7 @@ struct Event {
 }
 
 
+#[allow (clippy::type_complexity)]
 static EVENT_CHANNEL: LazyLock <(Sender<(Instant,Event)>, Receiver<(Instant,Event)>)> = LazyLock::new (unbounded);
 
 
@@ -102,6 +103,7 @@ enum Colors {
 - Note that the colors below are designed for a Powershell-7 profile for windows-terminal that disables automatic color adjustment ..
     otherwise, the terminal tries to enforce contrast levels by brightening colors against bkg-highlight etc
 - Plus, the 'colored' crate used requires $env:COLORTERM = 'truecolor' set, either in pwsh $PROFILE or directly in env-vars etc
+- for the extract below, kbd-evs is defined as alias to our exe in $PROFILE
 - Powershell-7 profile extract sample intended for use with this utility:
     {
         "name": "kbd-evs",
@@ -147,12 +149,6 @@ impl Colors {
         }
     }
 }
-
-/* todo
-    - consider adding the time separation and printint horiz lines
-    - consider extending the line a bit more past the gap
-    - consider if the gap can be made more informative on hl lines (unless the line separator makes things more evident already)
- */
 
 
 
@@ -263,7 +259,7 @@ fn print_events (receiver: Receiver<(Instant,Event)>) {
         let key = key_colorized (&key, event.is_press, is_mod, hl_kr);
 
         let ev_t = if event.is_press { "dn" } else { "up" };
-        let ev_t = key_colorized (& format! ("{:<2}", ev_t), event.is_press, is_mod, hl_kr);
+        let ev_t = key_colorized (& format! ("{ev_t:<2}"), event.is_press, is_mod, hl_kr);
 
         let inj = if repeat { Injected::Repeat } else { event.inj };
         let inj = match inj {
@@ -272,7 +268,7 @@ fn print_events (receiver: Receiver<(Instant,Event)>) {
             Injected::Krusty => "k",
             Injected::Other  => "j",
         };
-        let inj = colorized (& format!("{:<1}", inj), Cls::EvT, hl_kr);
+        let inj = colorized (& format!("{inj:<1}"), Cls::EvT, hl_kr);
 
         let code = colorized (& format! ("{:>#06x}", event.vk_code), Cls::Grey, hl_kr);
 
@@ -300,8 +296,8 @@ fn print_events (receiver: Receiver<(Instant,Event)>) {
         }
 
         let line = format! (
-            "{}  {}  {}  {}  {}  {}  {}  {}  {}  {}    ", // spacing should match the header
-            key, ev_t, inj, alt, win, ctrl, shift, code, stamp, gap
+            "{key}  {ev_t}  {inj}  {alt}  {win}  {ctrl}  {shift}  {code}  {stamp}  {gap}    "
+            // ^^spacing should match the header
         );
         let line = if hl_kr {
             line.on_custom_color (Colors::Highlight_kdn_kr.color())
@@ -310,7 +306,7 @@ fn print_events (receiver: Receiver<(Instant,Event)>) {
         } else {
             line.into()
         };
-        println! ("{}",line)
+        println! ("{line}")
     }
 
     println!("Event channel closed. Printer thread exiting.");
@@ -359,7 +355,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let event = Event { vk_code, sc_code, is_press, mods, inj};
 
         if let Err(e) = EVENT_CHANNEL.0 .send ((stamp, event)) {
-            eprintln! ("[Hook Error] Failed to send event: {}", e);
+            eprintln! ("[Hook Error] Failed to send event: {e}");
         }
     }
 

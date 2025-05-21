@@ -9,7 +9,7 @@ pub use self::brightness_utils::*;
 
 
 /// !!  deprecated  !!
-# [ allow (dead_code) ]
+#[allow (dead_code)]
 mod brightness_ps_wmi {
 
     use std::process::Command;
@@ -17,7 +17,7 @@ mod brightness_ps_wmi {
     static PS_LOC: &str = r#"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#;
     static BRIGHT_Q_CMD: &str = "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness";
 
-    fn set_cmd (v:i32) -> String { format!("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{})", v) }
+    fn set_cmd (v:i32) -> String { format!("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{v})") }
 
     pub fn incr_brightness (incr:i32) {
         let cur_b = Command::new(PS_LOC).arg(BRIGHT_Q_CMD).output().ok()

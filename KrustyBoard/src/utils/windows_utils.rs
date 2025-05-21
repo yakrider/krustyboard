@@ -1,9 +1,9 @@
-#![ allow (non_snake_case) ]
+#![allow (non_snake_case)]
 
 use std::ffi::{c_void, OsString};
 use std::mem::{size_of, zeroed};
 use std::os::windows::prelude::OsStringExt;
-use std::sync::{Arc, Mutex, RwLock, LazyLock};
+use std::sync::{Mutex, RwLock, LazyLock};
 use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 
 use windows::core::{HSTRING, PCWSTR, BOOL, PWSTR};
@@ -23,7 +23,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS
 // Note for the new-types below that they are globaly re-exported from _krusty (and onto crate:*)
 
 // we'll define our own new-type of Hwnd mostly coz HWND doesnt implement Debug, Hash etc
-# [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
+#[derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Hwnd (pub(crate) isize);
 
 impl Hwnd {
@@ -46,7 +46,7 @@ impl From <isize> for Hwnd {
 
 
 // and the atomic version of Hwnd for storage
-# [ derive (Debug, Default) ]
+#[derive (Debug, Default)]
 pub struct HwndAtomic (AtomicIsize);
 
 impl HwndAtomic {
@@ -77,7 +77,7 @@ impl From <HwndAtomic> for HWND {
 
 
 // we'll define our own type of Point too, again coz POINT doesnt impl Debug, Hash etc
-# [ derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash) ]
+#[derive (Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Point {
     pub x : i32,
     pub y : i32,
@@ -92,7 +92,7 @@ impl From <Point> for POINT {
 
 
 // and the atomic version of Point for storage
-# [ derive (Debug, Default) ]
+#[derive (Debug, Default)]
 pub struct PointAtomic (AtomicU64);
 
 impl PointAtomic {
@@ -543,9 +543,9 @@ pub fn mic_mute_toggle () { unsafe {
 
 // we'll use a static rwlocked vec to store enum-windows from callbacks, and a mutex to ensure only one enum-windows call is active
 #[allow(non_upper_case_globals)]
-static enum_hwnds_lock : LazyLock <Arc <Mutex <()>>> = LazyLock::new (|| Arc::new ( Mutex::new(())));
+static enum_hwnds_lock : LazyLock <Mutex <()>> = LazyLock::new (|| Mutex::new(()));
 #[allow(non_upper_case_globals)]
-static enum_hwnds : LazyLock <Arc <RwLock <Vec <Hwnd>>>> = LazyLock::new (|| Arc::new ( RwLock::new (vec!()) ) );
+static enum_hwnds : LazyLock <RwLock <Vec <Hwnd>>> = LazyLock::new (|| RwLock::new (vec!()));
 
 
 

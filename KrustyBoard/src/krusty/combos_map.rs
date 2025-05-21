@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![allow (non_camel_case_types)]
 
 use std::sync::{Arc, OnceLock};
 use std::{thread, time::Duration};
@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::*;
 
 
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct WcCombosMapKey {
     bmk : BindingsMapKey,
     first_stroke : ComboHash,
@@ -22,7 +22,7 @@ impl WcCombosMapKey {
 }
 
 
-#[ derive (Default) ]
+#[derive (Default)]
 /// hold the components of the result on evaluating combo-values
 struct ProcCVsResult {
     cond_execd  : bool,
@@ -31,7 +31,7 @@ struct ProcCVsResult {
 
 
 
-# [ derive () ]
+#[derive ()]
 /// holds the actual combo-map, and impls functionality on adding combos and matching/handling runtime combos
 pub struct CombosMap {
     // Note that we're using AtomicRefCell instead of Arc-RwLock because we should be doing all the building before
@@ -215,21 +215,21 @@ impl CombosMap {
                 let fscs = cvs.iter().filter(|cv| cv.is_fsc).count();
                 //note : same combos might be both tscs and cond .. i.e adding the ones above can be > cvs.len()
                 format! ("fsc: {:?}, tot: {:?}, cond: {:?}   {:?}", fscs, cvs.len(), conds, c)
-            } ) .sorted() .for_each (|s| println!("{}",s));
+            } ) .sorted() .for_each (|s| println!("{s}"));
             println! ("nTot = {:?}", self.combos_map.borrow().len());
 
             println! ("combo counts by underlying bindings-map-key:");
             self.combos_map .borrow() .keys() .map(|c| c.bmk) .counts() .iter()
-                .map (|(bmk,n)| format!("  {:3}  {:?}", n, bmk)) .sorted() .for_each (|s| println!("{}",s));
+                .map (|(bmk,n)| format!("  {n:3}  {bmk:?}")) .sorted() .for_each (|s| println!("{s}"));
 
             println! ("\nwildcarded combos:");
             self.wildcard_combos.borrow() .values() .flatten()
-                .map (|(c,_cs)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
+                .map (|(c,_cs)| format!("  {c:?}")) .sorted() .for_each (|s| println!("{s}"));
 
             println! ("\nfirst-stroke-combo registrations:");
             self.combos_map .borrow() .iter()
                 .filter (|(_c,cvs)| cvs.iter().any(|cv| cv.is_fsc))
-                .map (|(c,_v)| format!("  {:?}",c)) .sorted() .for_each (|s| println!("{}",s));
+                .map (|(c,_v)| format!("  {c:?}")) .sorted() .for_each (|s| println!("{s}"));
 
             self.info_print_simult_active_combos_check();
         } );
@@ -244,13 +244,13 @@ impl CombosMap {
             println! ("## combo-map-keys with wildcards: {:?}", self.wildcard_combos.borrow().len());
 
             let fscs_count = self.combos_map .borrow() .values() .filter (|cvs| cvs.iter().any (|cv| cv.is_fsc)) .count();
-            println! ("## first-stroke registrations: {:?}", fscs_count);
+            println! ("## first-stroke registrations: {fscs_count:?}");
 
             let combos_w_mult_non_cond_cvs = self .combos_map .borrow() .iter() .map ( |(c,cvs)| {
                 (*c, cvs.iter() .filter (|cv| cv.cond.is_none() && !cv.is_fsc && !cv.dbl_tap) .count())
             } ) .filter (|(_,n)| *n > 1) .sorted_by_key (|(_,n)| *n) .collect_vec();
             println! ("## combos with multiple non-cond non-dbl-tap combo value entries each: {:?}", combos_w_mult_non_cond_cvs.len());
-            combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={:?} : {:?}", n, c));
+            combos_w_mult_non_cond_cvs .iter() .for_each (|(c,n)| println!("  n={n:?} : {c:?}"));
         } );
     }
 

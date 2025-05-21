@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![allow (non_camel_case_types)]
 
 use std::sync::Arc;
 use derivative::Derivative;
@@ -42,9 +42,9 @@ impl ComboGenable for ComboGenSt_Inited {}
 
 
 /// Combo-Generator progressive state struct inner data
-//# [ derive (Clone) ]
-# [ derive (Clone, Derivative) ]
-# [ derivative (Debug) ]
+//#[derive (Clone)]
+#[derive (Clone, Derivative)]
+#[derivative (Debug)]
 pub struct _ComboGen {
 
     /// Modifier keys that should be down to trigger this combo
@@ -63,7 +63,7 @@ pub struct _ComboGen {
     pub dbl_tap : bool,
 
     /// Optional condition to check before triggering this combo
-    # [ derivative (Debug="ignore") ]
+    #[derivative (Debug="ignore")]
     pub cond : Option<ComboCond>,
 
     /// Optional hash of a (sticky or latching) first-stroke-combo (fsc) that must be active for this combo to trigger. <br>
@@ -97,7 +97,7 @@ impl _ComboGen {
 
 
 /// Combo-Generator progressive state struct
-# [ derive (Debug, Clone) ]
+#[derive (Debug, Clone)]
 pub struct ComboGen <S: ComboGenSt = ComboGenSt_Init> {
 
     /// all the data that ComboGen actually holds through the construction states

@@ -1,0 +1,25 @@
+
+# Settings here will override those on ~/.cargo/config.toml
+
+
+
+[build]
+#
+# specifying parallel frontend with -Z threads requires nightly!!
+# since we only run kruty locally (not intended for release), we'll target local cpu alone
+rustflags = ["-Z", "threads=8", "-C", "target-cpu=native"]
+#
+# we'll use sccache to cache all builds
+rustc-wrapper = "sccache"
+#
+
+
+
+[target.x86_64-pc-windows-msvc]
+#
+# the lld linker is faster than default, and has no drawbacks to using it
+linker = "rust-lld"
+#
+# we'll have the linker run parallel too
+rustflags = ["-C", "link-arg=/threads:8"]
+#

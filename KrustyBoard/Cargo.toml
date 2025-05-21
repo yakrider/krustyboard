@@ -1,3 +1,8 @@
+
+# we'll use codegen-backend to enable cranelift
+cargo-features = ["codegen-backend"]
+
+
 [package]
 name = "krustyboard"
 version = "1.4.6"
@@ -12,6 +17,7 @@ categories = ["api-bindings"]
 license = "MIT"
 edition = "2021"
 build = "build.rs"
+
 
 
 [[bin]]
@@ -78,10 +84,30 @@ features = [
 
 
 
+
+# we'll set general debug-info to lines-tables only to speed up compilation
+# can remove this if we really need to debug, but should seldom be the case
+[profile.dev]
+debug = "line-tables-only"
+codegen-backend = "cranelift"
+
 # enable when profiling (e.g with FlameGraph)
 #[profile.release]
 #debug = true
 
+
+
+# for faster builds, we can put the following sections in either ~/.cargo/config.toml or <PROJ>/.cargo/config.toml
+#
+# the parallel compilation frontend requires nightly
+#[build]
+#rustflags = ["-Z", "threads=8", "-C", "target-cpu=native"]
+#rustc-wrapper = "sccache"
+#
+# Note that in ~/.cargo.config.toml we already use rust-lld .. eg:
+#[target.x86_64-pc-windows-msvc]
+#linker = "rust-lld"
+#rustflags = ["-C", "link-arg=/threads:8"]
 
 
 [lints.clippy]

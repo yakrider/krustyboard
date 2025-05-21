@@ -1,4 +1,4 @@
-#![ allow (dead_code, non_snake_case) ]
+#![allow (dead_code, non_snake_case)]
 
 use std::thread;
 use std::time::{Instant, Duration};
@@ -20,7 +20,7 @@ pub use utils::{Hwnd, HwndAtomic, Point, PointAtomic};
 // ^^ re-exporting these to everyone, as we dont typically import utils::*
 
 
-# [ derive (Debug, Default) ]
+#[derive (Debug, Default)]
 /// representation for all our atomic flags for states mod-states, modifier-keys, mouse-btn-state etc <br>
 /// (Note that this uses Acquire/Release memory ordering semantics, and shouldnt be used as lock/mutex etc)
 pub struct Flag (AtomicBool);
@@ -54,7 +54,7 @@ impl Flag {
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct TimeStamp (RwLock<Instant>);
 
 // Note that we have moved everything to using the EventStamp instead so this is just vestigial now
@@ -75,7 +75,7 @@ impl TimeStamp {
 
 
 
-# [ derive (Debug, Default) ]
+#[derive (Debug, Default)]
 pub struct EventStamp (AtomicU32);
 
 impl EventStamp {

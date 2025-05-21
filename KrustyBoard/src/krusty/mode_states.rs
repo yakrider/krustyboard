@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types, non_snake_case) ]
+#![allow (non_camel_case_types, non_snake_case)]
 
 use std::sync::{Arc, OnceLock};
 use atomic_refcell::AtomicRefCell;
@@ -10,7 +10,7 @@ use crate::{*, ModeState_T::*};
 
 
 
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 /// All the supported mode-states, (whether they have triggering keys registered or not)
 pub enum ModeState_T {
     // note below that no_ms can be useful to fill in fns set to take somethhing .. (it is ignored at its not in bitmaps)
@@ -38,7 +38,7 @@ impl ModeState_T {
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 /// ModeState representation for mode-flags (and any associated trigger keys they have)
 /// Note that key triggered mode-states are active ONLY while the assigned key is held down
 pub struct ModeState {
@@ -54,7 +54,7 @@ pub struct ModeState {
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 /// Holds all the ModeStates together, common functionality is impld here
 pub struct ModeStates {
     _private : (),

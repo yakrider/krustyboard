@@ -4,7 +4,7 @@ use strum_macros::EnumIter;
 
 
 /// Enum for all the Keyboard Keys
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 pub enum KbdKey {
 
     MouseLeftBtn,

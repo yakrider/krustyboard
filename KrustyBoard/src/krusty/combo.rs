@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types, non_upper_case_globals) ]
+#![allow (non_camel_case_types, non_upper_case_globals)]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,7 +18,7 @@ use crate::*;
 
 
 
-# [ derive (Eq, PartialEq, Hash, Copy, Clone) ]
+#[derive (Eq, PartialEq, Hash, Copy, Clone)]
 /// represents the actual Combo, and impls generation from ComboGens (to store in combo-map) or from active states-flags
 pub struct Combo {
     _private:(),
@@ -101,7 +101,7 @@ impl ComboHashAtomic {
 
 
 
-# [ derive () ]
+#[derive ()]
 /// ComboValue is the 'value' part of the combos_map entry that holds the AF, the combo creation time, and the optional trigger condition
 pub(crate) struct ComboValue {
     _private : (),
@@ -387,7 +387,7 @@ impl std::fmt::Debug for Combo {
         use colored::*;
         const bits_chars: &str = "CAčSWAčSWEDFRQ1234CAčSWAčSWEDFRQ1234";
         fn bits_str (bits:u64) -> String {
-            format! ("{:064b}",bits) .chars().rev()
+            format! ("{bits:064b}") .chars().rev()
                 .zip (bits_chars.chars())
                 .enumerate() .map ( |(i,(b,bc))| {
                     let c = if b=='1' {bc.to_string().yellow()} else {bc.to_string().dimmed()};

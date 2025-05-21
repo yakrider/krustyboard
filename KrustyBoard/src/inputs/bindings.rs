@@ -31,7 +31,7 @@ pub type EvCbFn_QueuedProc_T = Box <dyn Fn() + Send + Sync + 'static>;
 
 /// The bindings callback type can either be inline-execution type (must return EventPropagationDirective)
 /// or spawned out in a child thread (no return val)
-# [ derive (Clone) ]
+#[derive (Clone)]
 pub enum EvCbFn_T {
     EvCbFn_Inline  (EvCbFn_InThread_T),
     EvCbFn_Spawned (EvCbFn_OffThread_T),
@@ -40,7 +40,7 @@ pub enum EvCbFn_T {
 
 /// The bindings callback entry includes the appropriate callback-type and directives on whether to proceed
 /// with combo processing after it done, and whether to signal to OS for further event-propagation
-# [ derive (Clone) ]
+#[derive (Clone)]
 pub struct EvCbEntry {
     pub ev_proc_ds : EvProc_Ds,
     pub cb : EvCbFn_T,
@@ -99,13 +99,13 @@ impl std::fmt::Debug for BindingsMapKey {
     fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use {KbdEv_MapKey_T::*, MouseBtnEv_T::*, MouseWheelEv_T::*};
         match &self {
-            key_ev_bmkt     (key,   KeyEventCb_KeyDown) => write! (f, "Down  {:?}", key),
-            key_ev_bmkt     (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {:?}", key),
-            btn_ev_bmkt     (btn,   BtnDown)            => write! (f, "Down  {:?}", btn),
-            btn_ev_bmkt     (btn,   BtnUp)              => write! (f, "  Up  {:?}", btn),
-            wheel_ev_bmkt   (wheel, WheelBackwards)     => write! (f, "Bkwd  {:?}", wheel),
-            wheel_ev_bmkt   (wheel, WheelForwards)      => write! (f, " Fwd  {:?}", wheel),
-            fsc_ev_bmkt     (fsc,   fsc_ev_t)           => write! (f, "{:?}  {:?}", fsc_ev_t, fsc),
+            key_ev_bmkt     (key,   KeyEventCb_KeyDown) => write! (f, "Down  {key:?}"),
+            key_ev_bmkt     (key,   KeyEventCb_KeyUp)   => write! (f, "  Up  {key:?}"),
+            btn_ev_bmkt     (btn,   BtnDown)            => write! (f, "Down  {btn:?}"),
+            btn_ev_bmkt     (btn,   BtnUp)              => write! (f, "  Up  {btn:?}"),
+            wheel_ev_bmkt   (wheel, WheelBackwards)     => write! (f, "Bkwd  {wheel:?}"),
+            wheel_ev_bmkt   (wheel, WheelForwards)      => write! (f, " Fwd  {wheel:?}"),
+            fsc_ev_bmkt     (fsc,   fsc_ev_t)           => write! (f, "{fsc_ev_t:?}  {fsc:?}"),
             fgnd_ev_bmkt                                => write! (f, "Fgnd Changed"),
             pointer_ev_bmkt                             => write! (f, "Mouse Moved"),
         }
@@ -117,7 +117,7 @@ impl std::fmt::Debug for BindingsMapKey {
 
 /// The input-events-action-bindings object itself, Arc/RwLock wrapped for safe sharing/setting/invocation across threads.
 /// The map-key has event-src and-event type, the map-value is the callback entry .. used for both kbd and mouse events
-# [ derive (Deref) ]
+#[derive (Deref)]
 pub struct Bindings (
     AtomicRefCell <FxHashMap <BindingsMapKey, EvCbEntry>>
     // ^^ note that we use AtomicRefCell instead of RwLock as we dont ever write to it at runtime (and it is faster at runtime)

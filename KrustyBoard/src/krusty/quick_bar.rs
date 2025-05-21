@@ -2,7 +2,7 @@
 
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, Mutex, OnceLock, LazyLock};
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 use eframe::emath::{pos2, Rect, vec2};
@@ -242,17 +242,16 @@ pub struct QuickBar {
     drag_active : Flag,
 
     // we'll grab hwnd and ctx when the bar comes up
-    ctx  : Arc <Mutex <Option <Context>>>,
+    ctx  : OnceLock <Context>,
     hwnd : AtomicIsize,
 
     // to get the grid-provider, we'll need to pass the egui context (upon egui start)
     // (which can then be used to preload textures into the ctx etc)
     // .. so we'll let users register a grid-provider-builder fn that we'll call then
-    get_grid_builder : Arc <Mutex <Option <GetGridBuilderFn>>>,
+    get_grid_builder : OnceLock <GetGridBuilderFn>,
 
     // and so thatd return a grid_provider which we'll store and use at rendering time
-    // (this is called at render-time .. we're gonna even forgo option wrapping here)
-    get_grid : Arc <Mutex <GetGridFn>>,
+    get_grid_fn : OnceLock <GetGridFn>,
 
     // we'll keep a flag on when the update fn might need to refresh grid (coz fgnd change etc)
     refresh_grid : Flag,
@@ -267,35 +266,36 @@ pub struct QuickBar {
 impl QuickBar {
 
     pub fn instance () -> &'static QuickBar {
-
-        // we'll prep a default get-grid fn that returns an empty grid
-        // (instead of having the get-gird be option wrapped just for init purposes)
-        static gg_empty : LazyLock <ActionGrid> = LazyLock::new (ActionGrid::default);
-
         static INSTANCE: OnceLock <QuickBar> = OnceLock::new();
         INSTANCE .get_or_init ( ||
             QuickBar {
                 is_visible  : Flag::default(),
                 drag_active : Flag::default(),
 
-                ctx  : Arc::new (Mutex::new (None)),
+                ctx  : OnceLock::new(),
                 hwnd : AtomicIsize::default(),
 
-                get_grid_builder : Arc::new ( Mutex::new ( None ) ),
-                get_grid         : Arc::new ( Mutex::new ( Box::new (move || &gg_empty))),
-                refresh_grid     : Flag::default(),
-                freeze_grid      : Flag::default(),
+                get_grid_builder : OnceLock::new(),
+                get_grid_fn      : OnceLock::new(),
+
+                refresh_grid  : Flag::default(),
+                freeze_grid   : Flag::default(),
             }
         )
     }
 
-    pub fn set_grid_provider_builder (&self, gpbfn: GetGridBuilderFn) {
-        *self.get_grid_builder.lock().unwrap() = Some (gpbfn);
+    // we'll have a thin getter-fn to actually query for the grid from the get-grid fn on demand
+    pub fn get_grid (&self) -> Option <&'static ActionGrid> {
+        self.get_grid_fn.get() .map (|ggfn| ggfn())
+    }
+
+    pub fn set_grid_provider_builder (&self, ggbfn: GetGridBuilderFn) {
+        let _ = self.get_grid_builder.set(ggbfn);
     }
 
     pub fn set_dragging (&self, is_dragging:bool) {
         if !is_dragging && self.drag_active.is_set() {
-            if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+            if let Some(grid) = self.get_grid() {
                 self.persist_pos (grid);
             }
         }
@@ -309,16 +309,16 @@ impl QuickBar {
     }
 
     pub fn cur_grid_check_visible(&self) -> bool {
-        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.is_visible.is_set())
+        self.get_grid() .is_some_and (|grid| grid.is_visible.is_set())
     }
     pub fn cur_grid_check_persist (&self) -> bool {
-        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.is_persist.is_set())
+        self.get_grid() .is_some_and (|grid| grid.is_persist.is_set())
     }
     pub fn cur_grid_check_prior_persist(&self) -> bool {
-        self.get_grid.lock().ok() .map (|gfn| gfn()) .is_some_and (|grid| grid.prior_persist.is_set())
+        self.get_grid() .is_some_and (|grid| grid.prior_persist.is_set())
     }
     pub fn cur_grid_set_prior_persist (&self, v:bool) {
-        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+        if let Some(grid) = self.get_grid() {
             grid.prior_persist.store(v);
         }
     }
@@ -328,14 +328,14 @@ impl QuickBar {
     }
 
     pub fn request_repaint (&self) {
-        if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
+        if let Some(ctx) = self.ctx.get() {
             ctx.request_repaint();
         }
     }
 
     pub fn toggle (&self) {
         // toggling will open/close it with persistence (unlike for mouse invocations with fsc)
-        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+        if let Some(grid) = self.get_grid() {
             if grid.is_visible.is_clear() {
                 self.show (true, false)  // bools : persist, and open at stored loc
             } else {
@@ -352,7 +352,7 @@ impl QuickBar {
     }
 
     pub fn set_persistent (&self) {
-        if let Ok(grid) = self.get_grid.lock() .map (|gfn| gfn()) {
+        if let Some(grid) = self.get_grid() {
             grid.is_persist.set();
             if grid.is_visible.is_set() { self.persist_pos(grid) }
         }
@@ -360,7 +360,7 @@ impl QuickBar {
 
     pub fn hide (&self, force:bool) {
 
-        let grid = self.get_grid.lock() .map (|gfn| gfn()) .ok();
+        let grid = self.get_grid();
 
         if grid .as_ref() .is_some_and (|g| g.is_persist.is_set()) && !force { return };
         // ^^ if we were shown w persist flag, only a force close should hide it
@@ -399,8 +399,7 @@ impl QuickBar {
         // e.g. windows reposition requires un-minimize to have happened first (not at same time) .. and egui queues up cmds and so on
         // so instead, we'll do most of that w win-api cmds directly which seem more robust and reliable
 
-
-        let grid = self.get_grid.lock().expect("grid isnt setup").as_ref()();
+        let Some(grid) = self.get_grid() else { return };
 
         if grid.enabled.is_clear() { return }
 
@@ -442,7 +441,7 @@ impl QuickBar {
 
     pub fn get_scaled_grid_px_sz (&self, grid:&ActionGrid) -> CellDims {
         // we'll need scaling to calc the qbar's new position/size
-        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
+        let scaling = self.ctx.get() .map_or (1.0, |ctx| ctx.pixels_per_point());
 
         let grid_sz = grid.grid_px_sz();
         let width  = (scaling * grid_sz.width  as f32) as i32;
@@ -453,7 +452,7 @@ impl QuickBar {
     }
 
     pub fn handle_invocation (&self) {
-        let Ok(grid) = self.get_grid.lock().map(|gfn| gfn()) else { return };
+        let Some(grid) = self.get_grid() else { return };
         // we'll cache the persist state into prior_persist so we can check whether to persist upon invoc-clear
         grid.prior_persist .store (grid.is_persist.is_set());
         // and if we are to persist, we should update the persist position
@@ -463,7 +462,7 @@ impl QuickBar {
     }
     pub fn handle_invocation_clear (&self) {
         // if cur-grid had prior persistent, we move qbar back there, else we hide it
-        let Ok(grid) = self.get_grid.lock().map(|gfn| gfn()) else { return };
+        let Some(grid) = self.get_grid() else { return };
         if grid.prior_persist.is_clear() {
             self.hide(false);
             // ^^ closing w/o force flag means it wont close if persist flag set, e.g by kbd invocation
@@ -476,7 +475,7 @@ impl QuickBar {
     pub fn handle_fgnd_change (&self, fgnd_hwnd:Hwnd) {
         // we'd like the qb grid to check for updates, so we'll mark a flag, and wake up the ui-event-loop
         if fgnd_hwnd != Hwnd (self.hwnd.load (Ordering::Relaxed)) {
-            if let Some(ctx) = self.ctx.lock().unwrap().as_ref() {
+            if let Some(ctx) = self.ctx.get() {
                 self.refresh_grid.set();
                 ctx.request_repaint();
             }
@@ -488,7 +487,7 @@ impl QuickBar {
 
     fn resize (&self, grid: &ActionGrid) { unsafe {
         let hwnd = Hwnd (self.hwnd.load(Ordering::Relaxed));
-        let scaling = self.ctx.lock().unwrap().as_ref() .map_or (1.0, |ctx| ctx.pixels_per_point());
+        let scaling = self.ctx.get() .map_or (1.0, |ctx| ctx.pixels_per_point());
         let grid_sz = grid.grid_px_sz();
         let width  = (scaling * grid_sz.width  as f32) as i32;
         let height = (scaling * grid_sz.height as f32) as i32;
@@ -554,7 +553,7 @@ impl QuickBar {
                     egui_extras::install_image_loaders(&cc.egui_ctx);
 
                     // we also want to grab/store the ctx
-                    *self.ctx.lock().unwrap() = Some (cc.egui_ctx.clone());
+                    let _ = self.ctx .set (cc.egui_ctx.clone());
 
                     // we'll grab/store the hwnd as well
                     let Ok(h) = cc.window_handle() else { return Ok(app()) };
@@ -568,7 +567,7 @@ impl QuickBar {
                     // and we can use the ctx to call the configured grid-provider builder ..
                     // .. which will preload any icons, and generate the grid-provider for us
                     // .. then we'll use that to further setup the startup state for the qbar window
-                    if let Some(ggbfn) = self.get_grid_builder.lock().unwrap().as_ref() {
+                    if let Some(ggbfn) = self.get_grid_builder.get() {
                         let get_grid_fn = ggbfn (&cc.egui_ctx);
                         let cur_grid = get_grid_fn.as_ref()();
                         thread::spawn ( move || {
@@ -581,7 +580,7 @@ impl QuickBar {
                             }
                         } );
                         // and finally we can store the grid-provider fn itself
-                        *self.get_grid.lock().unwrap() = get_grid_fn;
+                        let _ = self.get_grid_fn .set (get_grid_fn);
                     }
 
                     // and finally we can let things start
@@ -613,14 +612,14 @@ impl eframe::App for &QuickBar {
         // we also allow dynamically updating the grid based on fgnd context, so we'll want to cache a grid ref for cur painting ..
         // then if the grid changes, we'll pick up the change in the next repaint
         static mut grid_s : OnceLock <&ActionGrid> = OnceLock::new();
-        let grid = unsafe {
-            grid_s .get_or_init (|| self.get_grid.lock().unwrap().as_ref()())
-        };
+        let grid = unsafe { grid_s .get_or_init (|| self.get_grid().unwrap()) };
+        // ^^ we'd never get here without having a grid-provider
+
         // and if the refresh-grid flag is set (typically due to fgnd change), we'll requery and update to a new grid
         if self.refresh_grid.is_set() && self.freeze_grid.is_clear() { unsafe {
             self.refresh_grid.clear();
             if let Some(grid) = grid_s.get_mut() {
-                let new_grid = self.get_grid.lock().unwrap().as_ref()();
+                let Some(new_grid) = self.get_grid() else { return };
                 if !std::ptr::eq (*grid, new_grid) {
                     if new_grid.enabled.is_set() && new_grid.is_visible.is_set() {
                         if new_grid.grid_sz != grid.grid_sz || new_grid.cell_sz != grid.cell_sz {
@@ -833,3 +832,4 @@ impl eframe::App for &QuickBar {
 
 
 }
+

@@ -1,25 +1,20 @@
 
-#![allow(unused)]
 
-
-use std::sync::{Mutex, Arc, LazyLock};
-use std::ops::BitAnd;
+use std::sync::OnceLock;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
 use image::ImageFormat;
 
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 
-use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{Icon, TrayIconBuilder};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use windows::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS};
-use crate::{InputProcessor, KrustyState, utils};
+use crate::{KrustyState, utils};
 
 
 
@@ -36,14 +31,14 @@ pub enum KrustyTauriEvent {
 }
 
 
-#[ allow (non_upper_case_globals) ]
-static tray_events_proxy : LazyLock <Arc <Mutex <Option <EventLoopProxy <KrustyTauriEvent>>>>> = LazyLock::new (|| Arc::new (Mutex::new (None)));
+#[allow (non_upper_case_globals)]
+static tray_events_proxy : OnceLock <EventLoopProxy <KrustyTauriEvent>> = OnceLock::new();
 
 
-#[ allow (non_snake_case) ]
+#[allow (non_snake_case)]
 /// this will inject an internal event into sys-tray event-loop which will update tray-menu checkboxes
 pub fn update_tray__krusty_suspend_state (is_suspended:bool) {
-    if let Some(proxy) = tray_events_proxy .lock() .unwrap() .as_ref() {
+    if let Some(proxy) = tray_events_proxy.get() {
         let _ = proxy.send_event ( KrustyTauriEvent::SuspendEvent { is_suspended } );
     }
 }
@@ -97,9 +92,10 @@ pub fn start_system_tray_monitor() {
     let suspend = CheckMenuItem::new ("Suspend", true, false, None);
 
     let tray_menu = Menu::new();
-    tray_menu .append_items ( &[ &elevated, &suspend, &reload, &restart, &quit ] );
+    let _ = tray_menu .append_items ( &[ &elevated, &suspend, &reload, &restart, &quit ] );
 
-    let tray_icon = TrayIconBuilder::new()
+    // note that the _tray_icon below might be usused locally, but needs to be remain in scope to avoid dropping the tray-icon!
+    let _tray_icon = TrayIconBuilder::new()
         .with_menu (Box::new(tray_menu))
         .with_tooltip ("KrustyBoard")
         .with_icon (get_krusty_icon())
@@ -112,7 +108,7 @@ pub fn start_system_tray_monitor() {
 
     let event_loop_proxy = event_loop.create_proxy();
 
-    *tray_events_proxy.lock() .unwrap() = Some (event_loop_proxy.clone());
+    let _ = tray_events_proxy .set (event_loop_proxy.clone());
 
     let proxy = event_loop_proxy.clone();
     MenuEvent::set_event_handler ( Some ( move |event:MenuEvent| {
@@ -129,7 +125,7 @@ pub fn start_system_tray_monitor() {
     let hotkey_mgr = GlobalHotKeyManager::new().unwrap();
     let unsuspend_hotkey = HotKey::new ( Some (Modifiers::CAPS_LOCK | Modifiers::ALT), Code::Insert );
     // ^^ since tauri modifiers are bitmasks, if we want ALT -AND- SHIFT, we have to specify mask as ALT | SHIFT .. (silly but oh well)
-    if let Err(e) = hotkey_mgr.register(unsuspend_hotkey) {
+    if hotkey_mgr.register(unsuspend_hotkey) .is_err() {
         println! ("WARNING : Failed to register unsuspend hotkey !!")
     }
 

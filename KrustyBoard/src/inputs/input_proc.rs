@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![allow (non_camel_case_types)]
 
 use std::{panic, thread};
 use std::os::raw::c_int;
@@ -30,7 +30,7 @@ pub const SRC_ID_MASK_KBD   : u64 = 1 << 63;
 pub const SRC_ID_MASK_MOUSE : u64 = 1 << 62;
 
 
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 /// The directive on whether to continue OS event propagation upon an event-callback or combo-processing
 pub enum EvProp_D {
     EvProp_Continue,
@@ -39,14 +39,14 @@ pub enum EvProp_D {
 }
 /// The directive included in a bindings callback entry that indicates whether to skip or proceed
 /// with combo processing after it is done
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum ComboProc_D {
     ComboProc_Enable,
     ComboProc_Disable,
     ComboProc_Undet,
 }
 /// Directives on whether to continue with combo processing or OS event propagation upon a kbd-callback
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct EvProc_Ds {
     pub ev_prop_d    : EvProp_D,
     pub combo_proc_d : ComboProc_D,
@@ -432,7 +432,7 @@ static LAST_STAMP: AtomicU32 = AtomicU32::new(0);
 fn print_mouse_ev (ev: Event) {
     let last_s = LAST_STAMP.swap(ev.stamp, Ordering::Relaxed);
     let gap_dur = ev.stamp - last_s;
-    thread::spawn(move || println!("{:?}, {:?}", ev, gap_dur));
+    thread::spawn(move || println!("{ev:?}, {gap_dur:?}"));
 }
 
 

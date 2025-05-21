@@ -1,4 +1,4 @@
-#![ allow (non_snake_case) ]
+#![allow (non_snake_case)]
 
 use std::{
     thread, time,
@@ -58,7 +58,7 @@ impl MouseBtnState {
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct MouseWheelState {
     pub wheel : MouseWheel,
     pub last_stamp : EventStamp,

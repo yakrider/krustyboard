@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![allow (non_camel_case_types)]
 
 
 use std::sync::{OnceLock, RwLock};
@@ -15,7 +15,7 @@ use crate::utils::*;
 
 pub const NUM_WIN_GROUPS : usize = 4;
 
-# [ derive (Debug, Copy, Clone, Eq, PartialEq) ]
+#[derive (Debug, Copy, Clone, Eq, PartialEq)]
 pub enum WinGroups_E { wg1, wg2, wg3, wg4 }
 impl WinGroups_E {
     pub fn idx (&self) -> usize {
@@ -33,19 +33,19 @@ impl TryFrom<usize> for WinGroups_E {
 
 
 
-# [ derive (Debug, Default) ]
+#[derive (Debug, Default)]
 // Note: this is intended as quick throwaway grouping and set that we'd rather replace than update
 pub struct _WinGroup {
     grp     : Vec <Hwnd>,
     grp_set : FxHashSet <Hwnd>,
     topmost : Flag,
 }
-# [ derive (Debug, Deref) ]
+#[derive (Debug, Deref)]
 pub struct WinGroup ( RwLock <_WinGroup> );
 
 
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct WinGroups {
     grps: [&'static WinGroup; NUM_WIN_GROUPS],
 }

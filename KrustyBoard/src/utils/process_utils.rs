@@ -101,7 +101,7 @@ pub fn start_chrome_incognito() {
 }
 
 pub fn start_chrome_app (app_id:&str) {
-    let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(format!(r#"--profile-directory="Default" --app-id={}"#, app_id)) .spawn();
+    let _ = Command::new(APP_RUNNER_LOC) .arg(CHROME_LOC) .arg(format!(r#"--profile-directory="Default" --app-id={app_id}"#)) .spawn();
 }
 
 pub fn start_firefox () {

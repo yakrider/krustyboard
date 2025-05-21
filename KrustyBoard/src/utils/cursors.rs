@@ -17,7 +17,7 @@ use crate::Flag;
 
 
 
-# [ derive (Debug, Copy, Clone) ]
+#[derive (Debug, Copy, Clone)]
 pub struct Cursor {
     // Note here that HICON is a pointer underneath, and making it copy/clone isnt exactly kosher ..
     // .. to avoid a retained HICON ever being dropped/modified by OS, we should only keep owned/copied hicons here
@@ -208,7 +208,7 @@ impl Cursors {
     }
 
 
-    # [ allow (non_camel_case_types) ]
+    #[allow (non_camel_case_types)]
     fn apply_fsc <SEL_1, SEL_2> (&'static self, selector:SEL_1, flash_sel:SEL_2)
         where SEL_1 : CursorSelector,
               SEL_2 : CursorSelector,

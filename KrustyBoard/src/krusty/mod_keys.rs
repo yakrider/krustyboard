@@ -1,4 +1,4 @@
-#![ allow (non_snake_case, non_camel_case_types) ]
+#![allow (non_snake_case, non_camel_case_types)]
 
 
 use std::time;
@@ -17,8 +17,8 @@ use crate::{*, ModKey::*, ComboProc_D::*, EvProp_D::*};
 
 
 /// All the supported modifier-keys (incl some w incomplete impl like rwin)
-# [ allow (non_camel_case_types) ]
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter) ]
+#[allow (non_camel_case_types)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone, EnumIter)]
 pub enum ModKey {
     no_mk,
     caps,      lalt,      ralt,      lwin,      rwin,      lctrl,      rctrl,      lshift,      rshift,
@@ -54,7 +54,7 @@ impl TryFrom <ModKey> for KbdKey {
 
 
 /// CapsModKey holds the caps-lock key and its impl as the base for most l2/l3 functionality
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct CapsModKey {
     _private : (),
     pub down     : Flag,    // physically down
@@ -74,7 +74,7 @@ pub type KH = Box <dyn KeyHandling + Send + Sync + 'static>;
 /// (As with couple extra bytes of storage, we get to keep code close enough to switch easily between TMK/SMK e.g. for lwin)
 /// Unified-Modifier-Key is now used for all modkeys regardless of ModKey_Mgmt behavior variation (other than for the capslock key)
 // (for reference, we used to have a SyncedModKey for the fully managed type, and a TrackedModKey for all the others)
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct UnifModKey {
     _private     : (),
 
@@ -101,8 +101,8 @@ pub struct UnifModKey {
 /// - blocked     .. the key events are blocked at this level and never make it out externally (e.g. ralt )
 /// - doubled     .. when double-tapped, they behave like single tapped, whereas single tapped are monitored but blocked (e.g. win)
 /// - managed     .. full management .. track both physical and logical states
-# [ allow (non_camel_case_types) ]
-# [ derive (Debug, Eq, PartialEq, Hash, Copy, Clone) ]
+#[allow (non_camel_case_types)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum ModKey_Mgmt {
     MK_Mgmt_Passthrough,
     MK_Mgmt_Blocked,
@@ -112,16 +112,16 @@ pub enum ModKey_Mgmt {
 
 // note that we wont need any data in the variant objects, they are simply used as types to associate the behavior
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct ModKey_Passthrough;
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct ModKey_Blocked;
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct ModKey_Doubled;
 
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct ModKey_Managed;
 
 
@@ -149,7 +149,7 @@ pub trait KeyHandling : Debug {
 
 
 /// Holds representation for all modifier keys together, interlinked functionality etc impld here
-# [ derive (Debug) ]
+#[derive (Debug)]
 pub struct ModKeys {
     // caps will be tracked for internal reference, and we'll assume we'll ALWAYS operate with caps-lock off
     // we'll also track all mod keys as syncd-modifier-keys, where we track the phys and logical states, as well as whether to mask their release

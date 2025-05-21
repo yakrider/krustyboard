@@ -272,14 +272,10 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
         println!(
             "{:<w_z$} {:<w_hwnd$} {:<w_fgnd$} {:<w_top$} {:<w_elev$} {:<w_pos$} {:<w_dim$} {:<w_proc$} {:<w_class$} {:<w_title$}",
             "@z", "HWND", "Fg", "Top ", "Elv", "      Loc", "     Dims", " Process", " Class", " Title",
-            w_z = w_z, w_hwnd = w_hwnd, w_fgnd = w_fgnd, w_top = w_top, w_elev = w_elev,
-            w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class, w_title = w_title,
         );
         println!(
             "{:-<w_z$} {:-<w_hwnd$} {:-<w_fgnd$} {:-<w_top$} {:-<w_elev$} {:-<w_pos$} {:-<w_dim$} {:-<w_proc$} {:-<w_class$} {:-<w_title$}",
-            "", "", "", "", "", "", "", "", "", "", // Use empty strings for separators
-            w_z = w_z, w_hwnd = w_hwnd, w_fgnd = w_fgnd, w_top = w_top, w_elev = w_elev,
-            w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class, w_title = w_title,
+            "", "", "", "", "", "", "", "", "", ""
         );
         return
     }
@@ -292,8 +288,8 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
     let y = info.rect.top;
     let width = info.rect.right - info.rect.left;
     let height = info.rect.bottom - info.rect.top;
-    let pos_str = format!("{:7} {:<7}", x, y);
-    let dim_str = format!("{:4} x {:<4}", width, height);
+    let pos_str = format!("{x:7} {y:<7}");
+    let dim_str = format!("{width:4} x {height:<4}");
 
     fn trunc (s: &str, max: usize) -> String {
         if max < 5 {
@@ -313,10 +309,8 @@ fn print_window_info (title_only:bool, info: &HwndInfo, z_order: usize) {
     let (fg, bg) = if is_alt.fetch_xor(true, Ordering::Relaxed) { (COLOR_A, COLOR_BG_A) } else { (COLOR_B, COLOR_BG_B) };
 
     println!(
-        "{}{}{:<w_z$} {:<w_hwnd$} {:<w_fgnd$} {:<w_top$} {:<w_elev$} {:<w_pos$} {:<w_dim$} {:<w_proc$} {:<w_class$} {:<w_title$}{}",
-        bg, fg, z_order, hwnd_str, fgnd_str, top_str, elev_str, pos_str, dim_str, proc, class, title, RESET_COLOR,
-        w_z = w_z, w_hwnd = w_hwnd, w_fgnd = w_fgnd, w_top = w_top, w_elev = w_elev,
-        w_pos = w_pos, w_dim = w_dim, w_proc = w_proc, w_class = w_class, w_title = w_title,
+        "{bg}{fg}{z_order:<w_z$} {hwnd_str:<w_hwnd$} {fgnd_str:<w_fgnd$} {top_str:<w_top$} \
+        {elev_str:<w_elev$} {pos_str:<w_pos$} {dim_str:<w_dim$} {proc:<w_proc$} {class:<w_class$} {title:<w_title$}{RESET_COLOR}"
     );
 }
 

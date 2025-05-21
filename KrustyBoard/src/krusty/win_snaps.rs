@@ -1,7 +1,7 @@
-#![ allow (non_snake_case, non_upper_case_globals) ]
+#![allow (non_snake_case, non_upper_case_globals)]
 
 
-use std::sync::{Arc, RwLock, Mutex, LazyLock};
+use std::sync::{RwLock, Mutex, LazyLock};
 use std::{thread, time};
 
 use rand::Rng;
@@ -14,19 +14,19 @@ use crate::{ *, utils::*};
 
 
 
-# [ derive (Debug, Default, Copy, Clone) ]
+#[derive (Debug, Default, Copy, Clone)]
 pub struct Edge {xy:i32, tl:i32, br: i32}
 // ^^ basically we're representing both vert and horiz edge sections .. if v, need {x, top, bottom}, if h need {y, l, r}
 
 
-# [ derive (Debug, Default, Copy, Clone) ]
+#[derive (Debug, Default, Copy, Clone)]
 pub struct RectEdges { left:Edge, top:Edge, right:Edge, bottom:Edge }
 
-# [ derive (Debug, Copy, Clone) ]
+#[derive (Debug, Copy, Clone)]
 pub enum RectEdgeSide { Left, Top, Right, Bottom }
 
 
-# [ derive (Debug, Default, Clone) ]
+#[derive (Debug, Default, Clone)]
 pub struct RectEdgeLists { vert:Vec<Edge>, horiz:Vec<Edge> }
 impl RectEdgeLists {
     pub fn new_w_capacity (n:usize) -> RectEdgeLists {
@@ -35,7 +35,7 @@ impl RectEdgeLists {
 }
 
 
-# [ derive (Debug, Default, Clone) ]
+#[derive (Debug, Default, Clone)]
 pub struct WinSnapDat {
     pub hwnd          : Hwnd,
     pub rect          : RECT,
@@ -50,10 +50,10 @@ pub struct WinSnapDat {
 }
 
 
-# [ derive (Debug, Default, Copy, Clone) ]
+#[derive (Debug, Default, Copy, Clone)]
 struct Bounds { low:i32, high:i32 }
 impl Bounds {
-    # [ allow (dead_code) ]
+    #[allow (dead_code)]
     // The low and high bounds must be ordered for use in edge unification ..
     // .. however, the use of this is expected to be minimal as the ordering should be specified that way during creation
     // We'll leave it here both as a reminder, and for future reference/use
@@ -439,9 +439,8 @@ fn snap_to_edgelist_nearest__delta (win_edge:&Edge, pad_v:i32, edges:&[Edge], th
 
 
 // we'll use a static rwlocked vec to store child-windows from callbacks, and a mutex to ensure only one child-windows call is active
-#[allow (clippy::type_complexity)]
-static enum_rects : LazyLock <Arc <RwLock <Vec <(Hwnd,RECT)>>>> = LazyLock::new (|| Arc::new ( RwLock::new (vec!()) ) );
-static enum_rects_lock : LazyLock <Arc <Mutex <()>>> = LazyLock::new (|| Arc::new ( Mutex::new(())));
+static enum_rects : LazyLock <RwLock <Vec <(Hwnd,RECT)>>> = LazyLock::new (|| RwLock::new (vec!()) );
+static enum_rects_lock : LazyLock <Mutex <()>> = LazyLock::new (|| Mutex::new(()));
 
 
 fn gather_win_rects (wsd_hwnd: Hwnd) -> Vec<(Hwnd, RECT)> { unsafe {

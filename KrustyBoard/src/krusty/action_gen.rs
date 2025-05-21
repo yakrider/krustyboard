@@ -1,4 +1,4 @@
-#![ allow (non_camel_case_types) ]
+#![allow (non_camel_case_types)]
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -17,7 +17,7 @@ ActionGen API Type-State machinery notes:
 
 
 /// The mouse pointer actions are best modeled differently from events, so we'll define it separately
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive (Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum MousePointerAction_T {
     pointer_move_abs { x_pos:i32, y_pos:i32 },
     pointer_move_rel { del_x:i32, del_y:i32 },
@@ -61,7 +61,7 @@ impl ActionGenable for ActionGenSt_Inited {}
 
 
 /// Action-Generator progressive state struct
-# [ derive (Clone) ]
+#[derive (Clone)]
 pub struct ActionGen <S: ActionGenSt = ActionGenSt_Init> {
 
     /// modifier-keys to wrap the specified action-function for this combo-action
