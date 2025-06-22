@@ -15,7 +15,7 @@ readme = "README.md"
 keywords = ["hotkey", "autohotkey", "mouse", "keyboard", "shortcuts"]
 categories = ["api-bindings"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 
 

@@ -75,7 +75,9 @@ fn handle_pointer_window_drag (xt:i32, yt:i32, ks:KSR) {
     let wsd = ks.win_snap_dat.read().unwrap();    // we'll hold this read-lock until this fn exits .. should be ok
 
     // if the dat had a wingroup, we only proceed if the hwnd matches the wingroup
-    if wsd.win_grp.is_some_and(|wg| !ks.win_groups.get_grp_hwnds(wg).contains(&wsd.hwnd)) { return }
+    if let Some(wg) = wsd.win_grp
+        && ! ks.win_groups .get_grp_hwnds(wg) .contains (&wsd.hwnd)
+    { return }
 
     let (dx, dy) = ( x - wsd.pointer.x, y - wsd.pointer.y );
     let dest =  RECT {

@@ -284,8 +284,8 @@ impl CombosMap {
                 }
                 MouseBtnEv_T::BtnUp   => {
                     Some ( Arc::new ( move || {
-                        if let Some(bs) = self.ks.mouse.get_btn_state(btn) {
-                            if bs.active.is_set() { bs.active.clear(); bs.btn.release(); }
+                        if let Some(bs) = self.ks.mouse.get_btn_state(btn)  &&  bs.active.is_set() {
+                            bs.active.clear(); bs.btn.release();
                     } } ) )
                 }
             } }
@@ -328,8 +328,8 @@ impl CombosMap {
         // for cvs with no_rpt specified, if this was a repeat and therefore not executed ..
         // .. we still want stop looking for other combo matching stages .. hence returning combo_execd = true
         if cv.no_rpt {
-            if let EventDat::key_event { is_repeat, .. } = ev.dat {
-                if is_repeat { return true }
+            if let EventDat::key_event { is_repeat, .. } = ev.dat  &&  is_repeat {
+                return true
             }
         }
         // for cvs specified as dbl_tap however, this event not being dbl_tap shouldnt block further combo matching stages

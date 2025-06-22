@@ -11,7 +11,6 @@
 //.. (hopefully any name-space contention will be minimal and where occurs, avoidable via explicit path specification)
 
 
-
 // first our single-file sub-modules
 // .. currently we dont have any more of these!
 

@@ -24,12 +24,11 @@ pub struct Icon {
 
 impl Icon {
     pub fn load (ctx: &Context, name:&str, sz_hint:Vec2, incd_file: &include_dir::File) -> Option<Icon> {
-        if let Ok(img) = image::load_from_memory (incd_file.contents()) .map (|im| im.to_rgba8()) {
-            let (width, height) = img.dimensions();
-            let img = egui::ColorImage::from_rgba_unmultiplied ([width as usize, height as usize], &img);
-            let txh = ctx.load_texture (name, img, Default::default());
-            Some ( Icon { txh, sz_hint } )
-        } else { None }
+        let img = image::load_from_memory (incd_file.contents()) .map (|im| im.to_rgba8()) .ok()?;
+        let (width, height) = img.dimensions();
+        let img = egui::ColorImage::from_rgba_unmultiplied ([width as usize, height as usize], &img);
+        let txh = ctx.load_texture (name, img, Default::default());
+        Some ( Icon { txh, sz_hint } )
     }
 }
 
@@ -362,8 +361,9 @@ impl QuickBar {
 
         let grid = self.get_grid();
 
-        if grid .as_ref() .is_some_and (|g| g.is_persist.is_set()) && !force { return };
-        // ^^ if we were shown w persist flag, only a force close should hide it
+        if let Some(g) = grid.as_ref()  &&  g.is_persist.is_set()  &&  !force {
+            return  // <- if we were shown w persist flag, only a force close should hide it
+        };
 
         // lets save the qbar window position (if it was persistant) in case it has moved around
         if let Some(g) = grid.as_ref() {
@@ -694,7 +694,7 @@ impl eframe::App for &QuickBar {
                     );
                     //ui.painter().rect_filled ( rect, 0.0, Color32::from_gray(20) );
 
-                    ui.painter() .rect_stroke ( rect, 0.0, egui::Stroke::new (0.5, Color32::from_gray(100)), StrokeKind::Outside );
+                    ui.painter() .rect_stroke ( rect, 0.0, egui::Stroke::new (0.5_f32, Color32::from_gray(100)), StrokeKind::Outside );
                     // ^^ adds the border between cells that makeup the grid
 
                     if let Some(ico) = cur_cell.icon_fn.as_ref() .and_then (|f| f()) {
@@ -710,7 +710,7 @@ impl eframe::App for &QuickBar {
                     }
 
                     // we'll then paint any optional indicator for the action-cell
-                    if cur_cell.indicator.as_ref().is_some_and (|p| p()) {
+                    if let Some(p) = cur_cell.indicator.as_ref()  &&  p() {
                         // paint a 3px yellow square at bottom corner of cell with 1px margin
                         let sq_xy = pos2 ( rect.left() + 1.0, rect.bottom() - 4.0 );
                         let sq_wh = Rect::from_min_size (sq_xy, Vec2::splat(3.0));

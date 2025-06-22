@@ -361,7 +361,7 @@ fn _print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
 
 /// Keyboard lower-level-hook processor
 pub unsafe extern "system"
-fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT { unsafe {
 
     let return_call = || { CallNextHookEx (None, code, w_param, l_param) };
 
@@ -416,7 +416,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     }
 
     return_call()
-}
+} }
 
 
 
@@ -438,7 +438,7 @@ fn print_mouse_ev (ev: Event) {
 
 /// mouse lower-level-hook processor
 pub unsafe extern "system"
-fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT { unsafe {
 
     let return_call = || { CallNextHookEx (None, code, w_param, l_param) };
 
@@ -513,7 +513,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     }
 
     return_call()
-}
+} }
 
 
 

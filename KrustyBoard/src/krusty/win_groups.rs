@@ -178,7 +178,7 @@ impl WinGroups {
         if let Some(wg) = self.grps.get(wg.idx()) { wg.get_hwnds().contains(&hwnd) } else { false }
     }
     pub fn get_grp_hwnds (&self, wg:WinGroups_E) -> Vec<Hwnd> {
-        if let Some(wg) = self.grps.get(wg.idx()) {  wg.get_hwnds() } else { Vec::new() }
+        if let Some(wg) = self.grps.get(wg.idx()) { wg.get_hwnds() } else { Vec::new() }
     }
     pub fn add_to_group (&self, wg: WinGroups_E, hwnd:Hwnd) {
         if let Some(wg) = self.grps.get(wg.idx()) { wg.add(&hwnd) }

@@ -8,8 +8,8 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ICONINFO, HCURSOR, HICON, SYSTEM_CURSOR_ID,
-    SPI_SETCURSORS, SPIF_SENDCHANGE, IMAGE_CURSOR, LR_LOADFROMFILE,
-    LoadImageW, GetIconInfo, CopyIcon, LoadCursorW, SetSystemCursor, CreateIconIndirect, SystemParametersInfoW,
+    SPI_SETCURSORS, SPIF_SENDCHANGE, IMAGE_CURSOR, LR_LOADFROMFILE, LR_SHARED, LR_DEFAULTSIZE, LR_COPYFROMRESOURCE,
+    LoadImageW, GetIconInfo, CopyIcon, CopyImage, SetSystemCursor, CreateIconIndirect, SystemParametersInfoW
 };
 use crate::utils;
 use crate::Flag;
@@ -256,20 +256,31 @@ impl Cursors {
 
 impl Cursor {
 
-    unsafe fn _cursor_from_file (path:&str) -> Option<HICON> {
+    unsafe fn _cursor_from_file (path:&str) -> Option<HICON> { unsafe {
         use std::os::windows::ffi::OsStrExt;
         let wide_path: Vec<u16> = std::ffi::OsStr::new(path) .encode_wide() .chain(std::iter::once(0)) .collect();
         let hc = LoadImageW ( None, PCWSTR(wide_path.as_ptr()), IMAGE_CURSOR, 64, 64, LR_LOADFROMFILE ) .ok()?;
         if hc.is_invalid() { None } else { Some ( HICON (hc.0) ) }
-    }
+    } }
     // ^^ no longer used as we just load system cursors, but we'll leave here for reference, as it does allow higher-res cursors
 
-    unsafe fn get_sys_cursor (id:PCWSTR) -> Option<HICON> {
-        LoadCursorW (None, id) .ok() .and_then (|hc| CopyIcon(hc.into()).ok())
+    unsafe fn get_sys_cursor (id:PCWSTR) -> Option<HICON> { unsafe {
+        //LoadCursorW (None, id) .ok() .and_then (|hc| CopyIcon(hc.into()).ok())
         // ^^ we copy the hicon before we store it, as LoadCursor gives handles to the live cursor set
         // Note also that ms-docs say LoadCursor is apparently a dpi-unaware function ..
         //   however, trying to load cursors before calling SetThreadDpiAwarenessContext gives small dim cursors .. \\_(_)_//
-    }
+
+        // we'll use LoadImageW instead of LoadCursorW to see if we can get higher-res cursors ..
+        // .. but nope, its the same .. says its getting 64x64 as should be for 200% scaling .. but they still look lower-res than native
+        let hcursor = LoadImageW ( None, id, IMAGE_CURSOR, 0, 0, LR_SHARED | LR_DEFAULTSIZE ).ok()?;
+        //let hcursor = LoadImageW ( None, id, IMAGE_CURSOR, 64, 64, LR_SHARED ).ok()?;
+
+        (!hcursor .is_invalid()) .then_some (
+            //CopyIcon (HICON (hcursor.0))
+            CopyImage ( hcursor, IMAGE_CURSOR, 0, 0, LR_COPYFROMRESOURCE ) .ok()
+            //CopyImage ( hcursor, IMAGE_CURSOR, 64, 64, LR_COPYFROMRESOURCE ) .ok()
+        ) .flatten() .map (|h| HICON(h.0))
+    } }
 
     fn cache_sys_cursor (id_str:PCWSTR, sys_id:SYSTEM_CURSOR_ID) -> Option<Cursor> {
         let hicon = unsafe { Cursor::get_sys_cursor (id_str)? .0 as isize };
@@ -310,7 +321,7 @@ impl Cursor {
 
 
 
-unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
+unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> { unsafe {
 
     if hicon.is_invalid() { return None }
 
@@ -364,7 +375,7 @@ unsafe fn colorize_cursor (hicon:&HICON, rgb:&RGB) -> Option<HICON> {
 
     if new_icon.is_invalid() { None } else { Some(new_icon) }
 
-}
+} }
 
 
 

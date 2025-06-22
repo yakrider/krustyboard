@@ -113,6 +113,17 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             };
         } )
     };
+    /// right click can do media next for quick use
+    let on_rbtn_press : AF = {
+        let next_track = media_next_action (ks, true);
+        let prev_track = media_next_action (ks, false);
+        Arc::new (move || {
+            match ks.mod_keys.caps.down.is_set() || ks.mod_keys.some_shift_down() {
+                false => next_track(),
+                true  => prev_track(),
+            };
+        } )
+    };
     fn af_media_wheel (ks:KSR, is_bkwd:bool) -> AF {
         let vol_dn = ag().k(VolumeDown).gen_af();
         let vol_up = ag().k(VolumeUp  ).gen_af();
@@ -124,32 +135,38 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             match (is_bkwd, ks.mod_keys.caps.down.is_set(), ks.mod_keys.some_shift_down()) {
                 (true,  false, false) => vol_dn(),
                 (false, false, false) => vol_up(),
-                (true,   true, false) => next_track(),
-                (false,  true, false) => prev_track(),
-                (true,      _,  true) => skip_fwd(),
-                (false,     _,  true) => skip_bkwd(),
+                (true,  false,  true) => skip_fwd(),
+                (false, false,  true) => skip_bkwd(),
+                (true,   true,  true) => next_track(),
+                (false,  true,  true) => prev_track(),
+                (    _,  true, false) => {},            // <- caps-rbtn-scroll separately has tab-nav so no overloads here
             };
         } )
     }
+    // for wheel, we want to change icon based on modifier being pressed, but only while hovering on its cell
+    static _hovered : LazyLock<Flag> = LazyLock::new (Flag::default);
+    let hovered = &_hovered;    // &'static to pass around without having to clone
     let icon_fn : Option<IconFn> = Some ( {
         let (vol, tracks, scrub) = (icons.volume.as_ref(), icons.tracks.as_ref(), icons.scrub.as_ref());
         Arc::new (move || {
-            match (ks.mod_keys.caps.down.is_set(), ks.mod_keys.some_shift_down()) {
-                (false, false) => vol,
-                ( true, false) => tracks,
-                (    _,  true) => scrub,
+            match (hovered.is_set(), ks.mod_keys.caps.down.is_set(), ks.mod_keys.some_shift_down()) {
+                (true, true, false) => tracks,
+                (true,    _,  true) => scrub,
+                (   _,    _,     _) => vol,
             }
         } )
     } );
     let cell = ActionCell {
         label : Some (Label::new ("Media")),
         icon_fn,
-        on_press,
+        on_press, on_rbtn_press,
         on_wheel_bkwd : af_media_wheel (ks,  true),
         on_wheel_frwd : af_media_wheel (ks, false),
         // we'll also cover horiz-wheel since egui converts shift-wheel to h-wheel
         on_hwheel_bkwd : af_media_wheel (ks,  true),
         on_hwheel_frwd : af_media_wheel (ks, false),
+        on_hover_start : Arc::new (move || hovered.set()),
+        on_hover_end   : Arc::new (move || hovered.clear()),
         ..Default::default()
     };
     static _volume : OnceLock <Arc <ActionCell>> = OnceLock::new();
@@ -168,11 +185,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
         // we'll want a guard against re-entrancy as wheel spin can be fast, and our invocation scheme needs delays
         static stamp: LazyLock<Mutex<Instant>> = LazyLock::new (|| Mutex::new (Instant::now()));
-        if let Ok (mut t_last) = stamp.lock() {
-            if t_last.elapsed().as_millis() > 200 {
-                *t_last = Instant::now();
-            } else { return }
-        } else {return }
+        if let Ok (mut t_last) = stamp.lock()  &&  t_last.elapsed().as_millis() > 200 {
+            *t_last = Instant::now();
+        } else { return }
 
         thread::spawn ( move || {
             // ^^ we'll need delays so we spawn out
@@ -354,6 +369,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
 
+
+
     /// _** Brightness .. plus .. dusky, gamma, gamgee overloads !! **__
     fn gen_incr_af (kr:KR, incr:i32) -> AF {
         Arc::new ( move || {
@@ -365,34 +382,39 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         } )
     }
     fn af_wheel (kr:KR, is_bkwd:bool) -> AF {
-        let af_dusky_eff_next   = ag().k(Period).m(alt).m(win).gen_af();
-        let af_dusky_eff_prev   = ag().k(Comma ).m(alt).m(win).gen_af();
         let af_dusky_gamma_next = ag().k(Period).m(shift).m(win).gen_af();
         let af_dusky_gamma_prev = ag().k(Comma ).m(shift).m(win).gen_af();
+        let af_dusky_eff_next   = ag().k(Period).m(alt  ).m(win).gen_af();
+        let af_dusky_eff_prev   = ag().k(Comma ).m(alt  ).m(win).gen_af();
+        //let af_dusky_mag_next   = ag().k(Period).m(ctrl ).m(win).gen_af();
+        //let af_dusky_mag_prev   = ag().k(Comma ).m(ctrl ).m(win).gen_af();
         let af_br_incr_pos = gen_incr_af (kr,  1);
         let af_br_incr_neg = gen_incr_af (kr, -1);
         Arc::new ( move || {
-            match (is_bkwd, kr.ks.mod_keys.caps.down.is_set(), kr.ks.mod_keys.some_shift_down()) {
-                (true,  false, false) => af_br_incr_neg(),
-                (false, false, false) => af_br_incr_pos(),
-                (true,   true, false) => af_dusky_gamma_next(),
-                (false,  true, false) => af_dusky_gamma_prev(),
-                (true,      _,  true) => af_dusky_eff_next(),
-                (false,     _,  true) => af_dusky_eff_prev(),
+            match (is_bkwd, kr.ks.mod_keys.caps.down.is_set(), kr.ks.mod_keys.lshift.down.is_set()) {
+                (true,  false, false) => af_br_incr_neg(),       // no-caps, no-shift -> brightness
+                (false, false, false) => af_br_incr_pos(),       //
+                (true,  false,  true) => af_dusky_gamma_next(),  // shift (no-caps) -> gamma
+                (false, false,  true) => af_dusky_gamma_prev(),  //
+                (true,   true,     _) => af_dusky_eff_next(),    // caps (ig-shift) -> effects
+                (false,  true,     _) => af_dusky_eff_prev(),    //
             };
+            // ^^ note that caps-win-wheel is handled directly by krusty for dusky-zoom .. (similar to alt-wheel for brightneess)
+            // .. actually lshift-win-wheel is now directly gamma preset cycling too .. but we'll let the above stand too, meh
         } )
     }
     let on_click = {
-        let af_dusky_gamma_tog = ag().k(G).m(shift).m(win).gen_af();
-        let af_dusky_mode_tog  = ag().k(I).m(alt).m(win).m(shift).gen_af();
-        let af_dusky_eff_tog   = ag().k(I).m(alt).m(win).gen_af();
+        let af_dusky_gamma_reapply = ag().k(I).m(shift).m(win).m(ctrl).gen_af();
+        let af_dusky_gamma_tog     = ag().k(I).m(shift).m(win).gen_af();
+        let af_dusky_mode_tog      = ag().k(I).m(alt).m(win).m(shift).gen_af();
+        let af_dusky_eff_tog       = ag().k(I).m(alt).m(win).gen_af();
         Arc::new ( move || {
             win_allow_fgnd_all();   // <- helps overlay come to fgnd if we toggle-on any
-            match (ks.mod_keys.some_shift_down(), ks.mod_keys.caps.down.is_set()) {
-                (true,   true) => af_dusky_mode_tog(),
-                (true,  false) => af_dusky_eff_tog(),
-                (false,  true) => af_dusky_gamma_tog(),
-                (false, false) => { },
+            match (ks.mod_keys.caps.down.is_set(), ks.mod_keys.some_shift_down()) {
+                (false, false) => af_dusky_gamma_reapply(),     // no-caps, no-shift -> gamma preset reapply
+                (false,  true) => af_dusky_gamma_tog(),         // shift (no-caps)   -> gamma toggle
+                (true,  false) => af_dusky_eff_tog(),           // caps (no-shift)   -> effects toggle
+                (true,   true) => af_dusky_mode_tog(),          // caps, shift       -> fs-mode toggle
             };
         } )
     };
@@ -405,6 +427,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
                 false => af_dusky_clear_overlays(),
                 true  => af_dusky_clear_overrides(),
             }
+            // also clear any active krusty dimming overlays
+            kr.overlay.clear_overlay();
         } )
     };
     let on_mbtn_click : AF = Arc::new (bringup_gamgee);
@@ -413,9 +437,9 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // ^^ dimming overlay active indicator
 
     let cell = ActionCell {
-        label         : Some (Label::new ("Brightness")),
-        icon_fn : get_icon_fn (&icons.bright),
-        indicator     : Some(ov_indc),
+        label      : Some (Label::new ("Brightness")),
+        icon_fn    : get_icon_fn (&icons.bright),
+        indicator  : Some(ov_indc),
         on_click,
         on_rbtn_click,
         on_mbtn_click,
@@ -434,17 +458,28 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
 
 
     /// _** Wheel to Arrows **__
-    let arrow_up   = ag().k(ExtUp  ).gen_af();
-    let arrow_down = ag().k(ExtDown).gen_af();
-    let line_up    = ag().k(I      ).m(alt).m(ctrl).gen_af();
-    let line_down  = ag().k(Comma  ).m(alt).m(ctrl).gen_af();
+    let arrow_up   =  ag().k(ExtUp  ).gen_af();
+    let arrow_down =  ag().k(ExtDown).gen_af();
+    let line_up    =  ag().k(I      ).m(alt).m(ctrl).gen_af();
+    let line_down  =  ag().k(Comma  ).m(alt).m(ctrl).gen_af();
+
+    let nav_loc_back       =  ag().k(ExtLeft ).m(alt).gen_af();
+    let nav_loc_frwd       =  ag().k(ExtRight).m(alt).gen_af();
+    let nav_edit_loc_back  =  ag().k(ExtLeft ).m(alt).m(shift).gen_af();
+    let nav_edit_loc_frwd  =  ag().k(ExtRight).m(alt).m(shift).gen_af();
+
     let arrow_af = |dir_bkwd:bool| -> AF {
         Arc::new ( move || {
-            match (dir_bkwd, ks.mod_keys.caps.down.is_set()) {
-                (true,  false) => arrow_down(),
-                (false, false) => arrow_up(),
-                (true,  true ) => line_down(),
-                (false, true ) => line_up(),
+            match (ks.mod_keys.caps.down.is_set(), ks.mod_keys.some_shift_down(), dir_bkwd) {
+                ( true,  true,  true) => nav_edit_loc_frwd(),
+                (false,  true,  true) => nav_loc_frwd(),
+                ( true, false,  true) => line_down(),
+                (false, false,  true) => arrow_down(),
+
+                ( true,  true, false) => nav_edit_loc_back(),
+                (false,  true, false) => nav_loc_back(),
+                ( true, false, false) => line_up(),
+                (false, false, false) => arrow_up(),
             };
         } )
     };
@@ -452,7 +487,10 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         label : Some (Label::new ("Arrows")),
         icon_fn : get_icon_fn (&icons.arrows),
         on_wheel_bkwd : arrow_af.clone()(true),
-        on_wheel_frwd : arrow_af(false),
+        on_wheel_frwd : arrow_af.clone()(false),
+        // egui translates shift-wheel to horiz-wheel, so we'll catch those too
+        on_hwheel_bkwd : arrow_af.clone()(true),
+        on_hwheel_frwd : arrow_af.clone()(false),
         ..Default::default()
     };
     static _arrows : OnceLock <Arc <ActionCell>> = OnceLock::new();
@@ -589,6 +627,11 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         if ks.mod_keys.caps.down.is_clear() { lighten() }
         else { inv_lighten() }
     } );
+    let _im_zap = im_zap.clone();
+    let im_click = Arc::new ( move || {
+        if ks.mod_keys.some_mk_down() { _im_zap() }
+        else { im_inv() }
+    } );
 
     let cell = ActionCell {
         label : Some (Label::new ("Page Dark")),
@@ -611,9 +654,8 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
         icon_fn : get_icon_fn (&icons.darken_im),
         on_wheel_bkwd : im_darken,
         on_wheel_frwd : im_brighten,
-        on_press      : im_inv,
-        on_rbtn_press : im_zap.clone(),
-        on_mbtn_press : im_zap,
+        on_press      : im_click,
+        on_rbtn_press : im_zap,
         ..Default::default()
     };
     static _im_dark : OnceLock <Arc <ActionCell>> = OnceLock::new();
@@ -658,21 +700,6 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     let default_pos = Arc::new ( PointAtomic::new (start_pos) );
 
 
-    // general use
-    static _base : OnceLock <Arc <ActionGrid>> = OnceLock::new();
-    let grid = vec! (
-        vec! ( switche(),   switche_bl(),  brightness(),  volume() ),
-        vec! ( tabs_bl(),   tabs(),        arrows(),      empty()  ),
-        vec! ( empty(),     empty(),       min_back(),    empty()  ),
-    );
-    let label = "base".into();
-    let grid_sz = GridDims::new (3, 4);
-    let cur_pos = default_pos.clone();
-    let base : &'static Arc <ActionGrid> = _base.get_or_init ( move || {
-        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
-    } );
-
-
     // disabled grid .. (for cases where we want no grid, but w/o having to toggle the general/base grid)
     static _disabled_s : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let _disabled = _disabled_s.get_or_init ( move || {
@@ -680,16 +707,31 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     } );
 
 
+    // general use
+    static _base : OnceLock <Arc <ActionGrid>> = OnceLock::new();
+    let grid = vec! (
+        vec! ( switche(),   switche_bl(),  brightness() ),
+        vec! ( tabs_bl(),   tabs(),        volume()     ),
+        vec! ( arrows(),    empty(),       min_back()   ),
+    );
+    let label = "base".into();
+    let grid_sz = GridDims::new (3, 3);
+    let cur_pos = default_pos.clone();
+    let base : &'static Arc <ActionGrid> = _base.get_or_init ( move || {
+        Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
+    } );
+
+
 
     // ide specific
     static _ide : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
-        vec! ( switche(),   switche_bl(),  brightness(),  volume() ),
-        vec! ( tabs_bl(),   tabs(),        arrows(),      empty()  ),
-        vec! ( empty(),     diff(),        min_back(),    empty()  ),
+        vec! ( switche(),   switche_bl(),  brightness() ),
+        vec! ( tabs_bl(),   tabs(),        volume()     ),
+        vec! ( arrows(),    diff(),        min_back()   ),
     );
     let label = "ide".into();
-    let grid_sz = GridDims::new (3, 4);
+    let grid_sz = GridDims::new (3, 3);
     let cur_pos = Arc::new ( PointAtomic::new (start_pos) );
     // ^^ we'll set IDE qbar-grid positioning to be remembered separately
     let ide = _ide.get_or_init ( move || {
@@ -701,12 +743,12 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // browser specific
     static _web : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
-        vec! ( switche(),   switche_bl(),  brightness(),  volume() ),
-        vec! ( tabs_bl(),   refresh(),     arrows(),      empty()  ),
-        vec! ( pg_dark(),   im_dark(),     min_back(),    empty()  ),
+        vec! ( switche(),   switche_bl(),  brightness() ),
+        vec! ( tabs_bl(),   refresh(),     volume()     ),
+        vec! ( pg_dark(),   im_dark(),     min_back()   ),
     );
     let label = "web".into();
-    let grid_sz = GridDims::new (3, 4);
+    let grid_sz = GridDims::new (3, 3);
     let cur_pos = default_pos.clone();
     let web = _web.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )
@@ -716,12 +758,12 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
     // TradingView
     static _trading_view : OnceLock <Arc <ActionGrid>> = OnceLock::new();
     let grid = vec! (
-        vec! ( switche(),   switche_bl(),  brightness(),   volume() ),
-        vec! ( tabs_bl(),   refresh(),     tv_y_toggle(),  empty()  ),
-        vec! ( pg_dark(),   im_dark(),     min_back(),     empty()  ),
+        vec! ( switche(),   switche_bl(),  brightness() ),
+        vec! ( tabs_bl(),   tv_y_toggle(), volume()     ),
+        vec! ( pg_dark(),   im_dark(),     min_back()   ),
     );
     let label = "TradingView".into();
-    let grid_sz = GridDims::new (3, 4);
+    let grid_sz = GridDims::new (3, 3);
     let cur_pos =  Arc::new ( PointAtomic::new ( Point { x: 2500, y: 4 } ) );
     let trading_view = _trading_view.get_or_init ( move || {
         Arc::new ( ActionGrid { label, cell_sz, grid_sz, grid, cur_pos, ..ActionGrid::default() } )

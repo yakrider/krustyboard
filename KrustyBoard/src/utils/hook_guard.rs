@@ -91,6 +91,6 @@ impl HookGuard {
 }
 
 pub unsafe extern "system"
-fn hook_proc ( code: c_int, w_param: WPARAM, l_param: LPARAM ) -> LRESULT {
+fn hook_proc ( code: c_int, w_param: WPARAM, l_param: LPARAM ) -> LRESULT { unsafe {
     CallNextHookEx (None, code, w_param, l_param)
-}
+} }

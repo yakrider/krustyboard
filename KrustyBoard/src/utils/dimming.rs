@@ -101,7 +101,12 @@ impl DimmingOverlay {
         self.update();
     }
 
-    unsafe fn create_window (&'static self) {
+    pub fn clear_overlay (&'static self) {
+        self.monitor.ov_opacity.store (0, Ordering::Relaxed);
+        self.update();
+    }
+
+    unsafe fn create_window (&'static self) { unsafe {
         if self.hwnd.load().is_valid() {
             return;
         }
@@ -121,7 +126,7 @@ impl DimmingOverlay {
         if let Ok(hwnd) = res {
             self.hwnd.store (Hwnd (hwnd.0 as isize));
         }
-    }
+    } }
 
 
     pub fn update (&'static self) { unsafe {

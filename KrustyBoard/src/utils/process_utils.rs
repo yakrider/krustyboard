@@ -45,7 +45,11 @@ pub static CALC_EXES : LazyLock <Vec <String>> = LazyLock::new ( ||
 pub enum ExeGroups {
     #[default] Other = 0,
     Browser,
+    Explorer,
+    DirOpus,
     IDE,
+    NotepadPP,
+    Terminal,
     Music,
     Calc,
     AltTab,
@@ -63,6 +67,8 @@ impl ExeGroups {
                 Browser,
             "idea64.exe" | "rustrover64.exe" | "goland64.exe" | "rider64.exe" | "clion64.exe" | "pycharm64.exe" | "webstorm64.exe" =>
                 IDE,
+            "WindowsTerminal.exe" | "ConEmu.exe" | "ConEmu64.exe" | "mintty.exe" =>
+                Terminal,
             "winamp.exe" | "MusicBee.exe" =>
                 Music,
             "qalculate.exe" | "qcalculate.exe" | "CalculatorApp.exe" =>
@@ -70,6 +76,9 @@ impl ExeGroups {
             "XamlExplorerHostIslandWindow.exe" | "MultitaskingViewFrame.exe" =>
                 AltTab,
 
+            "explorer.exe"    => Explorer,
+            "dopus.exe"       => DirOpus,
+            "notepad++.exe"   => NotepadPP,
             "Switche.exe"     => Switche,
             "krustyboard.exe" => Krusty,
             "WinDusky.exe"    => Dusky,
