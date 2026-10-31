@@ -1,0 +1,39 @@
+
+
+## Config settings file for KrustyBoard appliation .. repository: https://github.com/yakrider/krustyboard
+# This file uses the toml format: https://toml.io
+#
+# Note that in toml format, root keys must be listed before any tables with square-brackets are started
+# So for instance, below, the [[gamma_presets]] and [[effects]] must come at the end (unless defining them as inline tables instead)
+#
+# The application will look for this file (KrustyBoard.conf.toml) in the same directory from which it is running (if the location is writeable)
+# If that location is not writeable, the config file will pick  ~/AppData/Local/KrustyBoard/ as conf file location
+# Upon startup, if the conf file is not present in the location selected as above, a default conf file will be created in that location
+# Configurations modified at run time will be written back to this file
+# Most changes to this file (unless specified in the config) will be picked up by the application upon restart
+
+
+
+
+
+# KrustyBoard conf version string .. this is used to check compatibility and print warnings/errors
+# Upon upgrading the application, and updating any user configs here as desired, can update this version string to remove warning printouts
+krusty_conf_version = 0.01
+
+
+
+# Enable logging for debugging or reporting errors .. default is false
+# When enabled, the log files with names like "KrustyBoard_log.<date>.log" will be generated in the same location as the active config file
+# Note: Enabling logging is only picked up upon restarting the application
+logging_enabled = true
+
+# Level of logging (if enabled) .. default is "INFO" .. options are "DEBUG", "INFO", "WARN", "ERROR"
+logging_level = "INFO"
+
+
+
+# Note that any applications running elevated (i.e. as admin) can only have Krusty inputs passed to them if Krusty is running elevated too.
+
+
+
+

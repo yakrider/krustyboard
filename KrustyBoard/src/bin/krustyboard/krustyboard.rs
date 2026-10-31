@@ -3,14 +3,12 @@
 
 mod qbar_grid;
 // ^^ The actual set-up of the action-grid for the quick-bar is separated into its own file
+mod mem_guard;
+// ^^ we also added a user-level add-on guard for our xps non-paged pool memory leak on xps via dell/realtek audio driver
 
 use std::{time::Duration, thread, sync::{Arc}, sync::atomic::Ordering};
 
 use krustyboard::{*, utils::*, key_utils::*, KbdKey::*, MouseButton::*, ModKey::*, ModeState_T::*, WinGroups_E::*};
-
-
-
-
 
 /// handling for any 'special' keys that need to be bound/handled directly (like for mouse btns) rather than via combo-maps
 pub fn setup_direct_binding_keys (_k:KR) {
@@ -2935,6 +2933,28 @@ fn setup_quick_bar (k:KR) {
 
 
 
+fn setup_sst_silence_stream (_k:KR) {
+
+    // the goal here is to be constantly streaming silence to speakers to fend off Realtek SST non-paged RAM leak!
+    // first off, we'll directly set up the audio stream right away on startup (when this is called)
+    mem_guard::AudioMemGuard::instance().refresh();
+
+    // but also upon hearing suspend/resume etc, we'll refresh the stream (as sometimes it seemed to be dead upon wake from suspend etc)
+    InputProcessor::instance().input_bindings.bind_sys_event ( EvCbEntry {
+        ev_proc_ds: EvProc_Ds::new (EvProp_D::EvProp_Stop, ComboProc_D::ComboProc_Disable),
+        cb : EvCbFn_T::EvCbFn_Queued ( Arc::new ( move |ev| {
+            if let EventDat::sys_event { sys_ev_t } = ev.dat {
+                //tracing::info! ("sys-event : {}", sys_ev_t);
+                //if sys_ev_t == SysEvent_T::SysEv_Resume || sys_ev_t == SysEvent_T::SysEv_Unlock {
+                if sys_ev_t == SysEvent_T::SysEv_Resume {
+                    tracing::warn! ("got system resume .. refreshing speaker stream for mem leakage control!");
+                    mem_guard::AudioMemGuard::instance().refresh();
+                }
+            }
+        } ) ),
+    } );
+
+}
 
 
 
@@ -3076,6 +3096,9 @@ pub fn setup_krusty_board (k:KR) {
     // and finally we have the quick-bar with its ui
     setup_quick_bar (k);
 
+    // we've also added setup to stream silence to speakers to stop driver non-paged-memory leak, and refresh upon suspend resume
+    setup_sst_silence_stream (k);
+
 
 
 
@@ -3119,7 +3142,7 @@ pub fn setup_krusty_board (k:KR) {
     // finally we can start binding key maps .. first the specialized handling for mode-state trigger keys
     k.ks.mode_states.bind_mode_keys_actions(k);
 
-    //k.cm.debug_print_combos_map();
+    k.cm.debug_print_combos_map();
     k.cm.info_print_simult_active_combos_check();
 
 
@@ -3147,6 +3170,14 @@ pub fn main () {
     // (coz if we're the spawned guard process we dont even want to initialize krusty etc)
     HookGuard::instance().guard();
 
+
+    // first we want to load/init the config, then get the non-blocking log-appender guard here in main
+    // this ensures any pending logs get flushed when the guard scope is dropped (e.g force exit, crash etc)
+    let conf = config::Config::instance();
+    let _guard = conf.setup_log_subscriber();
+
+    tracing::info! ("Initializing KrustyBoard ...");
+
     // setup the whole krusty keyboard configuration
     let k = Krusty::instance();
 
@@ -3160,6 +3191,9 @@ pub fn main () {
 
     // start the windows-events listener
     k.wel.setup_win_event_hooks();
+
+    // start the system-events listener
+    k.sel.setup_system_events_listener();
 
     // then start handling inputs
     k.iproc.begin_input_processing();

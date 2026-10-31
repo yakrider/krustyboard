@@ -206,6 +206,10 @@ pub struct Krusty {
     /// This will need to be started separately after setting up all the combos
     pub wel : &'static WinEventsListener,
 
+    /// SysEventsListener runs a listener for system-events like suspend/resume, screen on/off, logon/logoff etc
+    /// This too can be started separately after init (if so desired)
+    pub sel : &'static SysEventsListener,
+
     /// Cursors provide functionality to swap cursor-set colors to provide visual feedback
     /// This will need to be separately enabled to be active
     pub cursors : &'static Cursors,
@@ -446,6 +450,7 @@ impl Krusty {
                 cm      : CombosMap::instance(),
                 iproc   : InputProcessor::instance(),
                 wel     : WinEventsListener::instance(),
+                sel     : SysEventsListener::instance(),
                 cursors : Cursors::instance(),
                 qbar    : QuickBar::instance(),
                 overlay : DimmingOverlay::instance(),

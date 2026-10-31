@@ -156,10 +156,12 @@ pub fn grid_provider_builder (ctx: &Context) -> GetGridFn  {
             }
         } )
     } );
+    let on_mbtn_click : AF = Arc::new (|| mem_guard::AudioMemGuard::instance().disable());
+
     let cell = ActionCell {
         label : Some (Label::new ("Media")),
         icon_fn,
-        on_press, on_rbtn_press,
+        on_press, on_rbtn_press, on_mbtn_click,
         on_wheel_bkwd : af_media_wheel (ks,  true),
         on_wheel_frwd : af_media_wheel (ks, false),
         // we'll also cover horiz-wheel since egui converts shift-wheel to h-wheel

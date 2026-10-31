@@ -75,6 +75,7 @@ pub enum BindingsMapKey {
     fsc_ev_bmkt      ( ComboHash,    FscEvent_T ),
     fgnd_ev_bmkt,
     pointer_ev_bmkt,
+    sys_ev_bmkt,
 }
 impl BindingsMapKey {
     pub fn from_event (event: &Event) -> BindingsMapKey {
@@ -85,6 +86,7 @@ impl BindingsMapKey {
             fsc_event      { fsc, fsc_ev_t }         => fsc_ev_bmkt      (fsc,   fsc_ev_t),
             fgnd_event     { .. }                    => fgnd_ev_bmkt,
             pointer_event  { .. }                    => pointer_ev_bmkt,
+            sys_event      { .. }                    => sys_ev_bmkt,
     }  }
 }
 impl TryFrom <BindingsMapKey> for KbdKey {
@@ -108,6 +110,7 @@ impl std::fmt::Debug for BindingsMapKey {
             fsc_ev_bmkt     (fsc,   fsc_ev_t)           => write! (f, "{fsc_ev_t:?}  {fsc:?}"),
             fgnd_ev_bmkt                                => write! (f, "Fgnd Changed"),
             pointer_ev_bmkt                             => write! (f, "Mouse Moved"),
+            sys_ev_bmkt                                 => write! (f, "System Event Observed"),
         }
     }
 }
@@ -145,12 +148,9 @@ impl Bindings {
     pub fn bind_fsc_event (&self, fsc:ComboHash, fsc_ev_t:FscEvent_T, cbe:EvCbEntry) {
         self .borrow_mut() .insert ( fsc_ev_bmkt (fsc, fsc_ev_t), cbe );
     }
-    pub fn bind_fgnd_event (&self, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( fgnd_ev_bmkt, cbe );
-    }
-    pub fn bind_pointer_event (&self, cbe:EvCbEntry) {
-        self .borrow_mut() .insert ( pointer_ev_bmkt, cbe );
-    }
+    pub fn bind_pointer_event (&self, cbe:EvCbEntry) { self .borrow_mut() .insert ( pointer_ev_bmkt, cbe ); }
+    pub fn bind_fgnd_event    (&self, cbe:EvCbEntry) { self .borrow_mut() .insert ( fgnd_ev_bmkt, cbe ); }
+    pub fn bind_sys_event     (&self, cbe:EvCbEntry) { self .borrow_mut() .insert ( sys_ev_bmkt, cbe ); }
 
 
     // NOTE that these unbinds below are NOT intended to be called at runtime as we're using AtomicRefCell instead of RwLock
@@ -168,12 +168,9 @@ impl Bindings {
     pub fn unbind_fsc_event (&self, fsc:ComboHash, fsc_ev_t:FscEvent_T) {
         self .borrow_mut() .remove ( & fsc_ev_bmkt (fsc, fsc_ev_t) );
     }
-    pub fn unbind_fgnd_event (&self) {
-        self .borrow_mut() .remove ( & fgnd_ev_bmkt );
-    }
-    pub fn unbind_pointer_event (&self) {
-        self .borrow_mut() .remove ( & pointer_ev_bmkt );
-    }
+    pub fn unbind_pointer_event (&self) { self .borrow_mut() .remove ( & pointer_ev_bmkt ); }
+    pub fn unbind_fgnd_event    (&self) { self .borrow_mut() .remove ( & fgnd_ev_bmkt ); }
+    pub fn unbind_sys_event     (&self) { self .borrow_mut() .remove ( & sys_ev_bmkt ); }
 
 }
 

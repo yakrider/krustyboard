@@ -5,7 +5,7 @@ use std::os::raw::c_int;
 use std::sync::atomic::{Ordering, AtomicU32, AtomicIsize, AtomicU64};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::OnceLock;
-
+use tracing::{info, error};
 use windows::core::BOOL;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM, GetLastError};
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -110,7 +110,7 @@ impl InputProcessor {
                 if panic::catch_unwind ( || {
                     while let Ok(af) = input_queue_receiver.recv() { af() }
                 } ) .is_err() {
-                    println! ("PANIC in Input Processor AF Queue thread .. we gonna quit!");
+                    error! ("PANIC in Input Processor AF Queue thread .. we gonna quit!");
                     std::process::exit(1);
                 }
             });
@@ -160,31 +160,30 @@ impl InputProcessor {
 
 
     fn set_hook (
-        hook_id: WINDOWS_HOOK_ID,
-        hhook: &AtomicIsize,
+        hook_name: &str, hook_id: WINDOWS_HOOK_ID, hhook: &AtomicIsize,
         hook_proc: unsafe extern "system" fn (c_int, WPARAM, LPARAM) -> LRESULT,
     ) { unsafe {
         if let Ok(hh) = SetWindowsHookExW (hook_id, Some(hook_proc), None, 0) {
-            println! ("hooking attempt .. succeeded!");
+            info! ("hooking attempt ({}) .. succeeded!", hook_name);
             hhook.store (hh.0 as _, Ordering::SeqCst);
         } else {
-            eprintln!("hooking attempt .. FAILED .. error code : {:?} !!", GetLastError());
+            error! ("hooking attempt ({}) .. FAILED .. error code : {:?} !!", hook_name, GetLastError());
         }
     } }
-    fn set_kbd_hook   (&self) { InputProcessor::set_hook (WH_KEYBOARD_LL, &self.kbd_hook,   kbd_proc); }
-    fn set_mouse_hook (&self) { InputProcessor::set_hook (WH_MOUSE_LL,    &self.mouse_hook, mouse_proc); }
+    fn set_kbd_hook   (&self) { InputProcessor::set_hook ("kbd",   WH_KEYBOARD_LL, &self.kbd_hook,   kbd_proc); }
+    fn set_mouse_hook (&self) { InputProcessor::set_hook ("mouse", WH_MOUSE_LL,    &self.mouse_hook, mouse_proc); }
 
 
     fn unset_hook (hhook: &AtomicIsize) -> bool {
         if HHOOK (hhook.load (Ordering::SeqCst) as _) != HHOOK::default() {
             if unsafe { UnhookWindowsHookEx ( HHOOK (hhook.load(Ordering::SeqCst) as _) ) }.is_ok() {
                 hhook.store (HHOOK::default().0 as _, Ordering::SeqCst);
-                println!("unhooking attempt .. succeeded!");
+                info!("unhooking attempt .. succeeded!");
                 return true
             }
-            eprintln!("unhooking attempt .. failed .. error code : {:?} !!", unsafe { GetLastError() });
+            error!("unhooking attempt .. failed .. error code : {:?} !!", unsafe { GetLastError() });
         } else {
-            println!("unhooking attempt .. no prior hook found !!");
+            info!("unhooking attempt .. no prior hook found !!");
         }
         false
     }
@@ -242,7 +241,7 @@ impl InputProcessor {
             let mut msg: MSG = MSG::default();
             while BOOL(0) != GetMessageW (&mut msg, None, 0, 0) {
                 if msg.message == MSG_LOOP_KILL_MSG {
-                    println! ("received kill-msg in input-processing thread .. terminating thread ..");
+                    info! ("received kill-msg in input-processing thread .. terminating thread ..");
                     break
                 }
             }
@@ -273,14 +272,22 @@ impl InputProcessor {
         };
         let _ = self.proc_input_event (event);
     }
-
+    pub fn inject_sys_event (&self, sys_ev_t: SysEvent_T) {
+        let event = Event {
+            stamp: 0,
+            injected: true,
+            extra_info: KRUSTY_INJECTED_IDENTIFIER_EXTRA_INFO,
+            dat: ( EventDat::sys_event { sys_ev_t } ),
+        };
+        let _ = self.proc_input_event (event);
+    }
 
 
     /// Common input events processor .. <br>
     /// Both kbd and mouse events from hooks get packaged into an InputEvent and sent here for processing
     pub fn proc_input_event (&self, event:Event) -> EvProp_D {
 
-        //println!("{:?}",event)
+        //tracing::debug! ("{:?}", event);
 
         use { EvProp_D::*, ComboProc_D::* };
         let mut ev_proc_ds = EvProc_Ds::new (EvProp_Continue, ComboProc_Enable);
@@ -354,7 +361,7 @@ impl InputProcessor {
 
 /// debug printout
 fn _print_kbd_event (wp:&WPARAM, kbs:&KBDLLHOOKSTRUCT) {
-    println!("w_param: {:X}, vk_code: {:?}, scanCode: {:#06X}, flags: {:#018b}, time: {}, dwExtraInfo: {:X}",
+    tracing::debug! ("w_param: {:X}, vk_code: {:?}, scanCode: {:#06X}, flags: {:#018b}, time: {}, dwExtraInfo: {:X}",
              wp.0, KbdKey::from(kbs.vkCode as u64), kbs.scanCode, kbs.flags.0, kbs.time, kbs.dwExtraInfo);
 }
 
@@ -407,7 +414,7 @@ fn kbd_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT { unsafe 
 
         let event = Event { stamp, injected, extra_info, dat };
 
-        //println! ("{:?}", event);
+        //tracing::debug! ("{:?}", event);
 
         if iproc.proc_input_event (event) == EvProp_D::EvProp_Stop {
             return LRESULT(1);
@@ -432,7 +439,7 @@ static LAST_STAMP: AtomicU32 = AtomicU32::new(0);
 fn print_mouse_ev (ev: Event) {
     let last_s = LAST_STAMP.swap(ev.stamp, Ordering::Relaxed);
     let gap_dur = ev.stamp - last_s;
-    thread::spawn(move || println!("{ev:?}, {gap_dur:?}"));
+    tracing::debug! ("{ev:?}, {gap_dur:?}");
 }
 
 
@@ -462,7 +469,7 @@ fn mouse_proc (code: c_int, w_param: WPARAM, l_param: LPARAM) -> LRESULT { unsaf
     let injected = mh_struct.flags & LLMHF_INJECTED == LLMHF_INJECTED;
     let extra_info = mh_struct.dwExtraInfo;
 
-    //println!("{:#?}", mh_struct);
+    //tracing::debug! ("{:#?}", mh_struct);
 
     let gen_btn_ev = |btn:MouseButton, btn_ev_t:MouseBtnEv_T| {
         let src_id = ((btn_ev_t as u64) << 32) | u32::from(btn) as u64 | SRC_ID_MASK_MOUSE;

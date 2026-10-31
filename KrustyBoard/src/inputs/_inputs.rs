@@ -10,7 +10,7 @@ use std::{
     mem::size_of,
     os::raw::c_int,
 };
-use strum_macros::EnumIter;
+use strum_macros::{Display, EnumIter};
 
 use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -112,6 +112,19 @@ pub enum FscEvent_T {
     Fsc_Latching_Cleared,
 }
 
+#[derive (Debug, Display, Eq, PartialEq, Hash, Copy, Clone)]
+pub enum SysEvent_T {
+    SysEv_Lock,
+    SysEv_Unlock,
+    SysEv_Logon,
+    SysEv_Logoff,
+    SysEv_DisplayOn,
+    SysEv_DisplayOff,
+    SysEv_Suspend,
+    SysEv_Resume,
+}
+
+
 
 
 /// Input event can be a kbd-key-event, mouse-btn-event, mouse-wheel-event, or mouse-pointer-move (with their associated data)
@@ -123,6 +136,7 @@ pub enum EventDat {
     fsc_event      { fsc:ComboHash, fsc_ev_t: FscEvent_T },
     fgnd_event     { fgnd_hwnd:Hwnd },
     pointer_event  { xy:Point },
+    sys_event      { sys_ev_t:SysEvent_T },
 
 }
 

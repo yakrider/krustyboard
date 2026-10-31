@@ -300,6 +300,9 @@ impl CombosMap {
 
             EventDat::fgnd_event {..} => None,
             // ^^ Fgnd actions should typically be taken care of at bindings level, we do nothing here
+
+            EventDat::sys_event {..} => None,
+            // ^^ SysEvents like suspend/resume etc should also typically get handled at bindings level
         }
     }
 

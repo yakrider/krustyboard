@@ -159,6 +159,7 @@ impl Cursors {
         }
         // finally we can update the flags
         self.enabled.store(enabled);
+        tracing::info! ("Cursor Swap is set to : {}", enabled);
     }
     pub fn is_enabled (&self) -> bool {
         self.enabled.is_set()

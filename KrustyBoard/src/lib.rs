@@ -18,6 +18,7 @@
 
 // then our sub-modules with folders (but no main module file) with shadowed module file in the folders (where useful)
 
+pub mod config;
 
 /// inputs .. keyboard-keys, mouse-btns/wheel/pointer, and binding/processing them
 pub mod inputs {
@@ -55,6 +56,7 @@ pub mod krusty {
     pub mod win_snaps;
     pub mod win_groups;
     pub mod win_hooks;
+    pub mod sys_events;
     pub mod system_tray;
     pub mod quick_bar;
 
@@ -69,6 +71,7 @@ pub mod krusty {
     pub use self::win_snaps::*;
     pub use self::win_groups::*;
     pub use self::win_hooks::*;
+    pub use self::sys_events::*;
     pub use self::system_tray::*;
     pub use self::quick_bar::*;
 

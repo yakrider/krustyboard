@@ -72,6 +72,8 @@ impl WinEventsListener {
         // if we already got setup once, we dont need to do it again
         if self.is_hooked.is_clear() { self.is_hooked.set(); } else { return }
 
+        tracing::info! ("Starting Windows Events Listener..");
+
         spawn ( move || unsafe {
             SetWinEventHook ( 0x0003, 0x0003, None, Some(Self::win_event_hook_cb), 0, 0, 0);
             SetWinEventHook ( 0x0017, 0x0017, None, Some(Self::win_event_hook_cb), 0, 0, 0);
