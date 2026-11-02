@@ -52,7 +52,7 @@ impl SysEventsListener {
     }
     fn attempt_system_events_listener_setup (&'static self) -> Result<()> { unsafe {
         let hinst = GetModuleHandleW (None)?;
-        let class = w!("sysevent_listener");
+        let class = w!("krusty_sysevents_listener");
         RegisterClassW (&WNDCLASSW {
             lpfnWndProc: Some (Self::win_evs_proc_cb),
             hInstance: hinst.into(),

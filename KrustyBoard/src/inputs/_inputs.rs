@@ -4,7 +4,7 @@
 
 
 use std::{
-    sync::LazyLock,
+    sync::{LazyLock, Mutex, OnceLock},
     thread::sleep,
     time::Duration,
     mem::size_of,
@@ -12,8 +12,13 @@ use std::{
 };
 use strum_macros::{Display, EnumIter};
 
-use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::WindowsAndMessaging::{SetCursorPos, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_ORIENTATION, TOUCH_MASK_PRESSURE, PT_TOUCH};
+use windows::Win32::UI::Input::Pointer::{
+    InitializeTouchInjection, InjectTouchInput, POINTER_FLAGS, POINTER_TOUCH_INFO, POINTER_FLAG_DOWN,
+    POINTER_FLAG_UP, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_UPDATE, TOUCH_FEEDBACK_NONE,
+};
 use rustc_hash::FxHashMap;
 
 
@@ -364,9 +369,6 @@ impl MousePointer {
 }
 
 
-
-
-
 /// Send simulated mouse events to OS for injection into events-stream
 fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
 
@@ -387,5 +389,90 @@ fn send_mouse_input (flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) {
         SendInput (&inputs, size_of::<INPUT>() as c_int)
     };
 
+}
+
+
+
+
+
+// --- touch input pinch-zoom injection ---
+
+/// Injected two-finger pinch-zoom via Win32 touch injection. <br>
+/// This is a digitizer/touch path, so it does **not** appear on the LL mouse hook (and will not re-enter combo processing). <br>
+/// Apps that consume pinch natively (and the OS conversion to ctrl-wheel) can still see it.
+pub struct PinchZoom;
+
+impl PinchZoom {
+    /// Complete pinch gesture at the current cursor: contacts down, spread/contract, then up. <br>
+    /// Positive `spread_px` zooms in (fingers move apart); negative zooms out.
+    pub fn inject (spread_px: i32) {
+        let p = MousePointer::pos();
+        Self::inject_at (p, spread_px);
+    }
+    /// Complete pinch gesture centered at `center` (screen pixels).
+    pub fn inject_at (center: Point, spread_px: i32) {
+        inject_pinch_zoom (center, spread_px);
+    }
+}
+
+
+const PINCH_START_RADIUS : i32 = 120;
+const PINCH_MIN_RADIUS   : i32 = 4;
+const PINCH_CONTACT_PAD  : i32 = 1;
+
+static PINCH_INJECTION_OK : OnceLock <bool> = OnceLock::new();
+static PINCH_INJECT_LOCK  : Mutex <()> = Mutex::new (());
+
+fn ensure_touch_injection() -> bool {
+    *PINCH_INJECTION_OK .get_or_init ( || {
+        unsafe { InitializeTouchInjection (2, TOUCH_FEEDBACK_NONE) } .is_ok()
+    } )
+}
+
+
+fn pinch_contact (pointer_id: u32, x: i32, y: i32, flags: POINTER_FLAGS) -> POINTER_TOUCH_INFO {
+    let mut c = POINTER_TOUCH_INFO::default();
+    let pad = PINCH_CONTACT_PAD;
+    c.pointerInfo.pointerType     = PT_TOUCH;
+    c.pointerInfo.pointerId       = pointer_id;
+    c.pointerInfo.ptPixelLocation = POINT { x, y };
+    c.pointerInfo.pointerFlags    = flags;
+    c.touchMask    = TOUCH_MASK_CONTACTAREA | TOUCH_MASK_ORIENTATION | TOUCH_MASK_PRESSURE;
+    c.rcContact    = RECT { left: x - pad, top: y - pad, right: x + pad, bottom: y + pad };
+    c.orientation  = 90;
+    c.pressure     = 512;
+    c
+}
+
+fn pinch_contacts_at (center: Point, radius: i32, phase_flags: POINTER_FLAGS) -> [POINTER_TOUCH_INFO; 2] {
+    // we'll impl a diagonal pinch spread direction
+    let (dx, dy) = (radius, radius);
+    [
+        pinch_contact (0, center.x - dx, center.y - dy, phase_flags),
+        pinch_contact (1, center.x + dx, center.y + dy, phase_flags),
+    ]
+}
+
+fn inject_pinch_frame (contacts: &[POINTER_TOUCH_INFO; 2]) {
+    let _res = unsafe { InjectTouchInput (contacts) };
+    //tracing::info! ("attemping to inject pinch zoom .. info {:?} ..", contacts);
+    //tracing::info! ("touch inject result: {:?}", _res);
+}
+
+fn inject_pinch_zoom (center: Point, spread_px: i32) {
+    tracing::debug! ("injecting pinch zoom, spread {}px at {:?} ..", spread_px, center);
+    if !ensure_touch_injection() { return }
+    let Ok(_guard) = PINCH_INJECT_LOCK.lock() else { return };
+    // ^^ serializes calls so touch/spread/lift ordering stays consistent
+
+    let start_r = PINCH_START_RADIUS;
+    let end_r   = (start_r + spread_px) .max (PINCH_MIN_RADIUS);
+    let down_flags   = POINTER_FLAG_DOWN   | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+    let update_flags = POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+    let up_flags     = POINTER_FLAG_UP;
+
+    inject_pinch_frame (&pinch_contacts_at (center, start_r, down_flags));
+    inject_pinch_frame (&pinch_contacts_at (center, end_r,   update_flags));
+    inject_pinch_frame (&pinch_contacts_at (center, end_r,   up_flags));
 }
 

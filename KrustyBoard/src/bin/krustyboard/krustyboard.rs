@@ -150,6 +150,7 @@ fn check_title_contains (fg: &FgndInfo, title_frag: &str) -> bool { fg.title .co
 #[allow (dead_code)] fn dopus_not_fgnd()      -> ComboCond { fg_cond ( |fg| !check_dopus_fgnd (fg) ) }
 #[allow (dead_code)] fn tabs_popup_not_fgnd() -> ComboCond { fg_cond ( |fg| !check_tabs_popup_grp(fg) ) }
 
+#[allow (dead_code)] fn event_not_inj () -> ComboCond { ev_cond ( |ev| !ev.injected ) }
 
 
 
@@ -978,6 +979,7 @@ fn setup_vert_wheel (k:KR) {
     // further, some apps like chrome seem to directly listen to touch events, and only pass up pointer-move as mouse events ..
     // .. so not even wheel events will be heard from two-finger scrolls within chrome windows (let alone pinch zoom, gestures etc)
     // else in general, pinch zoom seems to generate (at ll-hook), a Lctrl-down upon zoom-start, then wheel-evs, then lctrl-up upon finger-up
+    // ^^ note however, that this is for *receiving* touch events .. otoh, we do inject touch events to simulate pinzh zoom via wheel combos!
 
     // re the wheel-delta (which is among few things of runtime use in event-data), we have ev-data available in event-proc and conditionals ..
     // .. but we have avoided having AFs taking that as arg (mostly coz AF composition would then suck, and AFs hard to use stand-alone)
@@ -997,6 +999,7 @@ fn setup_vert_wheel (k:KR) {
         - wheel         -->  wheel       .. (via fallback)
         - caps/ctrl-wh  -->  ctrl wheel  .. (plus switche and ctrl-tab overloads set-up elsewhere)
         - caps-x2-wh    -->  horiz-wheel
+        - caps-win-d-wh -->  pinch zoom at pointer
 
         - alt-wh        -->  brightness  .. (plus switche and alt-tab overloads set-up elsewhere)
         - alt-1-wh      -->  fine-mode brightness
@@ -1094,6 +1097,15 @@ fn setup_vert_wheel (k:KR) {
     // caps-dbl wheel can simply translate to horiz-wheel
     k.cm .add_combo ( cg().whl().bkwd().m(caps_dbl),   ag().hwhl().frwd() );
     k.cm .add_combo ( cg().whl().frwd().m(caps_dbl),   ag().hwhl().bkwd() );
+
+
+    // caps-win-d wheel can inject pinch-zoom at the pointer loc
+    // .. note that too fine an attempt below, e.g 20px might get interpreted as a touch-tap rather than pinch-zoom
+    //setup_frwd_bkwd_whl ( k,  |wg| wg.m(caps).m(win).s(msD),   32, -32,   |ag,p| ag.af (Arc::new (move || PinchZoom::inject(p))) );
+    // hmm, so ^^ that works for browser etc, but for non touch aware apps etc, OS translates those to injected wheel scrolls ..
+    // .. and we dont filter mouse events for injection lower down, so we'll include a non-injection condition here for pinch-zoom
+    k.cm .add_combo ( cg().whl().bkwd().m(caps).m(win).s(msD) .c(event_not_inj()),   ag().af (Arc::new (|| PinchZoom::inject( 32))) );
+    k.cm .add_combo ( cg().whl().frwd().m(caps).m(win).s(msD) .c(event_not_inj()),   ag().af (Arc::new (|| PinchZoom::inject(-32))) );
 
 
     // alt-wheel will do brightness control .. (and we'll separately support alt-tab and swtiche nav)
@@ -1975,10 +1987,11 @@ fn setup_tab_nav_sfsc (k:KR) {
 
     //k.cm .add_combo ( cg().k(W).m(caps).s(msE),  tab_nav_right.clone() );
 
-    k.cm .add_combo ( cg().k(W).m(caps).fsc(fsc),  tab_nav_left.clone() );
-    k.cm .add_combo ( cg().k(E).m(caps).fsc(fsc),  tab_nav_right.clone() );
-
-    k.cm .add_combo ( cg().k(E).m(caps).s(msE_dbl).fsc(fsc),  tab_nav_right.clone() );
+    //k.cm .add_combo ( cg().k(W).m(caps).fsc(fsc),  tab_nav_left.clone() );
+    //k.cm .add_combo ( cg().k(E).m(caps).fsc(fsc),  tab_nav_right.clone() );
+    //k.cm .add_combo ( cg().k(E).m(caps).s(msE_dbl).fsc(fsc),  tab_nav_right.clone() );
+    // ^^ lets no longer do E/W as rght/lft after trigger anymore .. coz 'w' is more valuable for close
+    // .. besides, for one handed, the mouse works in the mode, and for two handed, the J/K are better anyway
 
     k.cm .add_combo ( cg().k(K).m(caps).fsc(fsc),  tab_nav_right.clone() );
     k.cm .add_combo ( cg().k(J).m(caps).fsc(fsc),  tab_nav_left.clone() );
