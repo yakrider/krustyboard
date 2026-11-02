@@ -4,7 +4,7 @@
 use std::sync::{RwLock, Mutex, LazyLock};
 use std::{thread, time};
 
-use rand::Rng;
+use rand::RngExt;
 use rustc_hash::{FxHashMap, FxHashSet};
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
@@ -197,7 +197,7 @@ pub fn handle_pointer_window_resize_spaced (x:i32, y:i32, ks:KSR) {
     }
     // pointer move events stream much faster than reasonable to repaint for smooth perf ..
     // .. this is even more critical for resize as compared to drag, so we'll redraw for even smaller fraction of reports
-    if rand::thread_rng() .gen_range (0..10) < 2 {
+    if rand::rng() .random_range (0..10) < 2 {
         handle_pointer_window_resize (x, y, ks)
     }
 }

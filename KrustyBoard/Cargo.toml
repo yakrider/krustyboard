@@ -41,7 +41,7 @@ atomic_refcell = "0.1"
 brightness = "0.5"
 async-trait = "0.1"
 futures = "0.3"
-rand = "0.8"
+rand = "0.10"
 itertools = "0.12"
 rustc-hash = "2"
 derive_deref = "1"
@@ -82,6 +82,7 @@ features = [
     "Win32_System_IO",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
     "Win32_Graphics_Gdi",

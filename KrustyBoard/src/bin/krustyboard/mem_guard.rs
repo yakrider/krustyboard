@@ -13,7 +13,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 // .. however, there are instances when upon resuming from suspend etc, the stream is gone .. (hence impld the refreshing on that sys-event)
 
 
-const RESTART_GRACE_DUR : Duration = Duration::from_secs(3);
+const RESTART_GRACE_DUR : Duration = Duration::from_secs(5);
 
 
 pub struct AudioMemGuard {
